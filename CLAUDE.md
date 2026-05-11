@@ -11,11 +11,11 @@ Completed:
 - documentation structure (architecture, roadmap, ADRs, research)
 - CMake/vcpkg build scaffold
 - `.clang-format` config
+- basic GoogleTest unit test stub files
+- initial benchmark script and manifest scaffold
 
 Phase 0 remaining:
-- basic GoogleTest unit test stub files
 - toy BAM fixtures in `tests/toy_data/`
-- initial benchmark scripts and manifests
 
 Phase 1 (v0.1) is not started yet. First implementation targets:
 - HTSlib wrapper: `BamReader` with `open`, `fetch(region)`, `next_record`
@@ -51,15 +51,15 @@ cmake --build --preset linux-release
 ctest --preset linux-release --output-on-failure
 ```
 
-**Note:** All `src/` directories are currently empty — scaffold-only configure mode.
-No `alignx_lib` or `alignx` targets exist until `.cpp` source files are added.
+**Note:** Phase 0 includes only a minimal `alignx_lib` scaffold source for test target creation.
+No functional `alignx` executable exists until `src/main.cpp` and Phase 1 sources are added.
 
 ## htslib dependency
 
 CMake tries `find_package(htslib CONFIG)` first (vcpkg), then `pkg_check_modules(htslib)`.
 
 If configure warns "htslib not found":
-- Windows: `vcpkg install htslib` (or ensure `VCPKG_ROOT` is set)
+- Windows: htslib may be unavailable via the default `x64-windows` vcpkg triplet; scaffold builds continue without BAM/CRAM I/O.
 - Linux: `apt install libhts-dev` or `vcpkg install htslib`
 
 After first configure, check CMake output for the detection result.

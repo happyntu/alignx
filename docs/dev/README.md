@@ -25,6 +25,9 @@ ctest --preset windows-debug --output-on-failure
 ```
 
 vcpkg installs dependencies from `vcpkg.json` automatically on first configure.
+The Windows manifest intentionally does not install htslib when the default
+`x64-windows` triplet reports it as unsupported; scaffold builds continue with
+BAM/CRAM I/O disabled.
 
 ## First-time setup (Linux)
 
@@ -38,9 +41,9 @@ ctest --preset linux-release --output-on-failure
 
 ## Scaffold-only mode
 
-Until `src/` contains `.cpp` files, CMake configures in scaffold-only mode:
-no `alignx_lib` target and no `alignx` executable are created.
-This is expected for Phase 0 — tests also skip if no sources exist.
+Phase 0 includes only a minimal `alignx_lib` scaffold source so GoogleTest can
+create a smoke-test target. No functional `alignx` executable is created until
+`src/main.cpp` and Phase 1 sources exist.
 
 ## Adding a new source module
 
@@ -75,3 +78,7 @@ or on Ubuntu:
 ```bash
 apt install libhts-dev
 ```
+
+On Windows, the default vcpkg `x64-windows` triplet may report htslib as
+unsupported. In that case, use the scaffold build without htslib until a
+supported Windows HTSlib strategy is selected.

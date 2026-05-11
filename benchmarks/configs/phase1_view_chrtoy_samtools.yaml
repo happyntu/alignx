@@ -1,0 +1,32 @@
+name: phase1_view_chrtoy_samtools
+phase: v0.1
+description: Compare alignx view against samtools view on the synthetic chrToy fixture.
+
+dataset:
+  sam: tests/toy_data/toy_alignment.sam
+  bam: tests/toy_data/toy_alignment.sorted.bam
+  bai: tests/toy_data/toy_alignment.sorted.bam.bai
+  reference: chrToy
+
+query:
+  region: chrToy:1-250
+
+tools:
+  alignx:
+    binary: build/windows-debug/Debug/alignx.exe
+    command: view
+  samtools:
+    binary: samtools
+    command: view
+
+metrics:
+  - wall_time_ms
+  - exit_code
+  - stdout_bytes
+
+outputs:
+  raw_tsv: benchmarks/results/phase1_view_chrtoy_samtools.tsv
+
+notes:
+  - Phase 0 manifest only. The alignx executable is created after Phase 1 sources exist.
+  - BAM and BAI files should be materialized from the SAM fixture during Phase 1 setup.

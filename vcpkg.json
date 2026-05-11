@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "dependencies": [
     "zlib",
-    "htslib",
+    {
+      "name": "htslib",
+      "platform": "!windows"
+    },
     "cli11",
     "gtest"
   ]
