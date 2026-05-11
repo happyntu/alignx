@@ -48,5 +48,5 @@ SpacesInAngles: false
 SpacesInContainerLiterals: false
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
-Standard: c++23
+Standard: Latest
 ...

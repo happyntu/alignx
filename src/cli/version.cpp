@@ -3,7 +3,7 @@
 namespace alignx {
 
 std::string_view version() noexcept {
-  return "0.1.0";
+    return "0.1.0";
 }
 
-}  // namespace alignx
+} // namespace alignx

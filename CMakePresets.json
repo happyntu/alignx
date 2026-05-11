@@ -50,6 +50,34 @@
       }
     },
     {
+      "name": "wsl-debug",
+      "hidden": false,
+      "displayName": "WSL Debug (Conda + Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/wsl-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      },
+      "environment": {
+        "CMAKE_PREFIX_PATH": "$env{CONDA_PREFIX}",
+        "PKG_CONFIG_PATH": "$env{CONDA_PREFIX}/lib/pkgconfig"
+      }
+    },
+    {
+      "name": "wsl-release",
+      "hidden": false,
+      "displayName": "WSL Release (Conda + Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/wsl-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "environment": {
+        "CMAKE_PREFIX_PATH": "$env{CONDA_PREFIX}",
+        "PKG_CONFIG_PATH": "$env{CONDA_PREFIX}/lib/pkgconfig"
+      }
+    },
+    {
       "name": "linux-release",
       "hidden": false,
       "displayName": "Linux Release (GCC/Clang + vcpkg)",
@@ -79,6 +107,14 @@
     {
       "name": "linux-release",
       "configurePreset": "linux-release"
+    },
+    {
+      "name": "wsl-debug",
+      "configurePreset": "wsl-debug"
+    },
+    {
+      "name": "wsl-release",
+      "configurePreset": "wsl-release"
     }
   ],
   "testPresets": [
@@ -102,6 +138,16 @@
     {
       "name": "linux-release",
       "configurePreset": "linux-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "wsl-debug",
+      "configurePreset": "wsl-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "wsl-release",
+      "configurePreset": "wsl-release",
       "output": { "outputOnFailure": true }
     }
   ]

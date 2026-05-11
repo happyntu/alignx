@@ -52,6 +52,13 @@ cmake --build --preset linux-release
 ctest --preset linux-release --output-on-failure
 ```
 
+**WSL (Conda + Ninja, current Phase 1 path):**
+```bash
+mamba run -n alignx-dev cmake --preset wsl-debug
+mamba run -n alignx-dev cmake --build --preset wsl-debug
+mamba run -n alignx-dev ctest --preset wsl-debug --output-on-failure
+```
+
 **Note:** Phase 0 includes only a minimal `alignx_lib` scaffold source for test target creation.
 No functional `alignx` executable exists until `src/main.cpp` and Phase 1 sources are added.
 
@@ -62,6 +69,7 @@ CMake tries `find_package(htslib CONFIG)` first (vcpkg), then `pkg_check_modules
 If configure warns "htslib not found":
 - Windows: htslib may be unavailable via the default `x64-windows` vcpkg triplet; scaffold builds continue without BAM/CRAM I/O.
 - Linux: `apt install libhts-dev` or `vcpkg install htslib`
+- WSL current path: use the `alignx-dev` conda environment with `htslib` and `samtools`.
 
 After first configure, check CMake output for the detection result.
 

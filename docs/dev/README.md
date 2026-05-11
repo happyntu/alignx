@@ -39,6 +39,22 @@ cmake --build --preset linux-release
 ctest --preset linux-release --output-on-failure
 ```
 
+## First-time setup (WSL + Conda)
+
+Use this path for Phase 1 development while Windows vcpkg htslib support is
+unresolved.
+
+```bash
+# One-time environment creation
+mamba create -y -n alignx-dev -c conda-forge -c bioconda \
+  cmake ninja pkg-config cxx-compiler htslib samtools gtest cli11 zlib xz clang-format
+
+# Configure + build + test
+mamba run -n alignx-dev cmake --preset wsl-debug
+mamba run -n alignx-dev cmake --build --preset wsl-debug
+mamba run -n alignx-dev ctest --preset wsl-debug --output-on-failure
+```
+
 ## Scaffold-only mode
 
 Phase 0 includes only a minimal `alignx_lib` scaffold source so GoogleTest can

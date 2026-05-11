@@ -6,4 +6,4 @@ namespace alignx {
 
 std::string_view version() noexcept;
 
-}  // namespace alignx
+} // namespace alignx
