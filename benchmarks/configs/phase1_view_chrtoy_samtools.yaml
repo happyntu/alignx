@@ -10,6 +10,8 @@ dataset:
 
 query:
   region: chrToy:1-250
+  warmup: 1
+  repeats: 5
 
 tools:
   alignx:
@@ -20,6 +22,7 @@ tools:
     command: view
 
 metrics:
+  - run_id
   - wall_time_ms
   - exit_code
   - stdout_bytes

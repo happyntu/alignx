@@ -30,6 +30,8 @@ mamba run -n alignx-dev cmake --build --preset wsl-debug
   --samtools samtools \
   --input tests/toy_data/toy_alignment.sorted.bam \
   --region chrToy:1-250 \
+  --warmup 1 \
+  --repeats 5 \
   --output benchmarks/results/phase1_view_chrtoy_samtools.tsv
 ```
 
