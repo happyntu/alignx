@@ -34,7 +34,7 @@ int run_view(const std::filesystem::path& input, const std::string& region, std:
     }
 
     for (;;) {
-        auto line = reader->next_sam_line();
+        auto line = reader->next_sam_line_view();
         if (!line) {
             err << "alignx view: " << line.error() << '\n';
             return 1;
@@ -43,9 +43,9 @@ int run_view(const std::filesystem::path& input, const std::string& region, std:
             break;
         }
 
-        out << **line;
+        out.write(line->value().data(), static_cast<std::streamsize>(line->value().size()));
         if (line->value().empty() || line->value().back() != '\n') {
-            out << '\n';
+            out.put('\n');
         }
     }
 

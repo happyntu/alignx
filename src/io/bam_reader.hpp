@@ -38,6 +38,7 @@ public:
     [[nodiscard]] std::expected<void, std::string> fetch(std::string_view region);
     [[nodiscard]] std::expected<std::optional<BamRecord>, std::string> next_record();
     [[nodiscard]] std::expected<std::optional<std::string>, std::string> next_sam_line();
+    [[nodiscard]] std::expected<std::optional<std::string_view>, std::string> next_sam_line_view();
 
     [[nodiscard]] std::int32_t reference_count() const noexcept;
     [[nodiscard]] bool has_index() const noexcept;

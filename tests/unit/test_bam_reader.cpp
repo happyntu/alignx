@@ -73,6 +73,30 @@ TEST(BamReader, FetchesRegionFromToyBam) {
     EXPECT_EQ(records[1].mapq, 50);
 }
 
+TEST(BamReader, FormatsSamLineViewsForToyRegion) {
+    auto reader = alignx::io::BamReader::open(toy_bam_path());
+    ASSERT_TRUE(reader) << reader.error();
+
+    auto fetch = reader->fetch("chrToy:1-250");
+    ASSERT_TRUE(fetch) << fetch.error();
+
+    std::vector<std::string> lines;
+    for (;;) {
+        auto line = reader->next_sam_line_view();
+        ASSERT_TRUE(line) << line.error();
+        if (!line->has_value()) {
+            break;
+        }
+        lines.emplace_back(line->value());
+    }
+
+    ASSERT_EQ(lines.size(), 2);
+    EXPECT_EQ(lines[0],
+              "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0");
+    EXPECT_EQ(lines[1],
+              "read002\t16\tchrToy\t151\t50\t5M1I4M\t*\t0\t0\tTTTTACGGGA\tFFFFFFFFFF\tNM:i:1");
+}
+
 #else
 
 TEST(BamReader, ReportsMissingHtslib) {
