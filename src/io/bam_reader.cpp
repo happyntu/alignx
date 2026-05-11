@@ -1,5 +1,6 @@
 #include "io/bam_reader.hpp"
 
+#include <cstdlib>
 #include <utility>
 
 #ifdef ALIGNX_HAVE_HTSLIB
@@ -40,6 +41,20 @@ BamRecord to_record(const bam_hdr_t* header, const bam1_t* record) {
     }
 
     return out;
+}
+
+std::expected<std::optional<std::string>, std::string>
+read_next_raw_record(samFile* file, bam_hdr_t* header, hts_itr_t* iter, bam1_t* record) {
+    const int result =
+        iter != nullptr ? sam_itr_next(file, iter, record) : sam_read1(file, header, record);
+
+    if (result >= 0) {
+        return std::optional<std::string>{std::string{}};
+    }
+    if (result == -1) {
+        return std::optional<std::string>{};
+    }
+    return std::unexpected("failed while reading BAM record");
 }
 
 } // namespace
@@ -136,17 +151,38 @@ std::expected<void, std::string> BamReader::fetch(std::string_view region) {
 
 std::expected<std::optional<BamRecord>, std::string> BamReader::next_record() {
 #ifdef ALIGNX_HAVE_HTSLIB
-    const int result = impl_->iter != nullptr
-                           ? sam_itr_next(impl_->file, impl_->iter, impl_->record)
-                           : sam_read1(impl_->file, impl_->header, impl_->record);
-
-    if (result >= 0) {
+    auto result = read_next_raw_record(impl_->file, impl_->header, impl_->iter, impl_->record);
+    if (!result) {
+        return std::unexpected(result.error());
+    }
+    if (result->has_value()) {
         return to_record(impl_->header, impl_->record);
     }
-    if (result == -1) {
-        return std::optional<BamRecord>{};
+    return std::optional<BamRecord>{};
+#else
+    return std::unexpected("alignx was built without HTSlib support");
+#endif
+}
+
+std::expected<std::optional<std::string>, std::string> BamReader::next_sam_line() {
+#ifdef ALIGNX_HAVE_HTSLIB
+    auto result = read_next_raw_record(impl_->file, impl_->header, impl_->iter, impl_->record);
+    if (!result) {
+        return std::unexpected(result.error());
     }
-    return std::unexpected("failed while reading BAM record");
+    if (!result->has_value()) {
+        return std::optional<std::string>{};
+    }
+
+    kstring_t line{0, 0, nullptr};
+    if (sam_format1(impl_->header, impl_->record, &line) < 0) {
+        std::free(line.s);
+        return std::unexpected("failed to format BAM record as SAM");
+    }
+
+    std::string formatted(line.s, line.l);
+    std::free(line.s);
+    return formatted;
 #else
     return std::unexpected("alignx was built without HTSlib support");
 #endif

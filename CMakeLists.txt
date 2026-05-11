@@ -68,6 +68,7 @@ if(ALIGNX_LIB_SOURCES)
   target_include_directories(alignx_lib PUBLIC src)
   target_compile_features(alignx_lib PUBLIC cxx_std_23)
   target_link_libraries(alignx_lib PUBLIC ZLIB::ZLIB)
+  target_link_libraries(alignx_lib PRIVATE CLI11::CLI11)
 
   if(htslib_FOUND)
     target_link_libraries(alignx_lib PUBLIC ${ALIGNX_HTSLIB_TARGET})

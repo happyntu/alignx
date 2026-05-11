@@ -18,11 +18,15 @@ Completed:
 Phase 0 remaining:
 - none
 
-Phase 1 (v0.1) is not started yet. First implementation targets:
+Phase 1 (v0.1) is in progress.
+
+Completed:
 - HTSlib wrapper: `BamReader` with `open`, `fetch(region)`, `next_record`
+- `alignx view <bam> <region>` minimal CLI path for BAM region output
+
+Remaining implementation targets:
 - BAI/CSI index reader
 - `AXFIndex` v1: sorted interval list per reference, stored as `.axf.idx`
-- `alignx view <bam> <region>` — outputs SAM to stdout
 - `alignx stats <bam>` — flag / MAPQ / insert-size distribution
 - Benchmark: `alignx view` vs `samtools view` on chr1:1M-2M
 
