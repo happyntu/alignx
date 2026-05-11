@@ -35,7 +35,9 @@ outputs:
 
 notes:
   - Intended for WSL/Conda Phase 1 real-data benchmarking.
+  - Run scripts/check_benchmark_input.sh before timing a caller-provided BAM.
   - The benchmark script fails if alignx stdout differs from samtools stdout.
   - |
     Example:
+      scripts/check_benchmark_input.sh --input "$ALIGNX_BENCH_BAM" --region chr1:1000000-2000000
       scripts/bench_region_query.sh --input "$ALIGNX_BENCH_BAM" --region chr1:1000000-2000000 --warmup 1 --repeats 5 --output benchmarks/results/phase1_view_chr1_samtools.tsv

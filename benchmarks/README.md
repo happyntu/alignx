@@ -25,6 +25,11 @@
 mamba run -n alignx-dev cmake --build --preset wsl-debug
 
 # Example: toy region query benchmark
+./scripts/check_benchmark_input.sh \
+  --samtools samtools \
+  --input tests/toy_data/toy_alignment.sorted.bam \
+  --region chrToy:1-250
+
 ./scripts/bench_region_query.sh \
   --alignx build/wsl-debug/alignx \
   --samtools samtools \
@@ -33,6 +38,23 @@ mamba run -n alignx-dev cmake --build --preset wsl-debug
   --warmup 1 \
   --repeats 5 \
   --output benchmarks/results/phase1_view_chrtoy_samtools.tsv
+```
+
+For a caller-provided real BAM:
+
+```bash
+export ALIGNX_BENCH_BAM=/path/to/sample.bam
+
+./scripts/check_benchmark_input.sh \
+  --input "$ALIGNX_BENCH_BAM" \
+  --region chr1:1000000-2000000
+
+./scripts/bench_region_query.sh \
+  --input "$ALIGNX_BENCH_BAM" \
+  --region chr1:1000000-2000000 \
+  --warmup 1 \
+  --repeats 5 \
+  --output benchmarks/results/phase1_view_chr1_samtools.tsv
 ```
 
 ## Reporting conventions
