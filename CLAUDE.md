@@ -13,9 +13,10 @@ Completed:
 - `.clang-format` config
 - basic GoogleTest unit test stub files
 - initial benchmark script and manifest scaffold
+- toy SAM/BAM/BAI fixtures in `tests/toy_data/`
 
 Phase 0 remaining:
-- toy BAM fixtures in `tests/toy_data/`
+- none
 
 Phase 1 (v0.1) is not started yet. First implementation targets:
 - HTSlib wrapper: `BamReader` with `open`, `fetch(region)`, `next_record`

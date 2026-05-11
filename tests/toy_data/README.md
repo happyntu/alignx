@@ -11,6 +11,11 @@ Small deterministic alignment fixtures live here.
 ## Current Fixtures
 
 - `toy_alignment.sam` - minimal SAM fixture for Phase 0 scaffold tests and future BAM materialization.
+- `toy_alignment.sorted.bam` - deterministic BGZF/BAM fixture generated from `scripts/materialize_toy_bam.py`.
+- `toy_alignment.sorted.bam.bai` - minimal BAI index for the mapped `chrToy` records.
 
-Phase 1 should add a small sorted/indexed BAM fixture derived from this SAM file
-or another deterministic generator.
+Regenerate the binary fixtures with:
+
+```powershell
+python scripts/materialize_toy_bam.py
+```
