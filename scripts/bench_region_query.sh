@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ALIGNX="build/wsl-debug/alignx"
+ALIGNX="build/wsl-release/alignx"
 SAMTOOLS="samtools"
 INPUT_BAM="tests/toy_data/toy_alignment.sorted.bam"
 REGION="chrToy:1-250"
@@ -16,7 +16,7 @@ usage() {
 Usage: scripts/bench_region_query.sh [options]
 
 Options:
-  --alignx <path>    alignx executable (default: build/wsl-debug/alignx)
+  --alignx <path>    alignx executable (default: build/wsl-release/alignx)
   --samtools <path>  samtools executable (default: samtools)
   --input <path>     input BAM (default: tests/toy_data/toy_alignment.sorted.bam)
   --region <region>  region query (default: chrToy:1-250)

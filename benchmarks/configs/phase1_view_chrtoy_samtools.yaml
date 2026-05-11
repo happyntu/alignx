@@ -16,7 +16,7 @@ query:
 
 tools:
   alignx:
-    binary: build/wsl-debug/alignx
+    binary: build/wsl-release/alignx
     commands:
       - index
       - view

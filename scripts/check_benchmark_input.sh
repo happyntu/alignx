@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SAMTOOLS="samtools"
-ALIGNX="build/wsl-debug/alignx"
+ALIGNX="build/wsl-release/alignx"
 INPUT_BAM="tests/toy_data/toy_alignment.sorted.bam"
 REGION="chrToy:1-250"
 REQUIRE_RECORDS=1
@@ -15,7 +15,7 @@ Usage: scripts/check_benchmark_input.sh [options]
 
 Options:
   --samtools <path>        samtools executable (default: samtools)
-  --alignx <path>          alignx executable (default: build/wsl-debug/alignx)
+  --alignx <path>          alignx executable (default: build/wsl-release/alignx)
   --input <path>           input BAM (default: tests/toy_data/toy_alignment.sorted.bam)
   --region <region>        region query (default: chrToy:1-250)
   --axf-index-output <path>

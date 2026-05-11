@@ -22,17 +22,18 @@
 
 ```bash
 # Build first
-mamba run -n alignx-dev cmake --build --preset wsl-debug
+mamba run -n alignx-dev cmake --preset wsl-release
+mamba run -n alignx-dev cmake --build --preset wsl-release
 
 # Example: toy region query benchmark
 ./scripts/check_benchmark_input.sh \
   --samtools samtools \
-  --alignx build/wsl-debug/alignx \
+  --alignx build/wsl-release/alignx \
   --input tests/toy_data/toy_alignment.sorted.bam \
   --region chrToy:1-250
 
 ./scripts/bench_region_query.sh \
-  --alignx build/wsl-debug/alignx \
+  --alignx build/wsl-release/alignx \
   --samtools samtools \
   --input tests/toy_data/toy_alignment.sorted.bam \
   --region chrToy:1-250 \
@@ -51,12 +52,12 @@ For a caller-provided real BAM:
 export ALIGNX_BENCH_BAM=/path/to/sample.bam
 
 ./scripts/check_benchmark_input.sh \
-  --alignx build/wsl-debug/alignx \
+  --alignx build/wsl-release/alignx \
   --input "$ALIGNX_BENCH_BAM" \
   --region chr1:1000000-2000000
 
 ./scripts/bench_region_query.sh \
-  --alignx build/wsl-debug/alignx \
+  --alignx build/wsl-release/alignx \
   --input "$ALIGNX_BENCH_BAM" \
   --region chr1:1000000-2000000 \
   --warmup 1 \
