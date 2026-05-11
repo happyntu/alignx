@@ -13,12 +13,12 @@ and produce correct output before the next version starts.
 
 **Deliverables:**
 
-- [ ] HTSlib wrapper: `BamReader` with `open`, `fetch(region)`, `next_record`
-- [ ] BAI/CSI index reader
-- [ ] `AXFIndex` v1: chunk-level bin index stored as separate `.axf.idx` file
-- [ ] `alignx view <bam> <region>` — outputs SAM to stdout
-- [ ] `alignx stats <bam>` — flag/MAPQ/insert size distribution
-- [ ] Unit tests: BamReader round-trip on toy BAM
+- [x] HTSlib wrapper: `BamReader` with `open`, `fetch(region)`, `next_record`
+- [x] BAI/CSI index reader
+- [x] `AXFIndex` v1: chunk-level bin index stored as separate `.axf.idx` file
+- [x] `alignx view <bam> <region>` — outputs SAM to stdout
+- [x] `alignx stats <bam>` — flag/MAPQ/insert size distribution
+- [x] Unit tests: BamReader round-trip on toy BAM
 - [ ] Benchmark: `alignx view` vs `samtools view` on chr1:1M-2M
 
 **Tech notes:**

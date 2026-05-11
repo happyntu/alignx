@@ -31,7 +31,7 @@ alignx/
 alignx view sample.bam chr1:1M-2M
   → cli: parse region string → GenomicInterval
   → io:  BamReader::open(path)
-  → index: AXFIndex::query(interval) OR BaiReader::query(interval)
+  → index: BaiReader/CsiReader → AXFIndex v1 interval projection → query(interval)
   → io:  BamReader::fetch(virtual_offset_range)
   → query: RecordFilter::apply(FLAG, MAPQ, ...)
   → cli: RecordFormatter::print(stdout, SAM/AXF)

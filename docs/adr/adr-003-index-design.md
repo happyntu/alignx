@@ -45,6 +45,13 @@ AXFIndex (v1, 對應 v0.1 BAM-only 場景):
 
 **v0.1 實作**：每條 reference 維護 sorted interval list，查詢用 binary search 找 overlap。
 
+**v0.1 BAM 相容投影**：`BaiReader` / `CsiReader` 讀到的 bin + virtual-offset chunk
+可投影成 `AXFIndex` v1 interval。此模式下：
+
+- `start` / `end` 來自 binning scheme 的 genomic span。
+- `chunk_offset` 暫存 BGZF chunk begin virtual offset。
+- `column_index_offset` 暫存 BGZF chunk end virtual offset；真正 AXF column index 尚未進入 v0.1。
+
 **v0.3+**：改為 interval tree 或 succinct range tree，支援：
 - 位置 region query（主要）
 - MAPQ ≥ threshold filter（在 index 層剪枝）

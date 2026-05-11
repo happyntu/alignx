@@ -27,6 +27,7 @@ Completed:
 - BAI index reader metadata parser
 - CSI index reader metadata parser
 - `AXFIndex` v1 sorted interval list with binary read/write and CRC footer
+- BAI/CSI bin projection into `AXFIndex` v1 intervals
 
 Remaining implementation targets:
 - Benchmark: `alignx view` vs `samtools view` on chr1:1M-2M
