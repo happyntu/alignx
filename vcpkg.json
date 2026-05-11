@@ -1,0 +1,10 @@
+{
+  "name": "alignx",
+  "version": "0.1.0",
+  "dependencies": [
+    "zlib",
+    "htslib",
+    "cli11",
+    "gtest"
+  ]
+}
