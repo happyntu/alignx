@@ -21,15 +21,16 @@
 ## Running benchmarks
 
 ```bash
-# Build release first
-cmake --preset linux-release
-cmake --build --preset linux-release
+# Build first
+mamba run -n alignx-dev cmake --build --preset wsl-debug
 
-# Example: region query benchmark
+# Example: toy region query benchmark
 ./scripts/bench_region_query.sh \
-  --input data/toy/toy.bam \
-  --region chr1:1000000-2000000 \
-  --output benchmarks/results/region_query_$(date +%Y%m%d).tsv
+  --alignx build/wsl-debug/alignx \
+  --samtools samtools \
+  --input tests/toy_data/toy_alignment.sorted.bam \
+  --region chrToy:1-250 \
+  --output benchmarks/results/phase1_view_chrtoy_samtools.tsv
 ```
 
 ## Reporting conventions
