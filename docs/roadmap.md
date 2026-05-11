@@ -18,6 +18,7 @@ and produce correct output before the next version starts.
 - [x] `AXFIndex` v1: chunk-level bin index stored as separate `.axf.idx` file
 - [x] `alignx view <bam> <region>` — outputs SAM to stdout
 - [x] `alignx stats <bam>` — flag/MAPQ/insert size distribution
+- [x] `alignx index <bam>` — writes projected `.axf.idx` from `.bai` / `.csi`
 - [x] Unit tests: BamReader round-trip on toy BAM
 - [ ] Benchmark: `alignx view` vs `samtools view` on chr1:1M-2M
 

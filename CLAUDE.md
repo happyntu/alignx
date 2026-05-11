@@ -28,6 +28,7 @@ Completed:
 - CSI index reader metadata parser
 - `AXFIndex` v1 sorted interval list with binary read/write and CRC footer
 - BAI/CSI bin projection into `AXFIndex` v1 intervals
+- `alignx index <bam>` builds projected `.axf.idx` files from `.bai` / `.csi`
 
 Remaining implementation targets:
 - Benchmark: `alignx view` vs `samtools view` on chr1:1M-2M
@@ -150,7 +151,7 @@ alignx view     <input.axf|bam>   [region]             # region query → SAM st
 alignx export   <input.axf>       -o <output.bam|cram> # AXF → BAM/CRAM
 alignx pileup   <input.axf|bam>   <region>             # per-base coverage
 alignx stats    <input.axf|bam>                        # flag/MAPQ/insert stats
-alignx index    <input.axf>                            # build/rebuild .axf.idx
+alignx index    <input.bam|axf>  [-o output.axf.idx]    # build/rebuild .axf.idx
 ```
 
 ## Development Expectations

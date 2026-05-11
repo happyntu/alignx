@@ -37,6 +37,15 @@ alignx view sample.bam chr1:1M-2M
   → cli: RecordFormatter::print(stdout, SAM/AXF)
 ```
 
+### BAM index materialization (v0.1)
+```
+alignx index sample.bam -o sample.bam.axf.idx
+  → cli: find sample.bam.csi/.bai sidecar
+  → index: BaiReader/CsiReader parse bin + virtual-offset chunks
+  → index: project BAM bins into AXFIndex v1 intervals
+  → index: write .axf.idx with CRC footer
+```
+
 ### BAM → AXF conversion (v0.3)
 ```
 alignx convert sample.bam -o sample.axf

@@ -1,16 +1,36 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "cli/runner.hpp"
+#include "index/axf_index.hpp"
 
 namespace {
 
 std::filesystem::path toy_bam_path() {
     return std::filesystem::path(TEST_DATA_DIR) / "toy_alignment.sorted.bam";
+}
+
+std::filesystem::path toy_bai_path() {
+    return std::filesystem::path(TEST_DATA_DIR) / "toy_alignment.sorted.bam.bai";
+}
+
+std::filesystem::path toy_csi_path() {
+    return std::filesystem::path(TEST_DATA_DIR) / "toy_alignment.sorted.bam.csi";
+}
+
+std::filesystem::path make_temp_dir(std::string_view label) {
+    const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+    auto path = std::filesystem::temp_directory_path() /
+                (std::string(label) + "_" + std::to_string(suffix));
+    std::filesystem::create_directories(path);
+    return path;
 }
 
 int run_cli(const std::vector<std::string>& args, std::ostream& out, std::ostream& err) {
@@ -31,6 +51,77 @@ TEST(Cli, ViewRequiresArguments) {
     EXPECT_NE(code, 0);
     EXPECT_TRUE(err.str().find("required") != std::string::npos ||
                 out.str().find("required") != std::string::npos);
+}
+
+TEST(Cli, IndexWritesDefaultAxfIndexFromToyCsi) {
+    const auto temp_dir = make_temp_dir("alignx_cli_index_csi");
+    const auto input = temp_dir / "toy.bam";
+    const auto csi = temp_dir / "toy.bam.csi";
+    const auto output = temp_dir / "toy.bam.axf.idx";
+    std::filesystem::copy_file(toy_bam_path(), input);
+    std::filesystem::copy_file(toy_csi_path(), csi);
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "index", input.string()}, out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(err.str(), "");
+    EXPECT_NE(out.str().find("references\t1"), std::string::npos);
+    EXPECT_NE(out.str().find("intervals\t1"), std::string::npos);
+    ASSERT_TRUE(std::filesystem::is_regular_file(output));
+
+    auto axf = alignx::index::read_axf_index(output);
+    ASSERT_TRUE(axf) << axf.error();
+    auto hits = axf->query(0, 100, 110);
+    ASSERT_TRUE(hits) << hits.error();
+    EXPECT_EQ(hits->size(), 1);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, IndexWritesRequestedAxfIndexFromToyBai) {
+    const auto temp_dir = make_temp_dir("alignx_cli_index_bai");
+    const auto input = temp_dir / "toy.bam";
+    const auto bai = temp_dir / "toy.bam.bai";
+    const auto output = temp_dir / "requested.axf.idx";
+    std::filesystem::copy_file(toy_bam_path(), input);
+    std::filesystem::copy_file(toy_bai_path(), bai);
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "index", input.string(), "-o", output.string()}, out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(err.str(), "");
+    EXPECT_NE(out.str().find("output\t"), std::string::npos);
+    ASSERT_TRUE(std::filesystem::is_regular_file(output));
+
+    auto axf = alignx::index::read_axf_index(output);
+    ASSERT_TRUE(axf) << axf.error();
+    EXPECT_EQ(axf->reference_count(), 1);
+    EXPECT_EQ(axf->intervals(0).size(), 1);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, IndexReportsMissingBamIndex) {
+    const auto temp_dir = make_temp_dir("alignx_cli_index_missing");
+    const auto input = temp_dir / "missing_index.bam";
+    {
+        std::ofstream output(input, std::ios::binary);
+        output << "not a real BAM";
+    }
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "index", input.string()}, out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("no BAI/CSI index found"), std::string::npos);
+
+    std::filesystem::remove_all(temp_dir);
 }
 
 #ifdef ALIGNX_HAVE_HTSLIB
