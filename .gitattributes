@@ -1,0 +1,33 @@
+# Normalize text files to LF in the repository.
+* text=auto eol=lf
+
+# Shell scripts must stay LF.
+*.sh text eol=lf
+
+# Windows command scripts should use CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Bioinformatics text formats.
+*.bed text eol=lf
+*.fa text eol=lf
+*.fasta text eol=lf
+*.fq text eol=lf
+*.fastq text eol=lf
+*.sam text eol=lf
+*.tsv text eol=lf
+*.vcf text eol=lf
+
+# Compressed and indexed alignment artifacts are binary.
+*.axf binary
+*.axf.idx binary
+*.bai binary
+*.bam binary
+*.bgz binary
+*.crai binary
+*.cram binary
+*.csi binary
+*.gz binary
+*.idx binary
+*.zip binary
