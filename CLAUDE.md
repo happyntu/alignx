@@ -24,9 +24,10 @@ Completed:
 - HTSlib wrapper: `BamReader` with `open`, `fetch(region)`, `next_record`
 - `alignx view <bam> <region>` minimal CLI path for BAM region output
 - `alignx stats <bam>` minimal TSV summary for record count, FLAG, MAPQ, and nonzero insert sizes
+- BAI index reader metadata parser
 
 Remaining implementation targets:
-- BAI/CSI index reader
+- CSI index reader
 - `AXFIndex` v1: sorted interval list per reference, stored as `.axf.idx`
 - Benchmark: `alignx view` vs `samtools view` on chr1:1M-2M
 
