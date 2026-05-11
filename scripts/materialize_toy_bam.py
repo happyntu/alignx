@@ -223,18 +223,45 @@ def bai_payload(first_mapped_offset: int, after_last_mapped_offset: int, no_coor
     return bytes(payload)
 
 
+def csi_payload(first_mapped_offset: int, after_last_mapped_offset: int, no_coord: int) -> bytes:
+    min_shift = 14
+    depth = 5
+    bin_value = reg2bin(100, 110)
+
+    payload = bytearray()
+    payload += b"CSI\1"
+    payload += struct.pack("<i", min_shift)
+    payload += struct.pack("<i", depth)
+    payload += struct.pack("<i", 0)  # l_aux
+    payload += struct.pack("<i", 1)  # n_ref
+
+    payload += struct.pack("<i", 1)  # n_bin
+    payload += struct.pack("<I", bin_value)
+    payload += struct.pack("<Q", first_mapped_offset)  # loffset
+    payload += struct.pack("<i", 1)  # n_chunk
+    payload += struct.pack("<QQ", first_mapped_offset, after_last_mapped_offset)
+
+    payload += struct.pack("<Q", no_coord)
+    return bytes(payload)
+
+
 def materialize(output_dir: pathlib.Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     payload, first_mapped_offset, after_last_mapped_offset, no_coord = bam_payload()
     bam_path = output_dir / "toy_alignment.sorted.bam"
     bai_path = output_dir / "toy_alignment.sorted.bam.bai"
+    csi_path = output_dir / "toy_alignment.sorted.bam.csi"
 
     bam_path.write_bytes(bgzf_block(payload) + BGZF_EOF)
     bai_path.write_bytes(bai_payload(first_mapped_offset, after_last_mapped_offset, no_coord))
+    csi_path.write_bytes(
+        bgzf_block(csi_payload(first_mapped_offset, after_last_mapped_offset, no_coord)) + BGZF_EOF
+    )
 
     print(f"Wrote {bam_path}")
     print(f"Wrote {bai_path}")
+    print(f"Wrote {csi_path}")
 
 
 def main() -> int:

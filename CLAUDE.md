@@ -25,10 +25,10 @@ Completed:
 - `alignx view <bam> <region>` minimal CLI path for BAM region output
 - `alignx stats <bam>` minimal TSV summary for record count, FLAG, MAPQ, and nonzero insert sizes
 - BAI index reader metadata parser
+- CSI index reader metadata parser
 - `AXFIndex` v1 sorted interval list with binary read/write and CRC footer
 
 Remaining implementation targets:
-- CSI index reader
 - Benchmark: `alignx view` vs `samtools view` on chr1:1M-2M
 
 ## Build & Test Commands

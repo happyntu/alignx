@@ -26,6 +26,7 @@ benchmarks/plots/
 *.sam
 !tests/toy_data/*.bam
 !tests/toy_data/*.bai
+!tests/toy_data/*.csi
 !tests/toy_data/*.sam
 *.fa.gz
 *.fq.gz
