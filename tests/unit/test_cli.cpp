@@ -48,6 +48,26 @@ TEST(Cli, ViewOutputsToyRegionRecords) {
               "read002\t16\tchrToy\t151\t50\t5M1I4M\t*\t0\t0\tTTTTACGGGA\tFFFFFFFFFF\tNM:i:1\n");
 }
 
+TEST(Cli, StatsOutputsToyBamSummary) {
+    std::ostringstream out;
+    std::ostringstream err;
+
+    const int code = run_cli({"alignx", "stats", toy_bam_path().string()}, out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(err.str(), "");
+    EXPECT_EQ(out.str(), "metric\tvalue\n"
+                         "records.total\t3\n"
+                         "records.mapped\t2\n"
+                         "records.unmapped\t1\n"
+                         "mapq.0\t1\n"
+                         "mapq.50\t1\n"
+                         "mapq.60\t1\n"
+                         "flag.0\t1\n"
+                         "flag.4\t1\n"
+                         "flag.16\t1\n");
+}
+
 #else
 
 TEST(Cli, ViewReportsMissingHtslib) {
@@ -55,6 +75,17 @@ TEST(Cli, ViewReportsMissingHtslib) {
     std::ostringstream err;
 
     const int code = run_cli({"alignx", "view", toy_bam_path().string(), "chrToy:1-250"}, out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("without HTSlib"), std::string::npos);
+}
+
+TEST(Cli, StatsReportsMissingHtslib) {
+    std::ostringstream out;
+    std::ostringstream err;
+
+    const int code = run_cli({"alignx", "stats", toy_bam_path().string()}, out, err);
 
     EXPECT_NE(code, 0);
     EXPECT_EQ(out.str(), "");

@@ -26,6 +26,7 @@ BamRecord to_record(const bam_hdr_t* header, const bam1_t* record) {
     BamRecord out;
     out.qname = bam_get_qname(record);
     out.position = record->core.pos;
+    out.template_length = record->core.isize;
     out.flag = static_cast<std::uint16_t>(record->core.flag);
     out.mapq = static_cast<std::uint8_t>(record->core.qual);
 
