@@ -31,9 +31,15 @@ metrics:
   - stdout_bytes
   - stdout_diff_vs_samtools
   - axf_index_preflight
+  - avg_ms
+  - median_ms
+  - p95_ms
+  - max_over_median
+  - outlier_runs_2x_median
 
 outputs:
   raw_tsv: benchmarks/results/phase1_view_chrtoy_samtools.tsv
+  summary_tsv: benchmarks/results/phase1_view_chrtoy_samtools.summary.tsv
   axf_index: temporary unless --axf-index-output is provided
 
 notes:

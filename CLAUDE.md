@@ -31,6 +31,7 @@ Completed:
 - `alignx index <bam>` builds projected `.axf.idx` files from `.bai` / `.csi`
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
+- Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
 
 Remaining implementation targets:
 - Benchmark: `alignx view` vs `samtools view` on chr1:1M-2M

@@ -45,6 +45,10 @@ mamba run -n alignx-dev cmake --build --preset wsl-release
 Both scripts verify that `alignx index` can materialize a projected `.axf.idx`
 from the BAM sidecar `.bai` / `.csi` before timing `alignx view`. The generated
 index is written to a temporary directory unless `--axf-index-output` is passed.
+Each benchmark run writes the raw timing TSV and a summary TSV with average,
+median, p95, min/max, max-over-median, and outlier counts. By default the
+summary path is `<output without .tsv>.summary.tsv`; override it with
+`--summary-output`.
 
 For a caller-provided real BAM:
 
