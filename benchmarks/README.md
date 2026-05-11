@@ -27,6 +27,7 @@ mamba run -n alignx-dev cmake --build --preset wsl-debug
 # Example: toy region query benchmark
 ./scripts/check_benchmark_input.sh \
   --samtools samtools \
+  --alignx build/wsl-debug/alignx \
   --input tests/toy_data/toy_alignment.sorted.bam \
   --region chrToy:1-250
 
@@ -40,16 +41,22 @@ mamba run -n alignx-dev cmake --build --preset wsl-debug
   --output benchmarks/results/phase1_view_chrtoy_samtools.tsv
 ```
 
+Both scripts verify that `alignx index` can materialize a projected `.axf.idx`
+from the BAM sidecar `.bai` / `.csi` before timing `alignx view`. The generated
+index is written to a temporary directory unless `--axf-index-output` is passed.
+
 For a caller-provided real BAM:
 
 ```bash
 export ALIGNX_BENCH_BAM=/path/to/sample.bam
 
 ./scripts/check_benchmark_input.sh \
+  --alignx build/wsl-debug/alignx \
   --input "$ALIGNX_BENCH_BAM" \
   --region chr1:1000000-2000000
 
 ./scripts/bench_region_query.sh \
+  --alignx build/wsl-debug/alignx \
   --input "$ALIGNX_BENCH_BAM" \
   --region chr1:1000000-2000000 \
   --warmup 1 \

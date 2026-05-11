@@ -6,6 +6,7 @@ dataset:
   sam: tests/toy_data/toy_alignment.sam
   bam: tests/toy_data/toy_alignment.sorted.bam
   bai: tests/toy_data/toy_alignment.sorted.bam.bai
+  csi: tests/toy_data/toy_alignment.sorted.bam.csi
   reference: chrToy
 
 query:
@@ -16,7 +17,9 @@ query:
 tools:
   alignx:
     binary: build/wsl-debug/alignx
-    command: view
+    commands:
+      - index
+      - view
   samtools:
     binary: samtools
     command: view
@@ -27,10 +30,13 @@ metrics:
   - exit_code
   - stdout_bytes
   - stdout_diff_vs_samtools
+  - axf_index_preflight
 
 outputs:
   raw_tsv: benchmarks/results/phase1_view_chrtoy_samtools.tsv
+  axf_index: temporary unless --axf-index-output is provided
 
 notes:
   - Intended for WSL/Conda Phase 1 smoke benchmarking.
+  - The benchmark script runs alignx index before timed view commands; this is preflight only, not part of the measured view latency.
   - The benchmark script fails if alignx stdout differs from samtools stdout.

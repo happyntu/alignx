@@ -8,6 +8,8 @@ REGION="chrToy:1-250"
 OUTPUT="benchmarks/results/phase1_view_chrtoy_samtools.tsv"
 WARMUP=0
 REPEATS=1
+PREPARE_AXF_INDEX=1
+AXF_INDEX_OUTPUT=""
 
 usage() {
   cat <<'USAGE'
@@ -21,6 +23,9 @@ Options:
   --output <path>    output TSV (default: benchmarks/results/phase1_view_chrtoy_samtools.tsv)
   --warmup <n>       warmup iterations, not written to TSV (default: 0)
   --repeats <n>      measured iterations written to TSV (default: 1)
+  --axf-index-output <path>
+                     keep the generated AXF index at this path
+  --skip-axf-index   skip alignx index preflight before timing
   -h, --help         show this help
 USAGE
 }
@@ -55,6 +60,14 @@ while [[ $# -gt 0 ]]; do
       REPEATS="$2"
       shift 2
       ;;
+    --axf-index-output)
+      AXF_INDEX_OUTPUT="$2"
+      shift 2
+      ;;
+    --skip-axf-index)
+      PREPARE_AXF_INDEX=0
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -86,6 +99,27 @@ require_executable() {
   fi
   echo "Required executable not found: $exe" >&2
   exit 1
+}
+
+find_bam_index() {
+  local input="$1"
+  local candidate
+  for candidate in "${input}.csi" "${input}.bai"; do
+    if [[ -f "$candidate" ]]; then
+      printf "%s\n" "$candidate"
+      return 0
+    fi
+  done
+
+  if [[ "$input" == *.bam ]]; then
+    for candidate in "${input%.bam}.csi" "${input%.bam}.bai"; do
+      if [[ -f "$candidate" ]]; then
+        printf "%s\n" "$candidate"
+        return 0
+      fi
+    done
+  fi
+  return 1
 }
 
 run_timed() {
@@ -129,9 +163,36 @@ if [[ ! -f "$INPUT_BAM" ]]; then
   exit 1
 fi
 
+if ! input_index="$(find_bam_index "$INPUT_BAM")"; then
+  echo "Input BAM index not found: expected .bai or .csi for $INPUT_BAM" >&2
+  exit 1
+fi
+
 mkdir -p "$(dirname "$OUTPUT")"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
+
+if [[ "$PREPARE_AXF_INDEX" -eq 1 ]]; then
+  if [[ -n "$AXF_INDEX_OUTPUT" ]]; then
+    axf_index_output="$AXF_INDEX_OUTPUT"
+    mkdir -p "$(dirname "$axf_index_output")"
+  else
+    axf_index_output="$tmp_dir/input.axf.idx"
+  fi
+
+  if ! "$ALIGNX" index "$INPUT_BAM" -o "$axf_index_output" >"$tmp_dir/alignx_index.tsv" 2>"$tmp_dir/alignx_index.err"; then
+    sed 's/^/alignx index stderr: /' "$tmp_dir/alignx_index.err" >&2
+    echo "alignx index preflight failed for $INPUT_BAM" >&2
+    exit 1
+  fi
+  if [[ ! -s "$axf_index_output" ]]; then
+    echo "alignx index preflight produced an empty AXF index: $axf_index_output" >&2
+    exit 1
+  fi
+  sed 's/^/alignx index: /' "$tmp_dir/alignx_index.tsv" >&2
+else
+  echo "Skipping AXF index preflight; found input index: $input_index" >&2
+fi
 
 alignx_stdout="$tmp_dir/alignx.sam"
 alignx_stderr="$tmp_dir/alignx.err"

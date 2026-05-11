@@ -2,9 +2,12 @@
 set -euo pipefail
 
 SAMTOOLS="samtools"
+ALIGNX="build/wsl-debug/alignx"
 INPUT_BAM="tests/toy_data/toy_alignment.sorted.bam"
 REGION="chrToy:1-250"
 REQUIRE_RECORDS=1
+CHECK_AXF_INDEX=1
+AXF_INDEX_OUTPUT=""
 
 usage() {
   cat <<'USAGE'
@@ -12,8 +15,12 @@ Usage: scripts/check_benchmark_input.sh [options]
 
 Options:
   --samtools <path>        samtools executable (default: samtools)
+  --alignx <path>          alignx executable (default: build/wsl-debug/alignx)
   --input <path>           input BAM (default: tests/toy_data/toy_alignment.sorted.bam)
   --region <region>        region query (default: chrToy:1-250)
+  --axf-index-output <path>
+                           keep the generated AXF index at this path
+  --skip-axf-index         skip alignx index preflight
   --allow-empty-region     allow the region to return zero records
   -h, --help               show this help
 USAGE
@@ -25,6 +32,10 @@ while [[ $# -gt 0 ]]; do
       SAMTOOLS="$2"
       shift 2
       ;;
+    --alignx)
+      ALIGNX="$2"
+      shift 2
+      ;;
     --input)
       INPUT_BAM="$2"
       shift 2
@@ -32,6 +43,14 @@ while [[ $# -gt 0 ]]; do
     --region)
       REGION="$2"
       shift 2
+      ;;
+    --axf-index-output)
+      AXF_INDEX_OUTPUT="$2"
+      shift 2
+      ;;
+    --skip-axf-index)
+      CHECK_AXF_INDEX=0
+      shift
       ;;
     --allow-empty-region)
       REQUIRE_RECORDS=0
@@ -71,19 +90,42 @@ check_file() {
   echo "OK $label: $path"
 }
 
+find_bam_index() {
+  local input="$1"
+  local candidate
+  for candidate in "${input}.csi" "${input}.bai"; do
+    if [[ -f "$candidate" ]]; then
+      printf "%s\n" "$candidate"
+      return 0
+    fi
+  done
+
+  if [[ "$input" == *.bam ]]; then
+    for candidate in "${input%.bam}.csi" "${input%.bam}.bai"; do
+      if [[ -f "$candidate" ]]; then
+        printf "%s\n" "$candidate"
+        return 0
+      fi
+    done
+  fi
+  return 1
+}
+
+cleanup_dirs=()
+cleanup() {
+  for dir in "${cleanup_dirs[@]}"; do
+    rm -rf "$dir"
+  done
+}
+trap cleanup EXIT
+
 require_executable "$SAMTOOLS"
+if [[ "$CHECK_AXF_INDEX" -eq 1 ]]; then
+  require_executable "$ALIGNX"
+fi
 check_file "bam" "$INPUT_BAM"
 
-index_path=""
-if [[ -f "${INPUT_BAM}.bai" ]]; then
-  index_path="${INPUT_BAM}.bai"
-elif [[ -f "${INPUT_BAM}.csi" ]]; then
-  index_path="${INPUT_BAM}.csi"
-elif [[ "$INPUT_BAM" == *.bam && -f "${INPUT_BAM%.bam}.bai" ]]; then
-  index_path="${INPUT_BAM%.bam}.bai"
-elif [[ "$INPUT_BAM" == *.bam && -f "${INPUT_BAM%.bam}.csi" ]]; then
-  index_path="${INPUT_BAM%.bam}.csi"
-else
+if ! index_path="$(find_bam_index "$INPUT_BAM")"; then
   echo "FAIL index: missing .bai or .csi for $INPUT_BAM" >&2
   exit 1
 fi
@@ -118,6 +160,33 @@ if "$SAMTOOLS" view "$INPUT_BAM" "$REGION" >/dev/null; then
 else
   echo "FAIL region_view: samtools view failed for $REGION" >&2
   exit 1
+fi
+
+if [[ "$CHECK_AXF_INDEX" -eq 1 ]]; then
+  log_dir="$(mktemp -d)"
+  cleanup_dirs+=("$log_dir")
+
+  if [[ -n "$AXF_INDEX_OUTPUT" ]]; then
+    axf_index_output="$AXF_INDEX_OUTPUT"
+    mkdir -p "$(dirname "$axf_index_output")"
+  else
+    axf_index_output="$log_dir/input.axf.idx"
+  fi
+
+  axf_index_stdout="$log_dir/alignx_index.out"
+  axf_index_stderr="$log_dir/alignx_index.err"
+  if "$ALIGNX" index "$INPUT_BAM" -o "$axf_index_output" >"$axf_index_stdout" 2>"$axf_index_stderr"; then
+    if [[ ! -s "$axf_index_output" ]]; then
+      echo "FAIL alignx_index: empty AXF index output: $axf_index_output" >&2
+      exit 1
+    fi
+    echo "OK alignx_index: $axf_index_output"
+    sed 's/^/OK alignx_index_info: /' "$axf_index_stdout"
+  else
+    sed 's/^/alignx index stderr: /' "$axf_index_stderr" >&2
+    echo "FAIL alignx_index: alignx index failed for $INPUT_BAM" >&2
+    exit 1
+  fi
 fi
 
 echo "OK benchmark_input"
