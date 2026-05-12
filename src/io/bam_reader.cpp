@@ -44,16 +44,16 @@ BamRecord to_record(const bam_hdr_t* header, const bam1_t* record) {
     return out;
 }
 
-std::expected<std::optional<std::string>, std::string>
-read_next_raw_record(samFile* file, bam_hdr_t* header, hts_itr_t* iter, bam1_t* record) {
+std::expected<bool, std::string> read_next_raw_record(samFile* file, bam_hdr_t* header,
+                                                      hts_itr_t* iter, bam1_t* record) {
     const int result =
         iter != nullptr ? sam_itr_next(file, iter, record) : sam_read1(file, header, record);
 
     if (result >= 0) {
-        return std::optional<std::string>{std::string{}};
+        return true;
     }
     if (result == -1) {
-        return std::optional<std::string>{};
+        return false;
     }
     return std::unexpected("failed while reading BAM record");
 }
@@ -158,7 +158,7 @@ std::expected<std::optional<BamRecord>, std::string> BamReader::next_record() {
     if (!result) {
         return std::unexpected(result.error());
     }
-    if (result->has_value()) {
+    if (*result) {
         return to_record(impl_->header, impl_->record);
     }
     return std::optional<BamRecord>{};
@@ -185,7 +185,7 @@ std::expected<std::optional<std::string_view>, std::string> BamReader::next_sam_
     if (!result) {
         return std::unexpected(result.error());
     }
-    if (!result->has_value()) {
+    if (!*result) {
         return std::optional<std::string_view>{};
     }
 
