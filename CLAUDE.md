@@ -212,6 +212,8 @@ Do not claim full samtools replacement. alignx v0.1 targets **region query accel
 
 ## Benchmark and Paper Context
 
+Before running benchmarks or profiling workloads, notify the user and wait for confirmation because the development machine is often busy. Lightweight build/test/smoke checks are allowed without confirmation; repeated timing runs, benchmark scripts, and profiling on real BAM/CRAM data require confirmation first.
+
 This project may support a future methods paper around:
 - columnar alignment format for selective-column I/O
 - next-generation index for faster region queries
