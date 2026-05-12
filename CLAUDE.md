@@ -69,6 +69,13 @@ mamba run -n alignx-dev cmake --build --preset wsl-debug
 mamba run -n alignx-dev ctest --preset wsl-debug --output-on-failure
 ```
 
+**Remote large-data execution:**
+- For large BAM/CRAM/genome assets and benchmark/profiling workloads, prefer `missmi-server00` storage and execution over this Windows machine or WSL disk.
+- The local Codex session remains the orchestrator and should execute remote commands over SSH; do not require a persistent Git clone on the server.
+- `missmi-server00` SSH: `ssh -i C:/Users/user/.ssh/missmi_server00 -p 19822 happyntu@140.112.183.210`.
+- `missmi-server00` large-data root: `/mypool/biotools-benchmark-data/` on the large ZFS `mypool` filesystem.
+- If repository scripts or binaries are needed remotely, stream the script, copy the built binary, or create a minimal runtime snapshot from the local working tree over SSH. Keep the authoritative repository and commits on the local Windows workspace.
+
 **Note:** Phase 0 includes only a minimal `alignx_lib` scaffold source for test target creation.
 No functional `alignx` executable exists until `src/main.cpp` and Phase 1 sources are added.
 
@@ -183,6 +190,7 @@ alignx index    <input.bam|axf>  [-o output.axf.idx]    # build/rebuild .axf.idx
 ### Data hygiene
 
 - Do not commit large BAM/CRAM/genome files. Use scripts or manifests.
+- Do not stage large real datasets inside WSL `/home` when `/mypool` on `missmi-server00` is suitable; WSL VHDX growth consumes the Windows C: drive and may require manual compaction.
 - Small deterministic toy fixtures are acceptable in `tests/toy_data/` and `data/toy/`.
 - Raw benchmark results go in `benchmarks/results/`, not `docs/`.
 
