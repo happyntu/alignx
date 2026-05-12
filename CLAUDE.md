@@ -69,6 +69,8 @@ mamba run -n alignx-dev cmake --build --preset wsl-debug
 mamba run -n alignx-dev ctest --preset wsl-debug --output-on-failure
 ```
 
+For commands that write binary genomics files to stdout (BAM/CRAM/BCF or compressed BGZF output), do not use `conda run ... > output.bam`; activate the environment in a shell first, then run the tool and redirect output. This avoids any risk of environment-wrapper text contaminating binary files.
+
 **Remote large-data execution:**
 - For large BAM/CRAM/genome assets and benchmark/profiling workloads, prefer `missmi-server00` storage and execution over this Windows machine or WSL disk.
 - The local Codex session remains the orchestrator and should execute remote commands over SSH; do not require a persistent Git clone on the server.
