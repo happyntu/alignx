@@ -2,10 +2,15 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "analysis/stats.hpp"
@@ -19,8 +24,52 @@
 namespace alignx::cli {
 namespace {
 
+using Clock = std::chrono::steady_clock;
+
+struct ViewProfile {
+    std::uint64_t records = 0;
+    std::uint64_t stdout_bytes = 0;
+    Clock::duration setup_time{};
+    Clock::duration read_format_time{};
+    Clock::duration write_time{};
+};
+
+bool view_profile_enabled() {
+#ifdef _WIN32
+    std::size_t required_size = 0;
+    getenv_s(&required_size, nullptr, 0, "ALIGNX_PROFILE_VIEW");
+    if (required_size == 0) {
+        return false;
+    }
+
+    std::string value(required_size, '\0');
+    getenv_s(&required_size, value.data(), value.size(), "ALIGNX_PROFILE_VIEW");
+    if (!value.empty() && value.back() == '\0') {
+        value.pop_back();
+    }
+    return !value.empty() && value != "0";
+#else
+    const char* value = std::getenv("ALIGNX_PROFILE_VIEW");
+    return value != nullptr && value[0] != '\0' && std::string_view(value) != "0";
+#endif
+}
+
+double milliseconds(Clock::duration duration) {
+    return std::chrono::duration<double, std::milli>(duration).count();
+}
+
+void write_view_profile(const ViewProfile& profile, Clock::duration total_time, std::ostream& err) {
+    err << "profile\trecords\tsetup_ms\tread_format_ms\twrite_ms\ttotal_ms\tstdout_bytes\n";
+    err << "view\t" << profile.records << '\t' << milliseconds(profile.setup_time) << '\t'
+        << milliseconds(profile.read_format_time) << '\t' << milliseconds(profile.write_time)
+        << '\t' << milliseconds(total_time) << '\t' << profile.stdout_bytes << '\n';
+}
+
 int run_view(const std::filesystem::path& input, const std::string& region, std::ostream& out,
              std::ostream& err) {
+    const bool profile_enabled = view_profile_enabled();
+    const auto total_start = profile_enabled ? Clock::now() : Clock::time_point{};
+
     auto reader = io::BamReader::open(input);
     if (!reader) {
         err << "alignx view: " << reader.error() << '\n';
@@ -33,8 +82,34 @@ int run_view(const std::filesystem::path& input, const std::string& region, std:
         return 1;
     }
 
+    if (!profile_enabled) {
+        for (;;) {
+            auto line = reader->next_sam_line_view();
+            if (!line) {
+                err << "alignx view: " << line.error() << '\n';
+                return 1;
+            }
+            if (!line->has_value()) {
+                break;
+            }
+
+            out.write(line->value().data(), static_cast<std::streamsize>(line->value().size()));
+            if (line->value().empty() || line->value().back() != '\n') {
+                out.put('\n');
+            }
+        }
+
+        return 0;
+    }
+
+    ViewProfile profile;
+    profile.setup_time = Clock::now() - total_start;
     for (;;) {
+        const auto read_format_start = Clock::now();
         auto line = reader->next_sam_line_view();
+        const auto read_format_end = Clock::now();
+        profile.read_format_time += read_format_end - read_format_start;
+
         if (!line) {
             err << "alignx view: " << line.error() << '\n';
             return 1;
@@ -43,12 +118,22 @@ int run_view(const std::filesystem::path& input, const std::string& region, std:
             break;
         }
 
+        const auto write_start = Clock::now();
         out.write(line->value().data(), static_cast<std::streamsize>(line->value().size()));
         if (line->value().empty() || line->value().back() != '\n') {
             out.put('\n');
         }
+        const auto write_end = Clock::now();
+
+        profile.write_time += write_end - write_start;
+        profile.records += 1;
+        profile.stdout_bytes += line->value().size();
+        if (line->value().empty() || line->value().back() != '\n') {
+            profile.stdout_bytes += 1;
+        }
     }
 
+    write_view_profile(profile, Clock::now() - total_start, err);
     return 0;
 }
 

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -40,6 +41,22 @@ int run_cli(const std::vector<std::string>& args, std::ostream& out, std::ostrea
         argv.push_back(const_cast<char*>(arg.c_str()));
     }
     return alignx::cli::run(static_cast<int>(argv.size()), argv.data(), out, err);
+}
+
+void set_env_var(const char* name, const char* value) {
+#ifdef _WIN32
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 1);
+#endif
+}
+
+void unset_env_var(const char* name) {
+#ifdef _WIN32
+    _putenv_s(name, "");
+#else
+    unsetenv(name);
+#endif
 }
 
 TEST(Cli, ViewRequiresArguments) {
@@ -137,6 +154,26 @@ TEST(Cli, ViewOutputsToyRegionRecords) {
     EXPECT_EQ(out.str(),
               "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n"
               "read002\t16\tchrToy\t151\t50\t5M1I4M\t*\t0\t0\tTTTTACGGGA\tFFFFFFFFFF\tNM:i:1\n");
+}
+
+TEST(Cli, ViewProfileWritesOnlyToStderr) {
+    set_env_var("ALIGNX_PROFILE_VIEW", "1");
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "view", toy_bam_path().string(), "chrToy:1-250"}, out, err);
+
+    unset_env_var("ALIGNX_PROFILE_VIEW");
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(out.str(),
+              "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n"
+              "read002\t16\tchrToy\t151\t50\t5M1I4M\t*\t0\t0\tTTTTACGGGA\tFFFFFFFFFF\tNM:i:1\n");
+    EXPECT_NE(err.str().find(
+                  "profile\trecords\tsetup_ms\tread_format_ms\twrite_ms\ttotal_ms\tstdout_bytes"),
+              std::string::npos);
+    EXPECT_NE(err.str().find("view\t2\t"), std::string::npos);
+    EXPECT_NE(err.str().find("\t130\n"), std::string::npos);
 }
 
 TEST(Cli, StatsOutputsToyBamSummary) {
