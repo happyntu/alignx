@@ -75,7 +75,9 @@ For commands that write binary genomics files to stdout (BAM/CRAM/BCF or compres
 - For large BAM/CRAM/genome assets and benchmark/profiling workloads, prefer `missmi-server00` storage and execution over this Windows machine or WSL disk.
 - The local Codex session remains the orchestrator and should execute remote commands over SSH; do not require a persistent Git clone on the server.
 - `missmi-server00` SSH: `ssh -i C:/Users/user/.ssh/missmi_server00 -p 19822 happyntu@140.112.183.210`.
-- `missmi-server00` large-data root: `/mypool/biotools-benchmark-data/` on the large ZFS `mypool` filesystem.
+- `missmi-server00` alignx remote root: `/mypool/alignx/` on the large ZFS `mypool` filesystem.
+- Recommended remote layout: `/mypool/alignx/bin`, `/mypool/alignx/data`, `/mypool/alignx/refs`, `/mypool/alignx/results`, `/mypool/alignx/logs`, `/mypool/alignx/tmp`, and `/mypool/alignx/test_data`.
+- Remote alignx binaries can use the existing server HTSlib environment with `LD_LIBRARY_PATH=/home/happyntu/miniconda3/envs/hg002sv/lib`.
 - If repository scripts or binaries are needed remotely, stream the script, copy the built binary, or create a minimal runtime snapshot from the local working tree over SSH. Keep the authoritative repository and commits on the local Windows workspace.
 
 **Note:** Phase 0 includes only a minimal `alignx_lib` scaffold source for test target creation.
