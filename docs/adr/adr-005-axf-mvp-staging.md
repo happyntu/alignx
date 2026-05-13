@@ -113,6 +113,8 @@ Index at index_offset:
 
 Coordinates inside the AXF index are 0-based half-open. CLI region strings remain
 SAM-compatible 1-based closed intervals and are converted at query boundaries.
+The AXF0 MVP parser currently supports only `ref:start-end` region strings and
+does not support reference names containing `:`.
 
 ---
 

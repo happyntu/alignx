@@ -1,7 +1,6 @@
 #include "query/axf_view.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <limits>
 #include <ostream>
@@ -9,62 +8,10 @@
 #include <vector>
 
 #include "format/axf_file.hpp"
+#include "query/region.hpp"
 
 namespace alignx::query {
 namespace {
-
-struct ParsedRegion {
-    std::string reference;
-    std::int32_t start = 0;
-    std::int32_t end = 0;
-};
-
-std::expected<std::int32_t, std::string> parse_positive_i32(std::string_view text,
-                                                            std::string_view label) {
-    if (text.empty()) {
-        return std::unexpected("missing " + std::string(label));
-    }
-
-    std::int64_t value = 0;
-    for (char ch : text) {
-        if (!std::isdigit(static_cast<unsigned char>(ch))) {
-            return std::unexpected("invalid " + std::string(label));
-        }
-        value = value * 10 + (ch - '0');
-        if (value > std::numeric_limits<std::int32_t>::max()) {
-            return std::unexpected(std::string(label) + " is too large");
-        }
-    }
-    if (value <= 0) {
-        return std::unexpected(std::string(label) + " must be positive");
-    }
-    return static_cast<std::int32_t>(value);
-}
-
-std::expected<ParsedRegion, std::string> parse_region(std::string_view region) {
-    const std::size_t colon = region.find(':');
-    const std::size_t dash = region.find('-', colon == std::string_view::npos ? 0 : colon + 1);
-    if (colon == std::string_view::npos || dash == std::string_view::npos || colon == 0 ||
-        dash <= colon + 1 || dash + 1 >= region.size()) {
-        return std::unexpected("region must use ref:start-end");
-    }
-
-    auto one_based_start = parse_positive_i32(region.substr(colon + 1, dash - colon - 1), "start");
-    auto one_based_end = parse_positive_i32(region.substr(dash + 1), "end");
-    if (!one_based_start) {
-        return std::unexpected(one_based_start.error());
-    }
-    if (!one_based_end) {
-        return std::unexpected(one_based_end.error());
-    }
-    if (*one_based_start > *one_based_end) {
-        return std::unexpected("region start must be <= end");
-    }
-
-    return ParsedRegion{.reference = std::string(region.substr(0, colon)),
-                        .start = *one_based_start - 1,
-                        .end = *one_based_end};
-}
 
 std::vector<std::string_view> split_tab_fields(std::string_view line, std::size_t max_fields) {
     std::vector<std::string_view> fields;
@@ -131,8 +78,29 @@ std::expected<std::int32_t, std::string> cigar_reference_span(std::string_view c
     return static_cast<std::int32_t>(std::max<std::int64_t>(span, 1));
 }
 
+std::expected<std::int32_t, std::string> parse_sam_pos(std::string_view text) {
+    if (text.empty()) {
+        return std::unexpected("missing SAM POS");
+    }
+
+    std::int64_t value = 0;
+    for (char ch : text) {
+        if (ch < '0' || ch > '9') {
+            return std::unexpected("invalid SAM POS");
+        }
+        value = value * 10 + (ch - '0');
+        if (value > std::numeric_limits<std::int32_t>::max()) {
+            return std::unexpected("SAM POS is too large");
+        }
+    }
+    if (value <= 0) {
+        return std::unexpected("SAM POS must be positive");
+    }
+    return static_cast<std::int32_t>(value);
+}
+
 std::expected<bool, std::string> sam_line_overlaps_region(std::string_view line,
-                                                          const ParsedRegion& region) {
+                                                          const SamRegion& region) {
     if (!line.empty() && line.back() == '\n') {
         line.remove_suffix(1);
     }
@@ -145,7 +113,7 @@ std::expected<bool, std::string> sam_line_overlaps_region(std::string_view line,
         return false;
     }
 
-    auto one_based_pos = parse_positive_i32(fields[3], "SAM POS");
+    auto one_based_pos = parse_sam_pos(fields[3]);
     if (!one_based_pos) {
         return std::unexpected(one_based_pos.error());
     }
@@ -174,7 +142,7 @@ std::expected<std::uint32_t, std::string> find_reference_id(const format::AxfFil
 std::expected<void, std::string> write_axf_region_sam(const std::filesystem::path& input,
                                                       const std::string& region,
                                                       std::ostream& out) {
-    auto parsed_region = parse_region(region);
+    auto parsed_region = parse_sam_region(region);
     if (!parsed_region) {
         return std::unexpected(parsed_region.error());
     }
