@@ -23,6 +23,16 @@ struct BamRecord {
     [[nodiscard]] bool is_unmapped() const noexcept;
 };
 
+struct BamRecordView {
+    BamRecord record;
+    std::string_view sam_line;
+};
+
+struct BamReference {
+    std::string name;
+    std::uint32_t length = 0;
+};
+
 struct SamLineProfile {
     std::chrono::steady_clock::duration read_time{};
     std::chrono::steady_clock::duration format_time{};
@@ -54,12 +64,14 @@ public:
     [[nodiscard]] std::expected<void, std::string>
     fetch_profiled(std::string_view region, std::chrono::steady_clock::duration& fetch_time);
     [[nodiscard]] std::expected<std::optional<BamRecord>, std::string> next_record();
+    [[nodiscard]] std::expected<std::optional<BamRecordView>, std::string> next_record_view();
     [[nodiscard]] std::expected<std::optional<std::string>, std::string> next_sam_line();
     [[nodiscard]] std::expected<std::optional<std::string_view>, std::string> next_sam_line_view();
     [[nodiscard]] std::expected<std::optional<std::string_view>, std::string>
     next_sam_line_view_profiled(SamLineProfile& profile);
 
     [[nodiscard]] std::int32_t reference_count() const noexcept;
+    [[nodiscard]] std::expected<std::vector<BamReference>, std::string> references() const;
     [[nodiscard]] bool has_index() const noexcept;
 
 private:

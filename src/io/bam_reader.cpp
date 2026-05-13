@@ -269,6 +269,30 @@ std::expected<std::optional<BamRecord>, std::string> BamReader::next_record() {
 #endif
 }
 
+std::expected<std::optional<BamRecordView>, std::string> BamReader::next_record_view() {
+#ifdef ALIGNX_HAVE_HTSLIB
+    auto result = read_next_raw_record(impl_->file, impl_->header, impl_->iter, impl_->record);
+    if (!result) {
+        return std::unexpected(result.error());
+    }
+    if (!*result) {
+        return std::optional<BamRecordView>{};
+    }
+
+    BamRecord record = to_record(impl_->header, impl_->record);
+
+    impl_->sam_line.l = 0;
+    if (sam_format1(impl_->header, impl_->record, &impl_->sam_line) < 0) {
+        return std::unexpected("failed to format BAM record as SAM");
+    }
+
+    return BamRecordView{.record = std::move(record),
+                         .sam_line = std::string_view(impl_->sam_line.s, impl_->sam_line.l)};
+#else
+    return std::unexpected("alignx was built without HTSlib support");
+#endif
+}
+
 std::expected<std::optional<std::string>, std::string> BamReader::next_sam_line() {
     auto line = next_sam_line_view();
     if (!line) {
@@ -328,6 +352,29 @@ std::int32_t BamReader::reference_count() const noexcept {
     return impl_->header != nullptr ? impl_->header->n_targets : 0;
 #else
     return 0;
+#endif
+}
+
+std::expected<std::vector<BamReference>, std::string> BamReader::references() const {
+#ifdef ALIGNX_HAVE_HTSLIB
+    if (impl_->header == nullptr) {
+        return std::unexpected("BAM header is not available");
+    }
+
+    std::vector<BamReference> references;
+    references.reserve(static_cast<std::size_t>(impl_->header->n_targets));
+    for (std::int32_t ref_id = 0; ref_id < impl_->header->n_targets; ++ref_id) {
+        const char* name = sam_hdr_tid2name(impl_->header, ref_id);
+        if (name == nullptr) {
+            return std::unexpected("failed to read BAM reference name");
+        }
+        references.push_back(
+            {.name = name,
+             .length = static_cast<std::uint32_t>(impl_->header->target_len[ref_id])});
+    }
+    return references;
+#else
+    return std::unexpected("alignx was built without HTSlib support");
 #endif
 }
 
