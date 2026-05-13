@@ -8,6 +8,7 @@ ADRs record accepted architectural decisions for alignx.
 - `adr-002-axf-format-design.md` - AXF format direction
 - `adr-003-index-design.md` - index design direction
 - `adr-004-compression-and-acceleration-strategy.md` - CPU/GPU and lossless compression strategy
+- `adr-005-axf-mvp-staging.md` - correctness-first AXF MVP staging plan
 
 ## Guidelines
 

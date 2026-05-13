@@ -45,13 +45,19 @@ and produce correct output before the next version starts.
 
 **Goal:** Write and read the `.axf` columnar format. Prove selective column I/O is faster.
 
+**MVP staging:** ADR-005 defines a correctness-first AXF MVP before the full
+columnar codec stack. The first closed loop may store row-preserving SAM-line
+payloads in indexed AXF blocks to validate conversion, indexing, CLI routing,
+and region-query correctness.
+
 **Deliverables:**
 
+- [ ] AXF MVP file header, reference metadata, block payloads, and block index
+- [ ] `alignx convert <bam> -o <axf>` MVP
+- [ ] `alignx view <axf> <region>` MVP with toy stdout parity
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec: POS varint delta, FLAG bit-pack, MAPQ byte/RLE, SEQ reference-delta 2-bit
-- [ ] `alignx convert <bam> -o <axf>`
-- [ ] `alignx view <axf> <region>` (columnar path)
 - [ ] Round-trip fidelity: BAM → AXF → BAM → diff
 - [ ] Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
 

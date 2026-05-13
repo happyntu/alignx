@@ -47,6 +47,12 @@ alignx index sample.bam -o sample.bam.axf.idx
 ```
 
 ### BAM → AXF conversion (v0.3)
+
+ADR-005 defines the first AXF closed-loop MVP. Before the full columnar codec
+stack below is implemented, the MVP may store row-preserving SAM-line payloads
+inside indexed AXF blocks to validate conversion, indexing, CLI routing, and
+region-query correctness.
+
 ```
 alignx convert sample.bam -o sample.axf
   → io:  BamReader::stream_all()
