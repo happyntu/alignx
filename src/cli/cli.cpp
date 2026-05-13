@@ -30,7 +30,8 @@ struct ViewProfile {
     std::uint64_t records = 0;
     std::uint64_t stdout_bytes = 0;
     Clock::duration setup_time{};
-    Clock::duration read_format_time{};
+    Clock::duration read_time{};
+    Clock::duration format_time{};
     Clock::duration write_time{};
 };
 
@@ -59,10 +60,11 @@ double milliseconds(Clock::duration duration) {
 }
 
 void write_view_profile(const ViewProfile& profile, Clock::duration total_time, std::ostream& err) {
-    err << "profile\trecords\tsetup_ms\tread_format_ms\twrite_ms\ttotal_ms\tstdout_bytes\n";
+    err << "profile\trecords\tsetup_ms\tread_ms\tformat_ms\twrite_ms\ttotal_ms\tstdout_bytes\n";
     err << "view\t" << profile.records << '\t' << milliseconds(profile.setup_time) << '\t'
-        << milliseconds(profile.read_format_time) << '\t' << milliseconds(profile.write_time)
-        << '\t' << milliseconds(total_time) << '\t' << profile.stdout_bytes << '\n';
+        << milliseconds(profile.read_time) << '\t' << milliseconds(profile.format_time) << '\t'
+        << milliseconds(profile.write_time) << '\t' << milliseconds(total_time) << '\t'
+        << profile.stdout_bytes << '\n';
 }
 
 int run_view(const std::filesystem::path& input, const std::string& region, std::ostream& out,
@@ -105,10 +107,10 @@ int run_view(const std::filesystem::path& input, const std::string& region, std:
     ViewProfile profile;
     profile.setup_time = Clock::now() - total_start;
     for (;;) {
-        const auto read_format_start = Clock::now();
-        auto line = reader->next_sam_line_view();
-        const auto read_format_end = Clock::now();
-        profile.read_format_time += read_format_end - read_format_start;
+        io::SamLineProfile line_profile;
+        auto line = reader->next_sam_line_view_profiled(line_profile);
+        profile.read_time += line_profile.read_time;
+        profile.format_time += line_profile.format_time;
 
         if (!line) {
             err << "alignx view: " << line.error() << '\n';

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -22,6 +23,11 @@ struct BamRecord {
     [[nodiscard]] bool is_unmapped() const noexcept;
 };
 
+struct SamLineProfile {
+    std::chrono::steady_clock::duration read_time{};
+    std::chrono::steady_clock::duration format_time{};
+};
+
 class BamReader {
 public:
     BamReader();
@@ -39,11 +45,16 @@ public:
     [[nodiscard]] std::expected<std::optional<BamRecord>, std::string> next_record();
     [[nodiscard]] std::expected<std::optional<std::string>, std::string> next_sam_line();
     [[nodiscard]] std::expected<std::optional<std::string_view>, std::string> next_sam_line_view();
+    [[nodiscard]] std::expected<std::optional<std::string_view>, std::string>
+    next_sam_line_view_profiled(SamLineProfile& profile);
 
     [[nodiscard]] std::int32_t reference_count() const noexcept;
     [[nodiscard]] bool has_index() const noexcept;
 
 private:
+    [[nodiscard]] std::expected<std::optional<std::string_view>, std::string>
+    next_sam_line_view_impl(SamLineProfile* profile);
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

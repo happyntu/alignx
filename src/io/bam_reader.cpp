@@ -180,8 +180,23 @@ std::expected<std::optional<std::string>, std::string> BamReader::next_sam_line(
 }
 
 std::expected<std::optional<std::string_view>, std::string> BamReader::next_sam_line_view() {
+    return next_sam_line_view_impl(nullptr);
+}
+
+std::expected<std::optional<std::string_view>, std::string>
+BamReader::next_sam_line_view_profiled(SamLineProfile& profile) {
+    return next_sam_line_view_impl(&profile);
+}
+
+std::expected<std::optional<std::string_view>, std::string>
+BamReader::next_sam_line_view_impl(SamLineProfile* profile) {
 #ifdef ALIGNX_HAVE_HTSLIB
+    const auto read_start = profile != nullptr ? std::chrono::steady_clock::now()
+                                               : std::chrono::steady_clock::time_point{};
     auto result = read_next_raw_record(impl_->file, impl_->header, impl_->iter, impl_->record);
+    if (profile != nullptr) {
+        profile->read_time += std::chrono::steady_clock::now() - read_start;
+    }
     if (!result) {
         return std::unexpected(result.error());
     }
@@ -190,12 +205,18 @@ std::expected<std::optional<std::string_view>, std::string> BamReader::next_sam_
     }
 
     impl_->sam_line.l = 0;
+    const auto format_start = profile != nullptr ? std::chrono::steady_clock::now()
+                                                 : std::chrono::steady_clock::time_point{};
     if (sam_format1(impl_->header, impl_->record, &impl_->sam_line) < 0) {
         return std::unexpected("failed to format BAM record as SAM");
+    }
+    if (profile != nullptr) {
+        profile->format_time += std::chrono::steady_clock::now() - format_start;
     }
 
     return std::string_view(impl_->sam_line.s, impl_->sam_line.l);
 #else
+    (void)profile;
     return std::unexpected("alignx was built without HTSlib support");
 #endif
 }

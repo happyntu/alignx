@@ -169,9 +169,10 @@ TEST(Cli, ViewProfileWritesOnlyToStderr) {
     EXPECT_EQ(out.str(),
               "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n"
               "read002\t16\tchrToy\t151\t50\t5M1I4M\t*\t0\t0\tTTTTACGGGA\tFFFFFFFFFF\tNM:i:1\n");
-    EXPECT_NE(err.str().find(
-                  "profile\trecords\tsetup_ms\tread_format_ms\twrite_ms\ttotal_ms\tstdout_bytes"),
-              std::string::npos);
+    EXPECT_NE(
+        err.str().find(
+            "profile\trecords\tsetup_ms\tread_ms\tformat_ms\twrite_ms\ttotal_ms\tstdout_bytes"),
+        std::string::npos);
     EXPECT_NE(err.str().find("view\t2\t"), std::string::npos);
     EXPECT_NE(err.str().find("\t130\n"), std::string::npos);
 }
