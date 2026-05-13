@@ -48,6 +48,9 @@ query correctness before introducing specialized column codecs.
 - `alignx convert <input.bam> -o <output.axf>`
   - `--region <ref:start-end>` may be used for correctness smoke checks on
     large BAMs without converting the whole file.
+  - region-limited conversion uses the same 1-based closed input and 0-based
+    half-open overlap semantics as AXF view, and filters fetched BAM records
+    before writing AXF0 payloads.
 - `alignx view <input.axf> <region>`
 - Toy BAM correctness:
   - `alignx view toy.axf chrToy:1-250`

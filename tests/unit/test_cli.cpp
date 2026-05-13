@@ -274,6 +274,24 @@ TEST(Cli, ViewToyAxfRejectsZeroCoordinateRegion) {
     std::filesystem::remove_all(temp_dir);
 }
 
+TEST(Cli, ConvertRegionReportsMalformedRegion) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_bad_region");
+    const auto output = temp_dir / "toy.axf";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli(
+        {"alignx", "convert", toy_bam_path().string(), "-o", output.string(), "--region", "chrToy"},
+        out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("region must use ref:start-end"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(output));
+
+    std::filesystem::remove_all(temp_dir);
+}
+
 #ifdef ALIGNX_HAVE_HTSLIB
 
 TEST(Cli, ConvertWritesToyAxfMvp) {

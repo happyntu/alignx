@@ -4,10 +4,12 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "format/axf_file.hpp"
 #include "io/bam_reader.hpp"
+#include "query/region.hpp"
 
 namespace alignx::convert {
 namespace {
@@ -41,11 +43,25 @@ void append_line(PendingBlock& block, std::string_view line, const io::BamRecord
     }
 }
 
+bool overlaps_region(const io::BamRecord& record, const query::SamRegion& region) {
+    return record.reference_name == region.reference && record.position < region.end &&
+           region.start < record.end_position;
+}
+
 } // namespace
 
 std::expected<void, std::string> convert_bam_to_axf_mvp(const std::filesystem::path& input_bam,
                                                         const std::filesystem::path& output_axf,
                                                         const std::optional<std::string>& region) {
+    std::optional<query::SamRegion> parsed_region;
+    if (region.has_value()) {
+        auto parsed = query::parse_sam_region(*region);
+        if (!parsed) {
+            return std::unexpected(parsed.error());
+        }
+        parsed_region = std::move(*parsed);
+    }
+
     auto reader = io::BamReader::open(input_bam);
     if (!reader) {
         return std::unexpected(reader.error());
@@ -81,6 +97,9 @@ std::expected<void, std::string> convert_bam_to_axf_mvp(const std::filesystem::p
         const io::BamRecordView& view = **record_view;
         if (view.record.is_unmapped() || view.record.position < 0 ||
             view.record.end_position <= view.record.position) {
+            continue;
+        }
+        if (parsed_region.has_value() && !overlaps_region(view.record, *parsed_region)) {
             continue;
         }
 
