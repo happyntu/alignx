@@ -116,6 +116,11 @@ SAM-compatible 1-based closed intervals and are converted at query boundaries.
 The AXF0 MVP parser currently supports only `ref:start-end` region strings and
 does not support reference names containing `:`.
 
+AXF0 MVP region errors are intentionally stricter than HTSlib for malformed
+coordinates: missing references, malformed region strings, reversed intervals,
+and zero coordinates return nonzero status with empty stdout. Valid regions that
+match no records return success with empty stdout, matching the BAM path.
+
 ---
 
 ## Implementation Order

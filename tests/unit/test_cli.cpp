@@ -170,6 +170,110 @@ TEST(Cli, ViewOutputsToyAxfRegionRecords) {
     std::filesystem::remove_all(temp_dir);
 }
 
+TEST(Cli, ViewToyAxfNoHitRegionReturnsEmptyOutput) {
+    const auto temp_dir = make_temp_dir("alignx_cli_view_axf_no_hit");
+    const auto input = temp_dir / "toy.axf";
+    const std::string payload =
+        "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n";
+    alignx::format::AxfFile file{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .blocks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 110,
+                    .record_count = 1,
+                    .payload = std::vector<unsigned char>(payload.begin(), payload.end())}}};
+    auto write = alignx::format::write_axf_file(file, input);
+    ASSERT_TRUE(write) << write.error();
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "view", input.string(), "chrToy:251-260"}, out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(out.str(), "");
+    EXPECT_EQ(err.str(), "");
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ViewToyAxfReportsMalformedRegion) {
+    const auto temp_dir = make_temp_dir("alignx_cli_view_axf_bad_region");
+    const auto input = temp_dir / "toy.axf";
+    const std::string payload =
+        "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n";
+    alignx::format::AxfFile file{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .blocks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 110,
+                    .record_count = 1,
+                    .payload = std::vector<unsigned char>(payload.begin(), payload.end())}}};
+    auto write = alignx::format::write_axf_file(file, input);
+    ASSERT_TRUE(write) << write.error();
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "view", input.string(), "bad-region"}, out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("region must use ref:start-end"), std::string::npos);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ViewToyAxfReportsMissingReference) {
+    const auto temp_dir = make_temp_dir("alignx_cli_view_axf_missing_ref");
+    const auto input = temp_dir / "toy.axf";
+    const std::string payload =
+        "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n";
+    alignx::format::AxfFile file{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .blocks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 110,
+                    .record_count = 1,
+                    .payload = std::vector<unsigned char>(payload.begin(), payload.end())}}};
+    auto write = alignx::format::write_axf_file(file, input);
+    ASSERT_TRUE(write) << write.error();
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "view", input.string(), "chrMissing:1-10"}, out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("reference not found in AXF"), std::string::npos);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ViewToyAxfRejectsZeroCoordinateRegion) {
+    const auto temp_dir = make_temp_dir("alignx_cli_view_axf_zero_region");
+    const auto input = temp_dir / "toy.axf";
+    const std::string payload =
+        "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n";
+    alignx::format::AxfFile file{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .blocks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 110,
+                    .record_count = 1,
+                    .payload = std::vector<unsigned char>(payload.begin(), payload.end())}}};
+    auto write = alignx::format::write_axf_file(file, input);
+    ASSERT_TRUE(write) << write.error();
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "view", input.string(), "chrToy:0-10"}, out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("start must be positive"), std::string::npos);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
 #ifdef ALIGNX_HAVE_HTSLIB
 
 TEST(Cli, ConvertWritesToyAxfMvp) {
