@@ -98,3 +98,24 @@ apt install libhts-dev
 On Windows, the default vcpkg `x64-windows` triplet may report htslib as
 unsupported. In that case, use the scaffold build without htslib until a
 supported Windows HTSlib strategy is selected.
+
+## AXF roundtrip correctness smoke
+
+Use `scripts/smoke_axf_roundtrip.sh` to verify that a BAM region and the AXF0
+MVP converted from that BAM produce identical SAM stdout for the same region.
+This script performs no timing, repeats, profiling, or benchmark reporting.
+
+```bash
+mamba run -n alignx-dev cmake --build --preset wsl-release
+mkdir -p /tmp/alignx_axf_smoke
+ALIGNX_BIN=build/wsl-release/alignx \
+  scripts/smoke_axf_roundtrip.sh \
+  --input tests/toy_data/toy_alignment.sorted.bam \
+  --region chrToy:1-250 \
+  --work-dir /tmp/alignx_axf_smoke
+```
+
+For real BAMs, choose a work directory with enough space because the script
+writes an AXF file plus BAM/AXF SAM outputs. For large datasets, prefer running
+the smoke on `missmi-server00` under `/mypool/alignx/` rather than growing the
+local WSL VHDX.
