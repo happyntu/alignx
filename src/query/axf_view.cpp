@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <ostream>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -162,6 +163,7 @@ std::expected<void, std::string> write_axf_region_sam(const std::filesystem::pat
         return std::unexpected(blocks.error());
     }
 
+    std::string output;
     for (const format::AxfBlock* block : *blocks) {
         std::string_view payload(reinterpret_cast<const char*>(block->payload.data()),
                                  block->payload.size());
@@ -180,14 +182,15 @@ std::expected<void, std::string> write_axf_region_sam(const std::filesystem::pat
                 return std::unexpected(overlaps.error());
             }
             if (*overlaps) {
-                out.write(line.data(), static_cast<std::streamsize>(line.size()));
+                output.append(line.data(), line.size());
                 if (line.back() != '\n') {
-                    out.put('\n');
+                    output.push_back('\n');
                 }
             }
         }
     }
 
+    out.write(output.data(), static_cast<std::streamsize>(output.size()));
     return {};
 }
 

@@ -120,6 +120,9 @@ AXF0 MVP region errors are intentionally stricter than HTSlib for malformed
 coordinates: missing references, malformed region strings, reversed intervals,
 and zero coordinates return nonzero status with empty stdout. Valid regions that
 match no records return success with empty stdout, matching the BAM path.
+AXF0 query output is atomic at the command level: malformed payloads must not
+write partial stdout before returning an error. Row-preserving payload records
+that lack a final newline are normalized to newline-terminated SAM stdout.
 
 ---
 

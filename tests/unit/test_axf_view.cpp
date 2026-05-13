@@ -128,3 +128,34 @@ TEST(AxfView, ReportsMalformedSamPayload) {
 
     std::filesystem::remove(path);
 }
+
+TEST(AxfView, DoesNotWritePartialOutputWhenLaterPayloadIsMalformed) {
+    const auto path = temp_path("alignx_axf_view_atomic_error");
+    const std::string payload =
+        "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\n"
+        "bad\tline\n";
+    write_axf_or_fail(make_axf(payload), path);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf_region_sam(path, "chrToy:101-110", out);
+
+    ASSERT_FALSE(result);
+    EXPECT_NE(result.error().find("malformed SAM line"), std::string::npos);
+    EXPECT_EQ(out.str(), "");
+
+    std::filesystem::remove(path);
+}
+
+TEST(AxfView, NormalizesFinalPayloadLineToNewlineTerminatedOutput) {
+    const auto path = temp_path("alignx_axf_view_final_newline");
+    const std::string payload = "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF";
+    write_axf_or_fail(make_axf(payload), path);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf_region_sam(path, "chrToy:101-110", out);
+
+    EXPECT_TRUE(result) << result.error();
+    EXPECT_EQ(out.str(), payload + "\n");
+
+    std::filesystem::remove(path);
+}
