@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "cli/runner.hpp"
+#include "format/axf_file.hpp"
 #include "index/axf_index.hpp"
 
 namespace {
@@ -143,6 +144,32 @@ TEST(Cli, IndexReportsMissingBamIndex) {
 
 #ifdef ALIGNX_HAVE_HTSLIB
 
+TEST(Cli, ConvertWritesToyAxfMvp) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert");
+    const auto output = temp_dir / "toy.axf";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code =
+        run_cli({"alignx", "convert", toy_bam_path().string(), "-o", output.string()}, out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(err.str(), "");
+    EXPECT_NE(out.str().find("input\t"), std::string::npos);
+    EXPECT_NE(out.str().find("output\t"), std::string::npos);
+    EXPECT_NE(out.str().find("format\tAXF0"), std::string::npos);
+    ASSERT_TRUE(std::filesystem::is_regular_file(output));
+
+    auto axf = alignx::format::read_axf_file(output);
+    ASSERT_TRUE(axf) << axf.error();
+    ASSERT_EQ(axf->references.size(), 1);
+    EXPECT_EQ(axf->references[0].name, "chrToy");
+    ASSERT_EQ(axf->blocks.size(), 1);
+    EXPECT_EQ(axf->blocks[0].record_count, 2);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
 TEST(Cli, ViewOutputsToyRegionRecords) {
     std::ostringstream out;
     std::ostringstream err;
@@ -212,6 +239,22 @@ TEST(Cli, StatsOutputsToyBamSummary) {
 }
 
 #else
+
+TEST(Cli, ConvertReportsMissingHtslib) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_missing_htslib");
+    const auto output = temp_dir / "toy.axf";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code =
+        run_cli({"alignx", "convert", toy_bam_path().string(), "-o", output.string()}, out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("without HTSlib"), std::string::npos);
+
+    std::filesystem::remove_all(temp_dir);
+}
 
 TEST(Cli, ViewReportsMissingHtslib) {
     std::ostringstream out;

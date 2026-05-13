@@ -15,6 +15,7 @@
 
 #include "analysis/stats.hpp"
 #include "cli/runner.hpp"
+#include "convert/bam_to_axf.hpp"
 #include "index/axf_index.hpp"
 #include "index/bai_reader.hpp"
 #include "index/bam_index_projection.hpp"
@@ -174,6 +175,20 @@ int run_stats(const std::filesystem::path& input, std::ostream& out, std::ostrea
     return 0;
 }
 
+int run_convert(const std::filesystem::path& input, const std::filesystem::path& output,
+                std::ostream& out, std::ostream& err) {
+    auto conversion = convert::convert_bam_to_axf_mvp(input, output);
+    if (!conversion) {
+        err << "alignx convert: " << conversion.error() << '\n';
+        return 1;
+    }
+
+    out << "input\t" << input.string() << '\n';
+    out << "output\t" << output.string() << '\n';
+    out << "format\tAXF0\n";
+    return 0;
+}
+
 void add_unique_path(std::vector<std::filesystem::path>& paths, std::filesystem::path path) {
     if (std::find(paths.begin(), paths.end(), path) == paths.end()) {
         paths.push_back(std::move(path));
@@ -304,6 +319,14 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
         ->required()
         ->check(::CLI::ExistingFile);
 
+    std::filesystem::path convert_input;
+    std::filesystem::path convert_output;
+    auto* convert_cmd = app.add_subcommand("convert", "Convert BAM to AXF MVP format");
+    convert_cmd->add_option("input", convert_input, "Input BAM file")
+        ->required()
+        ->check(::CLI::ExistingFile);
+    convert_cmd->add_option("-o,--output", convert_output, "Output AXF file")->required();
+
     std::filesystem::path index_input;
     std::filesystem::path index_output;
     auto* index_cmd = app.add_subcommand("index", "Build an AXF index from a BAM index");
@@ -329,6 +352,9 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     }
     if (*stats) {
         return run_stats(stats_input, out, err);
+    }
+    if (*convert_cmd) {
+        return run_convert(convert_input, convert_output, out, err);
     }
     if (*index_cmd) {
         return run_index(index_input, index_output, out, err);

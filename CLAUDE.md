@@ -214,10 +214,13 @@ alignx index    <input.bam|axf>  [-o output.axf.idx]    # build/rebuild .axf.idx
 ## Implementation Boundaries (Phase 1)
 
 For v0.1:
-- BAM reading only (no CRAM yet, no AXF format writing yet).
+- BAM reading only for production query paths (no CRAM yet).
 - HTSlib wrapper in `src/io/`, BAI reader in `src/index/`.
 - AXFIndex v1: sorted interval list (no interval tree yet).
-- `alignx view` and `alignx stats` subcommands only.
+- `alignx view` and `alignx stats` BAM subcommands.
+- AXF0 MVP staging is allowed per ADR-005: `alignx convert <bam> -o <axf>` may write
+  row-preserving SAM-line payloads for toy correctness before the final columnar
+  AXF codec path is implemented.
 - Benchmark target: `samtools view` on chr1:1M-2M latency comparison.
 
 Do not claim full samtools replacement. alignx v0.1 targets **region query acceleration** only.
