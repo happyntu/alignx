@@ -45,9 +45,10 @@ public:
     BamReader& operator=(BamReader&&) noexcept;
 
     [[nodiscard]] static std::expected<BamReader, std::string>
-    open(const std::filesystem::path& path);
+    open(const std::filesystem::path& path, std::optional<int> hts_threads = std::nullopt);
     [[nodiscard]] static std::expected<BamReader, std::string>
-    open_profiled(const std::filesystem::path& path, BamOpenProfile& profile);
+    open_profiled(const std::filesystem::path& path, BamOpenProfile& profile,
+                  std::optional<int> hts_threads = std::nullopt);
 
     [[nodiscard]] std::expected<void, std::string> fetch(std::string_view region);
     [[nodiscard]] std::expected<void, std::string>
@@ -63,7 +64,8 @@ public:
 
 private:
     [[nodiscard]] static std::expected<BamReader, std::string>
-    open_impl(const std::filesystem::path& path, BamOpenProfile* profile);
+    open_impl(const std::filesystem::path& path, BamOpenProfile* profile,
+              std::optional<int> hts_threads);
 
     [[nodiscard]] std::expected<void, std::string>
     fetch_impl(std::string_view region, std::chrono::steady_clock::duration* fetch_time);

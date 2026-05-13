@@ -72,15 +72,15 @@ void write_view_profile(const ViewProfile& profile, Clock::duration total_time, 
         << milliseconds(total_time) << '\t' << profile.stdout_bytes << '\n';
 }
 
-int run_view(const std::filesystem::path& input, const std::string& region, std::ostream& out,
-             std::ostream& err) {
+int run_view(const std::filesystem::path& input, const std::string& region,
+             std::optional<int> hts_threads, std::ostream& out, std::ostream& err) {
     const bool profile_enabled = view_profile_enabled();
     const auto total_start = profile_enabled ? Clock::now() : Clock::time_point{};
 
     ViewProfile profile;
     io::BamOpenProfile open_profile;
-    auto reader = profile_enabled ? io::BamReader::open_profiled(input, open_profile)
-                                  : io::BamReader::open(input);
+    auto reader = profile_enabled ? io::BamReader::open_profiled(input, open_profile, hts_threads)
+                                  : io::BamReader::open(input, hts_threads);
     profile.open_time = open_profile.open_time;
     profile.header_time = open_profile.header_time;
     profile.index_time = open_profile.index_time;
@@ -290,10 +290,13 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
 
     std::filesystem::path view_input;
     std::string view_region;
+    int view_hts_threads = -1;
 
     auto* view = app.add_subcommand("view", "Output SAM records for a BAM region");
     view->add_option("input", view_input, "Input BAM file")->required()->check(::CLI::ExistingFile);
     view->add_option("region", view_region, "Genomic region, for example chr1:1-1000")->required();
+    view->add_option("--hts-threads", view_hts_threads,
+                     "HTSlib worker threads for BAM/CRAM I/O; overrides ALIGNX_HTS_THREADS");
 
     std::filesystem::path stats_input;
     auto* stats = app.add_subcommand("stats", "Output basic BAM statistics as TSV");
@@ -316,7 +319,13 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     }
 
     if (*view) {
-        return run_view(view_input, view_region, out, err);
+        if (view_hts_threads < -1) {
+            err << "alignx view: --hts-threads must be a non-negative integer\n";
+            return 1;
+        }
+        const auto hts_threads =
+            view_hts_threads >= 0 ? std::optional<int>{view_hts_threads} : std::nullopt;
+        return run_view(view_input, view_region, hts_threads, out, err);
     }
     if (*stats) {
         return run_stats(stats_input, out, err);

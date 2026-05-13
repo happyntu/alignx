@@ -61,7 +61,14 @@ std::expected<bool, std::string> read_next_raw_record(samFile* file, bam_hdr_t* 
     return std::unexpected("failed while reading BAM record");
 }
 
-std::expected<int, std::string> configured_hts_threads() {
+std::expected<int, std::string> configured_hts_threads(std::optional<int> override_threads) {
+    if (override_threads.has_value()) {
+        if (*override_threads < 0) {
+            return std::unexpected("HTSlib thread count must be a non-negative integer");
+        }
+        return *override_threads;
+    }
+
 #ifdef _WIN32
     std::size_t required_size = 0;
     getenv_s(&required_size, nullptr, 0, "ALIGNX_HTS_THREADS");
@@ -142,17 +149,20 @@ BamReader::BamReader(BamReader&&) noexcept = default;
 
 BamReader& BamReader::operator=(BamReader&&) noexcept = default;
 
-std::expected<BamReader, std::string> BamReader::open(const std::filesystem::path& path) {
-    return open_impl(path, nullptr);
+std::expected<BamReader, std::string> BamReader::open(const std::filesystem::path& path,
+                                                      std::optional<int> hts_threads) {
+    return open_impl(path, nullptr, hts_threads);
 }
 
 std::expected<BamReader, std::string> BamReader::open_profiled(const std::filesystem::path& path,
-                                                               BamOpenProfile& profile) {
-    return open_impl(path, &profile);
+                                                               BamOpenProfile& profile,
+                                                               std::optional<int> hts_threads) {
+    return open_impl(path, &profile, hts_threads);
 }
 
 std::expected<BamReader, std::string> BamReader::open_impl(const std::filesystem::path& path,
-                                                           BamOpenProfile* profile) {
+                                                           BamOpenProfile* profile,
+                                                           std::optional<int> hts_threads) {
 #ifdef ALIGNX_HAVE_HTSLIB
     BamReader reader;
     reader.impl_->path = path;
@@ -168,7 +178,7 @@ std::expected<BamReader, std::string> BamReader::open_impl(const std::filesystem
         return std::unexpected("failed to open BAM file: " + path_string);
     }
 
-    auto threads = configured_hts_threads();
+    auto threads = configured_hts_threads(hts_threads);
     if (!threads) {
         return std::unexpected(threads.error());
     }

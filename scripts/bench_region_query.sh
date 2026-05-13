@@ -11,6 +11,7 @@ WARMUP=0
 REPEATS=1
 PREPARE_AXF_INDEX=1
 AXF_INDEX_OUTPUT=""
+ALIGNX_HTS_THREADS=""
 
 usage() {
   cat <<'USAGE'
@@ -28,6 +29,8 @@ Options:
   --repeats <n>      measured iterations written to TSV (default: 1)
   --axf-index-output <path>
                      keep the generated AXF index at this path
+  --alignx-hts-threads <n>
+                     pass --hts-threads <n> to alignx view only
   --skip-axf-index   skip alignx index preflight before timing
   -h, --help         show this help
 USAGE
@@ -69,6 +72,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --axf-index-output)
       AXF_INDEX_OUTPUT="$2"
+      shift 2
+      ;;
+    --alignx-hts-threads)
+      ALIGNX_HTS_THREADS="$2"
       shift 2
       ;;
     --skip-axf-index)
@@ -265,6 +272,9 @@ write_summary() {
 
 require_nonnegative_integer "--warmup" "$WARMUP"
 require_nonnegative_integer "--repeats" "$REPEATS"
+if [[ -n "$ALIGNX_HTS_THREADS" ]]; then
+  require_nonnegative_integer "--alignx-hts-threads" "$ALIGNX_HTS_THREADS"
+fi
 if [[ "$REPEATS" -lt 1 ]]; then
   echo "--repeats must be at least 1" >&2
   exit 2
@@ -326,7 +336,13 @@ run_pair() {
   : >"$samtools_stderr"
 
   local alignx_result samtools_result
-  alignx_result="$(run_timed "$run_id" alignx "$ALIGNX" "$alignx_stdout" "$alignx_stderr" view "$INPUT_BAM" "$REGION")"
+  local alignx_args=(view)
+  if [[ -n "$ALIGNX_HTS_THREADS" ]]; then
+    alignx_args+=(--hts-threads "$ALIGNX_HTS_THREADS")
+  fi
+  alignx_args+=("$INPUT_BAM" "$REGION")
+
+  alignx_result="$(run_timed "$run_id" alignx "$ALIGNX" "$alignx_stdout" "$alignx_stderr" "${alignx_args[@]}")"
   samtools_result="$(run_timed "$run_id" samtools "$SAMTOOLS" "$samtools_stdout" "$samtools_stderr" view "$INPUT_BAM" "$REGION")"
 
   if [[ -s "$alignx_stderr" ]]; then

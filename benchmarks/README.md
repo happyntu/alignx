@@ -67,6 +67,7 @@ export ALIGNX_HTS_THREADS=2
   --alignx build/wsl-release/alignx \
   --input "$ALIGNX_BENCH_BAM" \
   --region chr1:1000000-2000000 \
+  --alignx-hts-threads 2 \
   --warmup 1 \
   --repeats 5 \
   --output benchmarks/results/phase1_view_chr1_samtools.tsv

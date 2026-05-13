@@ -178,6 +178,19 @@ TEST(Cli, ViewProfileWritesOnlyToStderr) {
     EXPECT_NE(err.str().find("\t130\n"), std::string::npos);
 }
 
+TEST(Cli, ViewAcceptsHtsThreadsOption) {
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code =
+        run_cli({"alignx", "view", "--hts-threads", "1", toy_bam_path().string(), "chrToy:1-250"},
+                out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(out.str(),
+              "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n"
+              "read002\t16\tchrToy\t151\t50\t5M1I4M\t*\t0\t0\tTTTTACGGGA\tFFFFFFFFFF\tNM:i:1\n");
+}
+
 TEST(Cli, StatsOutputsToyBamSummary) {
     std::ostringstream out;
     std::ostringstream err;
