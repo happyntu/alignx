@@ -142,6 +142,34 @@ TEST(Cli, IndexReportsMissingBamIndex) {
     std::filesystem::remove_all(temp_dir);
 }
 
+TEST(Cli, ViewOutputsToyAxfRegionRecords) {
+    const auto temp_dir = make_temp_dir("alignx_cli_view_axf");
+    const auto input = temp_dir / "toy.axf";
+    const std::string payload =
+        "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n"
+        "read002\t16\tchrToy\t151\t50\t5M1I4M\t*\t0\t0\tTTTTACGGGA\tFFFFFFFFFF\tNM:i:1\n";
+    alignx::format::AxfFile file{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .blocks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 159,
+                    .record_count = 2,
+                    .payload = std::vector<unsigned char>(payload.begin(), payload.end())}}};
+    auto write = alignx::format::write_axf_file(file, input);
+    ASSERT_TRUE(write) << write.error();
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "view", input.string(), "chrToy:151-155"}, out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(err.str(), "");
+    EXPECT_EQ(out.str(),
+              "read002\t16\tchrToy\t151\t50\t5M1I4M\t*\t0\t0\tTTTTACGGGA\tFFFFFFFFFF\tNM:i:1\n");
+
+    std::filesystem::remove_all(temp_dir);
+}
+
 #ifdef ALIGNX_HAVE_HTSLIB
 
 TEST(Cli, ConvertWritesToyAxfMvp) {
@@ -166,6 +194,35 @@ TEST(Cli, ConvertWritesToyAxfMvp) {
     EXPECT_EQ(axf->references[0].name, "chrToy");
     ASSERT_EQ(axf->blocks.size(), 1);
     EXPECT_EQ(axf->blocks[0].record_count, 2);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ConvertThenViewToyAxfMatchesBamView) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_view");
+    const auto output = temp_dir / "toy.axf";
+
+    std::ostringstream convert_out;
+    std::ostringstream convert_err;
+    const int convert_code =
+        run_cli({"alignx", "convert", toy_bam_path().string(), "-o", output.string()}, convert_out,
+                convert_err);
+    ASSERT_EQ(convert_code, 0) << convert_err.str();
+
+    std::ostringstream bam_out;
+    std::ostringstream bam_err;
+    const int bam_code =
+        run_cli({"alignx", "view", toy_bam_path().string(), "chrToy:1-250"}, bam_out, bam_err);
+    ASSERT_EQ(bam_code, 0) << bam_err.str();
+
+    std::ostringstream axf_out;
+    std::ostringstream axf_err;
+    const int axf_code =
+        run_cli({"alignx", "view", output.string(), "chrToy:1-250"}, axf_out, axf_err);
+
+    EXPECT_EQ(axf_code, 0) << axf_err.str();
+    EXPECT_EQ(axf_err.str(), "");
+    EXPECT_EQ(axf_out.str(), bam_out.str());
 
     std::filesystem::remove_all(temp_dir);
 }

@@ -217,7 +217,8 @@ For v0.1:
 - BAM reading only for production query paths (no CRAM yet).
 - HTSlib wrapper in `src/io/`, BAI reader in `src/index/`.
 - AXFIndex v1: sorted interval list (no interval tree yet).
-- `alignx view` and `alignx stats` BAM subcommands.
+- `alignx view` supports BAM plus AXF0 MVP row-preserving payloads for toy correctness;
+  `alignx stats` remains BAM-only.
 - AXF0 MVP staging is allowed per ADR-005: `alignx convert <bam> -o <axf>` may write
   row-preserving SAM-line payloads for toy correctness before the final columnar
   AXF codec path is implemented.

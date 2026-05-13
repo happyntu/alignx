@@ -56,15 +56,19 @@ region-query correctness.
 ```
 alignx convert sample.bam -o sample.axf
   → io:  BamReader::stream_all()
-  → convert: AxfEncoder::begin_chunk(reference_id, start)
-  → compress: QualCodec::encode(qual), CigarDelta::encode(cigar)
-              PosStream::encode(pos), ReadNameDict::encode(qname)
-  → format: AxfChunkWriter::flush(block)
-  → index:  AXFIndex::add_chunk(chunk_meta)
-  → format: AxfFileWriter::finalize(index)
+  → convert: collect mapped records into per-reference AXF0 MVP blocks
+  → format: write AXF0 header, reference metadata, payload bytes, block index
 ```
 
-### AXF region query (v0.3+)
+### AXF region query (v0.3 MVP)
+```
+alignx view sample.axf chr1:1M-2M
+  → format: read AXF0 header, reference metadata, payload bytes, block index
+  → query:  select overlapping blocks and filter row-preserving SAM payloads
+  → cli:    print matching SAM records to stdout
+```
+
+### AXF region query (future columnar path)
 ```
 alignx view sample.axf chr1:1M-2M
   → index: AXFIndex::query(interval) → [chunk_offset, ...]

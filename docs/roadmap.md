@@ -52,9 +52,9 @@ and region-query correctness.
 
 **Deliverables:**
 
-- [ ] AXF MVP file header, reference metadata, block payloads, and block index
-- [ ] `alignx convert <bam> -o <axf>` MVP
-- [ ] `alignx view <axf> <region>` MVP with toy stdout parity
+- [x] AXF MVP file header, reference metadata, block payloads, and block index
+- [x] `alignx convert <bam> -o <axf>` MVP
+- [x] `alignx view <axf> <region>` MVP with toy stdout parity
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec: POS varint delta, FLAG bit-pack, MAPQ byte/RLE, SEQ reference-delta 2-bit
