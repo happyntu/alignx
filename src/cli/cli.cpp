@@ -29,7 +29,10 @@ using Clock = std::chrono::steady_clock;
 struct ViewProfile {
     std::uint64_t records = 0;
     std::uint64_t stdout_bytes = 0;
-    Clock::duration setup_time{};
+    Clock::duration open_time{};
+    Clock::duration header_time{};
+    Clock::duration index_time{};
+    Clock::duration fetch_time{};
     Clock::duration read_time{};
     Clock::duration format_time{};
     Clock::duration write_time{};
@@ -60,11 +63,13 @@ double milliseconds(Clock::duration duration) {
 }
 
 void write_view_profile(const ViewProfile& profile, Clock::duration total_time, std::ostream& err) {
-    err << "profile\trecords\tsetup_ms\tread_ms\tformat_ms\twrite_ms\ttotal_ms\tstdout_bytes\n";
-    err << "view\t" << profile.records << '\t' << milliseconds(profile.setup_time) << '\t'
-        << milliseconds(profile.read_time) << '\t' << milliseconds(profile.format_time) << '\t'
-        << milliseconds(profile.write_time) << '\t' << milliseconds(total_time) << '\t'
-        << profile.stdout_bytes << '\n';
+    err << "profile\trecords\topen_ms\theader_ms\tindex_ms\tfetch_ms\tread_ms\tformat_ms\twrite_ms"
+           "\ttotal_ms\tstdout_bytes\n";
+    err << "view\t" << profile.records << '\t' << milliseconds(profile.open_time) << '\t'
+        << milliseconds(profile.header_time) << '\t' << milliseconds(profile.index_time) << '\t'
+        << milliseconds(profile.fetch_time) << '\t' << milliseconds(profile.read_time) << '\t'
+        << milliseconds(profile.format_time) << '\t' << milliseconds(profile.write_time) << '\t'
+        << milliseconds(total_time) << '\t' << profile.stdout_bytes << '\n';
 }
 
 int run_view(const std::filesystem::path& input, const std::string& region, std::ostream& out,
@@ -72,13 +77,20 @@ int run_view(const std::filesystem::path& input, const std::string& region, std:
     const bool profile_enabled = view_profile_enabled();
     const auto total_start = profile_enabled ? Clock::now() : Clock::time_point{};
 
-    auto reader = io::BamReader::open(input);
+    ViewProfile profile;
+    io::BamOpenProfile open_profile;
+    auto reader = profile_enabled ? io::BamReader::open_profiled(input, open_profile)
+                                  : io::BamReader::open(input);
+    profile.open_time = open_profile.open_time;
+    profile.header_time = open_profile.header_time;
+    profile.index_time = open_profile.index_time;
     if (!reader) {
         err << "alignx view: " << reader.error() << '\n';
         return 1;
     }
 
-    auto fetch = reader->fetch(region);
+    auto fetch = profile_enabled ? reader->fetch_profiled(region, profile.fetch_time)
+                                 : reader->fetch(region);
     if (!fetch) {
         err << "alignx view: " << fetch.error() << '\n';
         return 1;
@@ -104,8 +116,6 @@ int run_view(const std::filesystem::path& input, const std::string& region, std:
         return 0;
     }
 
-    ViewProfile profile;
-    profile.setup_time = Clock::now() - total_start;
     for (;;) {
         io::SamLineProfile line_profile;
         auto line = reader->next_sam_line_view_profiled(line_profile);

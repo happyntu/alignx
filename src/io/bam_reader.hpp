@@ -28,6 +28,12 @@ struct SamLineProfile {
     std::chrono::steady_clock::duration format_time{};
 };
 
+struct BamOpenProfile {
+    std::chrono::steady_clock::duration open_time{};
+    std::chrono::steady_clock::duration header_time{};
+    std::chrono::steady_clock::duration index_time{};
+};
+
 class BamReader {
 public:
     BamReader();
@@ -40,8 +46,12 @@ public:
 
     [[nodiscard]] static std::expected<BamReader, std::string>
     open(const std::filesystem::path& path);
+    [[nodiscard]] static std::expected<BamReader, std::string>
+    open_profiled(const std::filesystem::path& path, BamOpenProfile& profile);
 
     [[nodiscard]] std::expected<void, std::string> fetch(std::string_view region);
+    [[nodiscard]] std::expected<void, std::string>
+    fetch_profiled(std::string_view region, std::chrono::steady_clock::duration& fetch_time);
     [[nodiscard]] std::expected<std::optional<BamRecord>, std::string> next_record();
     [[nodiscard]] std::expected<std::optional<std::string>, std::string> next_sam_line();
     [[nodiscard]] std::expected<std::optional<std::string_view>, std::string> next_sam_line_view();
@@ -52,6 +62,12 @@ public:
     [[nodiscard]] bool has_index() const noexcept;
 
 private:
+    [[nodiscard]] static std::expected<BamReader, std::string>
+    open_impl(const std::filesystem::path& path, BamOpenProfile* profile);
+
+    [[nodiscard]] std::expected<void, std::string>
+    fetch_impl(std::string_view region, std::chrono::steady_clock::duration* fetch_time);
+
     [[nodiscard]] std::expected<std::optional<std::string_view>, std::string>
     next_sam_line_view_impl(SamLineProfile* profile);
 

@@ -102,17 +102,37 @@ BamReader::BamReader(BamReader&&) noexcept = default;
 BamReader& BamReader::operator=(BamReader&&) noexcept = default;
 
 std::expected<BamReader, std::string> BamReader::open(const std::filesystem::path& path) {
+    return open_impl(path, nullptr);
+}
+
+std::expected<BamReader, std::string> BamReader::open_profiled(const std::filesystem::path& path,
+                                                               BamOpenProfile& profile) {
+    return open_impl(path, &profile);
+}
+
+std::expected<BamReader, std::string> BamReader::open_impl(const std::filesystem::path& path,
+                                                           BamOpenProfile* profile) {
 #ifdef ALIGNX_HAVE_HTSLIB
     BamReader reader;
     reader.impl_->path = path;
 
     const auto path_string = path.string();
+    const auto open_start = profile != nullptr ? std::chrono::steady_clock::now()
+                                               : std::chrono::steady_clock::time_point{};
     reader.impl_->file = sam_open(path_string.c_str(), "r");
+    if (profile != nullptr) {
+        profile->open_time += std::chrono::steady_clock::now() - open_start;
+    }
     if (reader.impl_->file == nullptr) {
         return std::unexpected("failed to open BAM file: " + path_string);
     }
 
+    const auto header_start = profile != nullptr ? std::chrono::steady_clock::now()
+                                                 : std::chrono::steady_clock::time_point{};
     reader.impl_->header = sam_hdr_read(reader.impl_->file);
+    if (profile != nullptr) {
+        profile->header_time += std::chrono::steady_clock::now() - header_start;
+    }
     if (reader.impl_->header == nullptr) {
         return std::unexpected("failed to read BAM header: " + path_string);
     }
@@ -122,15 +142,32 @@ std::expected<BamReader, std::string> BamReader::open(const std::filesystem::pat
         return std::unexpected("failed to allocate BAM record");
     }
 
+    const auto index_start = profile != nullptr ? std::chrono::steady_clock::now()
+                                                : std::chrono::steady_clock::time_point{};
     reader.impl_->index = sam_index_load(reader.impl_->file, path_string.c_str());
+    if (profile != nullptr) {
+        profile->index_time += std::chrono::steady_clock::now() - index_start;
+    }
     return reader;
 #else
     (void)path;
+    (void)profile;
     return std::unexpected("alignx was built without HTSlib support");
 #endif
 }
 
 std::expected<void, std::string> BamReader::fetch(std::string_view region) {
+    return fetch_impl(region, nullptr);
+}
+
+std::expected<void, std::string>
+BamReader::fetch_profiled(std::string_view region,
+                          std::chrono::steady_clock::duration& fetch_time) {
+    return fetch_impl(region, &fetch_time);
+}
+
+std::expected<void, std::string>
+BamReader::fetch_impl(std::string_view region, std::chrono::steady_clock::duration* fetch_time) {
 #ifdef ALIGNX_HAVE_HTSLIB
     if (impl_->index == nullptr) {
         return std::unexpected("BAM index is not available for: " + impl_->path.string());
@@ -139,8 +176,13 @@ std::expected<void, std::string> BamReader::fetch(std::string_view region) {
     destroy_iter(impl_->iter);
     impl_->iter = nullptr;
 
+    const auto fetch_start = fetch_time != nullptr ? std::chrono::steady_clock::now()
+                                                   : std::chrono::steady_clock::time_point{};
     const std::string region_string(region);
     impl_->iter = sam_itr_querys(impl_->index, impl_->header, region_string.c_str());
+    if (fetch_time != nullptr) {
+        *fetch_time += std::chrono::steady_clock::now() - fetch_start;
+    }
     if (impl_->iter == nullptr) {
         return std::unexpected("failed to query BAM region: " + region_string);
     }
@@ -148,6 +190,7 @@ std::expected<void, std::string> BamReader::fetch(std::string_view region) {
     return {};
 #else
     (void)region;
+    (void)fetch_time;
     return std::unexpected("alignx was built without HTSlib support");
 #endif
 }
