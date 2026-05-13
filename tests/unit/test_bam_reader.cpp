@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -12,6 +13,22 @@ std::filesystem::path toy_bam_path() {
     return std::filesystem::path(TEST_DATA_DIR) / "toy_alignment.sorted.bam";
 }
 
+void set_env_var(const char* name, const char* value) {
+#ifdef _WIN32
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 1);
+#endif
+}
+
+void unset_env_var(const char* name) {
+#ifdef _WIN32
+    _putenv_s(name, "");
+#else
+    unsetenv(name);
+#endif
+}
+
 #ifdef ALIGNX_HAVE_HTSLIB
 
 TEST(BamReader, OpensToyBamAndLoadsIndex) {
@@ -20,6 +37,28 @@ TEST(BamReader, OpensToyBamAndLoadsIndex) {
 
     EXPECT_EQ(reader->reference_count(), 1);
     EXPECT_TRUE(reader->has_index());
+}
+
+TEST(BamReader, OpensToyBamWithConfiguredHtsThreads) {
+    set_env_var("ALIGNX_HTS_THREADS", "1");
+
+    auto reader = alignx::io::BamReader::open(toy_bam_path());
+
+    unset_env_var("ALIGNX_HTS_THREADS");
+
+    ASSERT_TRUE(reader) << reader.error();
+    EXPECT_TRUE(reader->has_index());
+}
+
+TEST(BamReader, RejectsInvalidConfiguredHtsThreads) {
+    set_env_var("ALIGNX_HTS_THREADS", "not-an-integer");
+
+    auto reader = alignx::io::BamReader::open(toy_bam_path());
+
+    unset_env_var("ALIGNX_HTS_THREADS");
+
+    ASSERT_FALSE(reader);
+    EXPECT_NE(reader.error().find("ALIGNX_HTS_THREADS"), std::string::npos);
 }
 
 TEST(BamReader, StreamsAllToyRecords) {

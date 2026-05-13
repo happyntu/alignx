@@ -1,6 +1,9 @@
 #include "io/bam_reader.hpp"
 
+#include <charconv>
 #include <cstdlib>
+#include <limits>
+#include <string>
 #include <utility>
 
 #ifdef ALIGNX_HAVE_HTSLIB
@@ -56,6 +59,44 @@ std::expected<bool, std::string> read_next_raw_record(samFile* file, bam_hdr_t* 
         return false;
     }
     return std::unexpected("failed while reading BAM record");
+}
+
+std::expected<int, std::string> configured_hts_threads() {
+#ifdef _WIN32
+    std::size_t required_size = 0;
+    getenv_s(&required_size, nullptr, 0, "ALIGNX_HTS_THREADS");
+    if (required_size == 0) {
+        return 0;
+    }
+
+    std::string value(required_size, '\0');
+    getenv_s(&required_size, value.data(), value.size(), "ALIGNX_HTS_THREADS");
+    if (!value.empty() && value.back() == '\0') {
+        value.pop_back();
+    }
+#else
+    const char* raw_value = std::getenv("ALIGNX_HTS_THREADS");
+    if (raw_value == nullptr) {
+        return 0;
+    }
+    std::string value(raw_value);
+#endif
+
+    if (value.empty() || value == "0") {
+        return 0;
+    }
+
+    int threads = 0;
+    const auto* first = value.data();
+    const auto* last = value.data() + value.size();
+    const auto parse = std::from_chars(first, last, threads);
+    if (parse.ec != std::errc{} || parse.ptr != last || threads < 0) {
+        return std::unexpected("ALIGNX_HTS_THREADS must be a non-negative integer");
+    }
+    if (threads > std::numeric_limits<int>::max()) {
+        return std::unexpected("ALIGNX_HTS_THREADS is too large");
+    }
+    return threads;
 }
 
 } // namespace
@@ -125,6 +166,14 @@ std::expected<BamReader, std::string> BamReader::open_impl(const std::filesystem
     }
     if (reader.impl_->file == nullptr) {
         return std::unexpected("failed to open BAM file: " + path_string);
+    }
+
+    auto threads = configured_hts_threads();
+    if (!threads) {
+        return std::unexpected(threads.error());
+    }
+    if (*threads > 0 && hts_set_threads(reader.impl_->file, *threads) != 0) {
+        return std::unexpected("failed to configure HTSlib threads");
     }
 
     const auto header_start = profile != nullptr ? std::chrono::steady_clock::now()

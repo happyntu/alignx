@@ -54,6 +54,9 @@ For a caller-provided real BAM:
 
 ```bash
 export ALIGNX_BENCH_BAM=/path/to/sample.bam
+# Optional: let HTSlib use worker threads for BAM/CRAM I/O.
+# Leave unset or set to 0 for the single-threaded baseline.
+export ALIGNX_HTS_THREADS=2
 
 ./scripts/check_benchmark_input.sh \
   --alignx build/wsl-release/alignx \
