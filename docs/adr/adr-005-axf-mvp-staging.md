@@ -126,6 +126,23 @@ SAM-compatible 1-based closed intervals and are converted at query boundaries.
    path unchanged.
 6. Add toy correctness tests before any real-BAM performance work.
 
+## Implementation Status
+
+As of 2026-05-14, the AXF0 closed loop is implemented:
+
+- `src/format/axf_file.hpp/.cpp` reads and writes the AXF0 MVP file shape.
+- `src/convert/bam_to_axf.hpp/.cpp` converts mapped BAM records into
+  row-preserving AXF0 blocks.
+- `src/query/axf_view.hpp/.cpp` handles AXF0 region query and SAM payload
+  filtering.
+- `alignx convert <bam> -o <axf>` and `alignx view <axf> <region>` are wired
+  through the CLI.
+- Tests cover toy conversion, AXF view, and BAM -> AXF -> view stdout parity.
+
+This status does not change the long-term ADR-002 columnar target. AXF0 remains
+a correctness staging format and should not be used for final compression-ratio
+or performance claims.
+
 ---
 
 ## Consequences
