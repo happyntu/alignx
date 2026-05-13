@@ -46,15 +46,16 @@ materially improve the result.
 
 ## Current Smoke Benchmark
 
-A 30-repeat local smoke benchmark with `ALIGNX_HTS_THREADS=2` showed:
+A 30-repeat local smoke benchmark using the script-level
+`--alignx-hts-threads 2` option showed:
 
 | Tool | Runs | Median ms | P95 ms | Stdout bytes |
 |---|---:|---:|---:|---:|
-| alignx | 30 | 41.125 | 43.686 | 8,509,628 |
-| samtools | 30 | 57.936 | 66.962 | 8,509,628 |
+| alignx | 30 | 41.570 | 50.119 | 8,509,628 |
+| samtools | 30 | 57.399 | 61.794 | 8,509,628 |
 
-This is about a 1.4x median speedup for the current BAM-backed path on this
-smoke workload.
+All runs had zero nonzero exits and identical stdout byte counts. This is about
+a 1.38x median speedup for the current BAM-backed path on this smoke workload.
 
 ## Decision
 
