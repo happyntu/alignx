@@ -41,6 +41,45 @@ TEST(BamToAxf, ConvertsToyBamToAxfMvp) {
     std::filesystem::remove(path);
 }
 
+TEST(BamToAxf, ConvertsOnlyRequestedRegion) {
+    const auto path = std::filesystem::temp_directory_path() / "alignx_toy_convert_region.axf";
+
+    auto convert = alignx::convert::convert_bam_to_axf_mvp(toy_bam_path(), path, "chrToy:1-120");
+    ASSERT_TRUE(convert) << convert.error();
+
+    auto axf = alignx::format::read_axf_file(path);
+    ASSERT_TRUE(axf) << axf.error();
+
+    ASSERT_EQ(axf->references.size(), 1);
+    ASSERT_EQ(axf->blocks.size(), 1);
+    EXPECT_EQ(axf->blocks[0].start_pos, 100);
+    EXPECT_EQ(axf->blocks[0].end_pos, 110);
+    EXPECT_EQ(axf->blocks[0].record_count, 1);
+
+    const std::string payload(axf->blocks[0].payload.begin(), axf->blocks[0].payload.end());
+    EXPECT_EQ(payload,
+              "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n");
+
+    std::filesystem::remove(path);
+}
+
+TEST(BamToAxf, ConvertsEmptyRegionToAxfWithReferencesAndNoBlocks) {
+    const auto path =
+        std::filesystem::temp_directory_path() / "alignx_toy_convert_empty_region.axf";
+
+    auto convert = alignx::convert::convert_bam_to_axf_mvp(toy_bam_path(), path, "chrToy:251-260");
+    ASSERT_TRUE(convert) << convert.error();
+
+    auto axf = alignx::format::read_axf_file(path);
+    ASSERT_TRUE(axf) << axf.error();
+
+    ASSERT_EQ(axf->references.size(), 1);
+    EXPECT_EQ(axf->references[0].name, "chrToy");
+    EXPECT_TRUE(axf->blocks.empty());
+
+    std::filesystem::remove(path);
+}
+
 #endif
 
 } // namespace

@@ -197,8 +197,8 @@ int run_stats(const std::filesystem::path& input, std::ostream& out, std::ostrea
 }
 
 int run_convert(const std::filesystem::path& input, const std::filesystem::path& output,
-                std::ostream& out, std::ostream& err) {
-    auto conversion = convert::convert_bam_to_axf_mvp(input, output);
+                const std::optional<std::string>& region, std::ostream& out, std::ostream& err) {
+    auto conversion = convert::convert_bam_to_axf_mvp(input, output, region);
     if (!conversion) {
         err << "alignx convert: " << conversion.error() << '\n';
         return 1;
@@ -206,6 +206,9 @@ int run_convert(const std::filesystem::path& input, const std::filesystem::path&
 
     out << "input\t" << input.string() << '\n';
     out << "output\t" << output.string() << '\n';
+    if (region.has_value()) {
+        out << "region\t" << *region << '\n';
+    }
     out << "format\tAXF0\n";
     return 0;
 }
@@ -344,11 +347,14 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
 
     std::filesystem::path convert_input;
     std::filesystem::path convert_output;
+    std::optional<std::string> convert_region;
     auto* convert_cmd = app.add_subcommand("convert", "Convert BAM to AXF MVP format");
     convert_cmd->add_option("input", convert_input, "Input BAM file")
         ->required()
         ->check(::CLI::ExistingFile);
     convert_cmd->add_option("-o,--output", convert_output, "Output AXF file")->required();
+    convert_cmd->add_option("--region", convert_region,
+                            "Optional BAM region to convert, for example chr1:1-1000");
 
     std::filesystem::path index_input;
     std::filesystem::path index_output;
@@ -377,7 +383,7 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
         return run_stats(stats_input, out, err);
     }
     if (*convert_cmd) {
-        return run_convert(convert_input, convert_output, out, err);
+        return run_convert(convert_input, convert_output, convert_region, out, err);
     }
     if (*index_cmd) {
         return run_index(index_input, index_output, out, err);

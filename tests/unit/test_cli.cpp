@@ -331,6 +331,66 @@ TEST(Cli, ConvertThenViewToyAxfMatchesBamView) {
     std::filesystem::remove_all(temp_dir);
 }
 
+TEST(Cli, ConvertRegionWritesOnlyRequestedToyRecord) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_region");
+    const auto output = temp_dir / "toy.axf";
+
+    std::ostringstream convert_out;
+    std::ostringstream convert_err;
+    const int convert_code = run_cli({"alignx", "convert", toy_bam_path().string(), "-o",
+                                      output.string(), "--region", "chrToy:151-160"},
+                                     convert_out, convert_err);
+    ASSERT_EQ(convert_code, 0) << convert_err.str();
+    EXPECT_EQ(convert_err.str(), "");
+    EXPECT_NE(convert_out.str().find("region\tchrToy:151-160"), std::string::npos);
+
+    auto axf = alignx::format::read_axf_file(output);
+    ASSERT_TRUE(axf) << axf.error();
+    ASSERT_EQ(axf->blocks.size(), 1);
+    EXPECT_EQ(axf->blocks[0].record_count, 1);
+
+    std::ostringstream view_out;
+    std::ostringstream view_err;
+    const int view_code =
+        run_cli({"alignx", "view", output.string(), "chrToy:1-250"}, view_out, view_err);
+
+    EXPECT_EQ(view_code, 0) << view_err.str();
+    EXPECT_EQ(view_err.str(), "");
+    EXPECT_EQ(view_out.str(),
+              "read002\t16\tchrToy\t151\t50\t5M1I4M\t*\t0\t0\tTTTTACGGGA\tFFFFFFFFFF\tNM:i:1\n");
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ConvertRegionWritesEmptyAxfForNoHitToyRegion) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_region_empty");
+    const auto output = temp_dir / "toy.axf";
+
+    std::ostringstream convert_out;
+    std::ostringstream convert_err;
+    const int convert_code = run_cli({"alignx", "convert", toy_bam_path().string(), "-o",
+                                      output.string(), "--region", "chrToy:251-260"},
+                                     convert_out, convert_err);
+    ASSERT_EQ(convert_code, 0) << convert_err.str();
+    EXPECT_EQ(convert_err.str(), "");
+
+    auto axf = alignx::format::read_axf_file(output);
+    ASSERT_TRUE(axf) << axf.error();
+    ASSERT_EQ(axf->references.size(), 1);
+    EXPECT_TRUE(axf->blocks.empty());
+
+    std::ostringstream view_out;
+    std::ostringstream view_err;
+    const int view_code =
+        run_cli({"alignx", "view", output.string(), "chrToy:251-260"}, view_out, view_err);
+
+    EXPECT_EQ(view_code, 0) << view_err.str();
+    EXPECT_EQ(view_out.str(), "");
+    EXPECT_EQ(view_err.str(), "");
+
+    std::filesystem::remove_all(temp_dir);
+}
+
 TEST(Cli, ViewOutputsToyRegionRecords) {
     std::ostringstream out;
     std::ostringstream err;

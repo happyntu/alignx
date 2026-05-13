@@ -1,6 +1,8 @@
 #include "convert/bam_to_axf.hpp"
 
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -42,10 +44,18 @@ void append_line(PendingBlock& block, std::string_view line, const io::BamRecord
 } // namespace
 
 std::expected<void, std::string> convert_bam_to_axf_mvp(const std::filesystem::path& input_bam,
-                                                        const std::filesystem::path& output_axf) {
+                                                        const std::filesystem::path& output_axf,
+                                                        const std::optional<std::string>& region) {
     auto reader = io::BamReader::open(input_bam);
     if (!reader) {
         return std::unexpected(reader.error());
+    }
+
+    if (region.has_value()) {
+        auto fetch = reader->fetch(*region);
+        if (!fetch) {
+            return std::unexpected(fetch.error());
+        }
     }
 
     auto references = reader->references();

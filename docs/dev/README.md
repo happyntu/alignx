@@ -104,6 +104,8 @@ supported Windows HTSlib strategy is selected.
 Use `scripts/smoke_axf_roundtrip.sh` to verify that a BAM region and the AXF0
 MVP converted from that BAM produce identical SAM stdout for the same region.
 This script performs no timing, repeats, profiling, or benchmark reporting.
+The script passes the same region to `alignx convert --region`, so it does not
+convert the whole BAM.
 
 ```bash
 mamba run -n alignx-dev cmake --build --preset wsl-release
@@ -116,6 +118,6 @@ ALIGNX_BIN=build/wsl-release/alignx \
 ```
 
 For real BAMs, choose a work directory with enough space because the script
-writes an AXF file plus BAM/AXF SAM outputs. For large datasets, prefer running
-the smoke on `missmi-server00` under `/mypool/alignx/` rather than growing the
-local WSL VHDX.
+writes an AXF file plus BAM/AXF SAM outputs for the requested region. For large
+datasets, prefer running the smoke on `missmi-server00` under `/mypool/alignx/`
+rather than growing the local WSL VHDX.

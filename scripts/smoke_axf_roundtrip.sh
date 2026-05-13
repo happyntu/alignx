@@ -12,7 +12,7 @@ Usage: scripts/smoke_axf_roundtrip.sh --input <bam> --region <region> --work-dir
 
 Correctness-only smoke check:
   1. alignx view <bam> <region> > bam.sam
-  2. alignx convert <bam> -o sample.axf
+  2. alignx convert <bam> -o sample.axf --region <region>
   3. alignx view sample.axf <region> > axf.sam
   4. diff -u bam.sam axf.sam > diff.txt
 
@@ -96,7 +96,7 @@ DIFF_OUT="$WORK_DIR/diff.txt"
 rm -f "$BAM_SAM" "$AXF_FILE" "$AXF_SAM" "$DIFF_OUT"
 
 "$ALIGNX" view "$INPUT_BAM" "$REGION" >"$BAM_SAM"
-"$ALIGNX" convert "$INPUT_BAM" -o "$AXF_FILE" >/dev/null
+"$ALIGNX" convert "$INPUT_BAM" -o "$AXF_FILE" --region "$REGION" >/dev/null
 "$ALIGNX" view "$AXF_FILE" "$REGION" >"$AXF_SAM"
 
 if ! diff -u "$BAM_SAM" "$AXF_SAM" >"$DIFF_OUT"; then

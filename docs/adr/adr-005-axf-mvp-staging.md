@@ -46,6 +46,8 @@ query correctness before introducing specialized column codecs.
 ### In Scope
 
 - `alignx convert <input.bam> -o <output.axf>`
+  - `--region <ref:start-end>` may be used for correctness smoke checks on
+    large BAMs without converting the whole file.
 - `alignx view <input.axf> <region>`
 - Toy BAM correctness:
   - `alignx view toy.axf chrToy:1-250`
