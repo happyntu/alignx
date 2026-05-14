@@ -43,12 +43,13 @@ def write_fixture(path: Path) -> None:
         (5, 5, 3, 1),  # CIGAR token
         (9, 4, 4, 1),  # SEQ 2-bit literal
         (10, 7, 5, 1),  # QUAL pack
-        (99, 77, 6, 1),  # unknown numeric fallback
+        (10, 8, 6, 1),  # QUAL pack compressed
+        (99, 77, 7, 1),  # unknown numeric fallback
     ]
     data.extend(CHUNK_HEADER.pack(0, 100, 160, records, len(columns)))
     for column in columns:
         data.extend(COLUMN_ENTRY.pack(*column))
-    data.extend(b"abcdefg")
+    data.extend(b"abcdefgh")
     chunk_length = len(data) - chunk_offset
 
     index_offset = len(data)
@@ -82,7 +83,8 @@ class InspectAxf1MetadataTest(unittest.TestCase):
             self.assertIn("0\t5\tcigar\t5\tcigar_token\t3\t1", columns)
             self.assertIn("0\t9\tsequence\t4\tseq_2bit_literal\t4\t1", columns)
             self.assertIn("0\t10\tquality\t7\tqual_pack\t5\t1", columns)
-            self.assertIn("0\t99\tunknown_99\t77\tunknown_77\t6\t1", columns)
+            self.assertIn("0\t10\tquality\t8\tqual_pack_compressed\t6\t1", columns)
+            self.assertIn("0\t99\tunknown_99\t77\tunknown_77\t7\t1", columns)
 
             codecs = self.run_inspector(fixture, "--column-codecs")
             self.assertIn("column_id\tcolumn_name\tcodec_id\tcodec_name\tchunk_count", codecs)
@@ -92,6 +94,7 @@ class InspectAxf1MetadataTest(unittest.TestCase):
             self.assertIn("5\tcigar\t5\tcigar_token\t1", codecs)
             self.assertIn("9\tsequence\t4\tseq_2bit_literal\t1", codecs)
             self.assertIn("10\tquality\t7\tqual_pack\t1", codecs)
+            self.assertIn("10\tquality\t8\tqual_pack_compressed\t1", codecs)
             self.assertIn("99\tunknown_99\t77\tunknown_77\t1", codecs)
 
 

@@ -39,11 +39,14 @@ class SummarizeAxf1ColumnsTest(unittest.TestCase):
                 "codec_distribution\tavg_payload_bytes_per_chunk\tpercent_payload",
                 summary,
             )
-            self.assertIn("2\tflag\t1\t1\t2:flag_bitpack:1\t1.000\t14.286", summary)
-            self.assertIn("5\tcigar\t1\t1\t5:cigar_token:1\t1.000\t14.286", summary)
-            self.assertIn("9\tsequence\t1\t1\t4:seq_2bit_literal:1\t1.000\t14.286", summary)
-            self.assertIn("10\tquality\t1\t1\t7:qual_pack:1\t1.000\t14.286", summary)
-            self.assertIn("99\tunknown_99\t1\t1\t77:unknown_77:1\t1.000\t14.286", summary)
+            self.assertIn("2\tflag\t1\t1\t2:flag_bitpack:1\t1.000\t12.500", summary)
+            self.assertIn("5\tcigar\t1\t1\t5:cigar_token:1\t1.000\t12.500", summary)
+            self.assertIn("9\tsequence\t1\t1\t4:seq_2bit_literal:1\t1.000\t12.500", summary)
+            self.assertIn(
+                "10\tquality\t2\t2\t7:qual_pack:1,8:qual_pack_compressed:1\t1.000\t25.000",
+                summary,
+            )
+            self.assertIn("99\tunknown_99\t1\t1\t77:unknown_77:1\t1.000\t12.500", summary)
 
 
 if __name__ == "__main__":

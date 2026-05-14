@@ -227,6 +227,28 @@ void replace_column_payload(std::vector<unsigned char>& data, std::size_t column
     write_u64_at(data, entry_offset + kColumnLengthOffset, replacement.size());
 }
 
+void expect_compressed_quality_payload_rejected(std::string_view label,
+                                                const std::vector<unsigned char>& envelope,
+                                                std::string_view expected_error) {
+    const auto path = temp_path(label);
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack_compressed));
+    replace_column_payload(data, kQualColumnIndex, envelope);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find(expected_error), std::string::npos) << read.error();
+
+    std::filesystem::remove(path);
+}
+
 template <typename Mutator>
 void expect_v2_metadata_corruption_rejected(std::string_view label, Mutator mutate,
                                             std::string_view expected_error) {
@@ -569,36 +591,12 @@ TEST(Axf1File, ReadsStoredCompressedQualPackEnvelope) {
 }
 
 TEST(Axf1File, RejectsUnsupportedCompressedPayloadCompression) {
-    const auto path = temp_path("alignx_axf1_unsupported_compressed_payload");
-    const auto file = make_file();
-
-    auto write = alignx::format::write_axf1_file(file, path);
-    ASSERT_TRUE(write) << write.error();
-
-    auto data = read_bytes(path);
-    const std::vector<unsigned char> envelope{7, 1, 0, 0};
-    write_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset,
-                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack_compressed));
-    replace_column_payload(data, kQualColumnIndex, envelope);
-    write_bytes(path, data);
-
-    auto read = alignx::format::read_axf1_file(path);
-    ASSERT_FALSE(read);
-    EXPECT_NE(read.error().find("unsupported AXF1 compressed payload compression"),
-              std::string::npos)
-        << read.error();
-
-    std::filesystem::remove(path);
+    expect_compressed_quality_payload_rejected("alignx_axf1_unsupported_compressed_payload",
+                                               {7, 1, 0, 0},
+                                               "unsupported AXF1 compressed payload compression");
 }
 
 TEST(Axf1File, RejectsCompressedPayloadSizeMismatch) {
-    const auto path = temp_path("alignx_axf1_compressed_payload_size_mismatch");
-    const auto file = make_file();
-
-    auto write = alignx::format::write_axf1_file(file, path);
-    ASSERT_TRUE(write) << write.error();
-
-    auto data = read_bytes(path);
     std::vector<unsigned char> envelope;
     append_varint_u64(envelope, static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack));
     append_varint_u64(envelope, 0);
@@ -606,17 +604,8 @@ TEST(Axf1File, RejectsCompressedPayloadSizeMismatch) {
     append_varint_u64(envelope, 4);
     envelope.insert(envelope.end(), {'\x01', 'F', '\x0a', '\x0a'});
 
-    write_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset,
-                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack_compressed));
-    replace_column_payload(data, kQualColumnIndex, envelope);
-    write_bytes(path, data);
-
-    auto read = alignx::format::read_axf1_file(path);
-    ASSERT_FALSE(read);
-    EXPECT_NE(read.error().find("AXF1 compressed payload size mismatch"), std::string::npos)
-        << read.error();
-
-    std::filesystem::remove(path);
+    expect_compressed_quality_payload_rejected("alignx_axf1_compressed_payload_size_mismatch",
+                                               envelope, "AXF1 compressed payload size mismatch");
 }
 
 TEST(Axf1File, RejectsUnsupportedCompressedQualBaseCodec) {
@@ -647,6 +636,42 @@ TEST(Axf1File, RejectsUnsupportedCompressedQualBaseCodec) {
         << read.error();
 
     std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedCompressedPayloadBaseCodec) {
+    expect_compressed_quality_payload_rejected("alignx_axf1_truncated_compressed_payload_base",
+                                               {0x80},
+                                               "truncated AXF1 compressed payload base codec");
+}
+
+TEST(Axf1File, RejectsTruncatedCompressedPayloadCompression) {
+    expect_compressed_quality_payload_rejected("alignx_axf1_truncated_compressed_payload_algorithm",
+                                               {7, 0x80},
+                                               "truncated AXF1 compressed payload compression");
+}
+
+TEST(Axf1File, RejectsTruncatedCompressedPayloadUncompressedSize) {
+    expect_compressed_quality_payload_rejected(
+        "alignx_axf1_truncated_compressed_payload_raw_size", {7, 0, 0x80},
+        "truncated AXF1 compressed payload uncompressed size");
+}
+
+TEST(Axf1File, RejectsTruncatedCompressedPayloadSize) {
+    expect_compressed_quality_payload_rejected("alignx_axf1_truncated_compressed_payload_size",
+                                               {7, 0, 4, 0x80},
+                                               "truncated AXF1 compressed payload size");
+}
+
+TEST(Axf1File, RejectsTruncatedCompressedPayloadBytes) {
+    expect_compressed_quality_payload_rejected("alignx_axf1_truncated_compressed_payload_bytes",
+                                               {7, 0, 5, 5, 1, 'F', 10, 10},
+                                               "truncated AXF1 compressed payload bytes");
+}
+
+TEST(Axf1File, RejectsCompressedPayloadTrailingBytes) {
+    expect_compressed_quality_payload_rejected("alignx_axf1_compressed_payload_trailing_bytes",
+                                               {7, 0, 4, 4, 1, 'F', 10, 10, 0},
+                                               "AXF1 compressed payload has trailing bytes");
 }
 
 TEST(Axf1File, KeepsQualRleWhenPackIsNotSmaller) {
