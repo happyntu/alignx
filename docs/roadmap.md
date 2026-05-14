@@ -70,9 +70,11 @@ and region-query correctness.
 - [x] AXF1 FLAG bit-pack smoke on HG002 chr1 small region
 - [x] AXF1 MAPQ RLE codec with raw fallback
 - [x] AXF1 MAPQ RLE smoke on HG002 chr1 small region
+- [x] AXF1 SEQ codec design note
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
-- [ ] Codec: SEQ reference-delta 2-bit
+- [ ] Codec: SEQ 2-bit literal with raw fallback
+- [ ] Codec design: SEQ reference-delta with reference identity metadata
 - [x] Production AXF1 chunk sizing policy design: byte budget, genomic span, record count hybrid
 - [x] Implement production AXF1 hybrid chunk sizing in converter
 - [ ] Tune AXF1 chunk sizing thresholds on HG002-style data

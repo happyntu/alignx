@@ -138,7 +138,7 @@ The minimum practical column set is:
 | `RNEXT` | length-prefixed strings or sentinel encoding | Preserve stdout first. |
 | `PNEXT` | raw `i32`/`u32` array | Preserve SAM semantics. |
 | `TLEN` | raw `i32` array | Preserve SAM semantics. |
-| `SEQ` | length-prefixed strings | Reference-delta later. |
+| `SEQ` | length-prefixed strings | Planned next step is 2-bit literal with raw fallback; reference-delta requires separate metadata and semantics design. |
 | `QUAL` | length-prefixed strings | Lossless raw first. |
 | `TAGS` | length-prefixed trailing SAM text | Per-tag streams later. |
 
@@ -198,6 +198,10 @@ values when that payload is smaller than raw `u16`; otherwise the writer falls
 back to raw `u16` FLAG values.
 The MAPQ column uses repeated `(run_length varint, MAPQ byte)` pairs when RLE is
 smaller than raw `u8`; otherwise the writer falls back to raw MAPQ bytes.
+The SEQ column remains raw length-prefixed strings for now. The recommended next
+SEQ codec is a chunk-local 2-bit literal codec with raw fallback; reference-delta
+is deferred until reference identity metadata and exact CIGAR/strand
+reconstruction semantics are designed.
 This is a correctness scaffold, not a benchmark claim.
 
 The AXF1 converter now emits deterministic chunks using the first
@@ -557,6 +561,9 @@ Suggested implementation boundary:
   then falls back to full chunk decode for chunks with matching output records.
 - `docs/research/axf1-chunk-sizing-policy.md` defines the recommended first
   production AXF1 chunk sizing policy.
+- `docs/research/axf1-seq-codec-design.md` defines the recommended SEQ codec
+  path: implement self-contained 2-bit literal first and defer reference-delta
+  until reference identity metadata and CIGAR/strand semantics are designed.
 - `CMakeLists.txt` already globs `src/format/*.cpp`, `src/query/*.cpp`,
   `src/convert/*.cpp`, and `tests/unit/*.cpp`, so the proposed AXF1 source and
   test files are automatically added to `alignx_lib` and `unit_tests`.
