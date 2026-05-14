@@ -36,6 +36,7 @@ alignx::format::AxfFile make_multi_reference_file() {
     alignx::format::AxfFile file;
     file.references.push_back({.name = "chrAlpha", .length = 1000});
     file.references.push_back({.name = "chrBeta", .length = 2000});
+    file.references.push_back({.name = "chrEmpty", .length = 3000});
     file.blocks.push_back({.ref_id = 1,
                            .start_pos = 300,
                            .end_pos = 400,
@@ -197,11 +198,20 @@ TEST(AxfFile, MetadataSortsBlocksAndQueriesOnlyMatchingReference) {
     auto metadata = alignx::format::read_axf_index_metadata(path);
     ASSERT_TRUE(metadata) << metadata.error();
 
-    ASSERT_EQ(metadata->references.size(), 2);
+    ASSERT_EQ(metadata->references.size(), 3);
     EXPECT_EQ(metadata->references[0].name, "chrAlpha");
     EXPECT_EQ(metadata->references[1].name, "chrBeta");
+    EXPECT_EQ(metadata->references[2].name, "chrEmpty");
 
     ASSERT_EQ(metadata->blocks.size(), 4);
+    ASSERT_EQ(metadata->reference_block_ranges.size(), 3);
+    EXPECT_EQ(metadata->reference_block_ranges[0].begin, 0);
+    EXPECT_EQ(metadata->reference_block_ranges[0].end, 2);
+    EXPECT_EQ(metadata->reference_block_ranges[1].begin, 2);
+    EXPECT_EQ(metadata->reference_block_ranges[1].end, 4);
+    EXPECT_EQ(metadata->reference_block_ranges[2].begin, 4);
+    EXPECT_EQ(metadata->reference_block_ranges[2].end, 4);
+
     EXPECT_EQ(metadata->blocks[0].ref_id, 0);
     EXPECT_EQ(metadata->blocks[0].start_pos, 100);
     EXPECT_EQ(metadata->blocks[0].record_count, 2);
@@ -229,6 +239,10 @@ TEST(AxfFile, MetadataSortsBlocksAndQueriesOnlyMatchingReference) {
     beta_hits = metadata->query_blocks(1, 220, 250);
     ASSERT_TRUE(beta_hits) << beta_hits.error();
     EXPECT_TRUE(beta_hits->empty());
+
+    auto empty_hits = metadata->query_blocks(2, 1, 100);
+    ASSERT_TRUE(empty_hits) << empty_hits.error();
+    EXPECT_TRUE(empty_hits->empty());
 
     std::filesystem::remove(path);
 }

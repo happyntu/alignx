@@ -300,6 +300,18 @@ std::expected<void, std::string> validate_index_metadata(const AxfFileIndex& ind
     return {};
 }
 
+void build_reference_block_ranges(AxfFileIndex& index) {
+    index.reference_block_ranges.assign(index.references.size(), {});
+    std::size_t block_index = 0;
+    for (std::size_t ref_id = 0; ref_id < index.references.size(); ++ref_id) {
+        const std::size_t begin = block_index;
+        while (block_index < index.blocks.size() && index.blocks[block_index].ref_id == ref_id) {
+            ++block_index;
+        }
+        index.reference_block_ranges[ref_id] = {.begin = begin, .end = block_index};
+    }
+}
+
 } // namespace
 
 bool AxfBlock::overlaps(std::int32_t query_start, std::int32_t query_end) const noexcept {
@@ -338,7 +350,11 @@ AxfFileIndex::query_blocks(std::uint32_t ref_id, std::int32_t start, std::int32_
     }
 
     std::vector<const AxfBlockIndexEntry*> hits;
-    for (const AxfBlockIndexEntry& block : blocks) {
+    const AxfBlockRange range = reference_block_ranges.size() == references.size()
+                                    ? reference_block_ranges.at(ref_id)
+                                    : AxfBlockRange{.begin = 0, .end = blocks.size()};
+    for (std::size_t index = range.begin; index < range.end; ++index) {
+        const AxfBlockIndexEntry& block = blocks.at(index);
         if (block.ref_id == ref_id && block.overlaps(start, end)) {
             hits.push_back(&block);
         }
@@ -618,6 +634,7 @@ read_axf_index_metadata(const std::filesystem::path& path) {
                   }
                   return lhs.end_pos < rhs.end_pos;
               });
+    build_reference_block_ranges(index);
     return index;
 }
 

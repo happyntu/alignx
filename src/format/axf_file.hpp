@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -42,9 +43,15 @@ struct AxfBlockIndexEntry {
     [[nodiscard]] bool overlaps(std::int32_t query_start, std::int32_t query_end) const noexcept;
 };
 
+struct AxfBlockRange {
+    std::size_t begin = 0;
+    std::size_t end = 0;
+};
+
 struct AxfFileIndex {
     std::vector<AxfReference> references;
     std::vector<AxfBlockIndexEntry> blocks;
+    std::vector<AxfBlockRange> reference_block_ranges;
 
     [[nodiscard]] std::expected<std::vector<const AxfBlockIndexEntry*>, std::string>
     query_blocks(std::uint32_t ref_id, std::int32_t start, std::int32_t end) const;
