@@ -39,13 +39,14 @@ Completed:
 - AXF1 tests cover multi-chunk and multi-reference query ordering
 - AXF1 converter tests explicitly cover mapped-only toy output
 - AXF1 production chunk sizing policy design note
+- AXF1 converter implements hybrid chunk sizing policy
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
 - Remote HG002 chr1:1M-2M engineering benchmark completed for `alignx view` vs `samtools view`
 
 Remaining implementation targets:
-- Implement AXF1 hybrid chunk sizing policy in the converter
+- Tune AXF1 hybrid chunk sizing thresholds with correctness smoke checks and confirmed benchmarks
 
 ## Build & Test Commands
 

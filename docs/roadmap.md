@@ -61,7 +61,8 @@ and region-query correctness.
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec: POS varint delta, FLAG bit-pack, MAPQ byte/RLE, SEQ reference-delta 2-bit
 - [x] Production AXF1 chunk sizing policy design: byte budget, genomic span, record count hybrid
-- [ ] Implement production AXF1 hybrid chunk sizing in converter
+- [x] Implement production AXF1 hybrid chunk sizing in converter
+- [ ] Tune AXF1 chunk sizing thresholds on HG002-style data
 - [ ] Round-trip fidelity: BAM → AXF → BAM → diff
 - [ ] Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
 

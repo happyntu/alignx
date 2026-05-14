@@ -177,23 +177,21 @@ to identify records that overlap the requested region. Full output columns are
 decoded only if the chunk contains at least one matching record. This is still a
 raw-codec correctness scaffold, not a benchmark claim.
 
-The AXF1 converter now emits deterministic MVP chunks instead of one chunk per
-reference. The current implementation uses a deliberately small max-record rule
-to force multi-chunk toy coverage. The first production-oriented policy is
-documented in `docs/research/axf1-chunk-sizing-policy.md` as a hybrid of byte
-budget, genomic span, and record count.
+The AXF1 converter now emits deterministic chunks using the first
+production-oriented hybrid policy documented in
+`docs/research/axf1-chunk-sizing-policy.md`: byte budget, genomic span, record
+count, and reference-change flushes.
 
 Current converter chunk policy:
 
 - the Phase 1 converter is mapped-record only and skips unmapped records or
   records whose reference span is invalid;
 - chunks are emitted deterministically as records are accepted, preserving BAM
-  input order for the toy correctness path;
-- the max-record threshold is intentionally tiny so tests exercise multi-chunk
-  view behavior without large fixtures;
-- this threshold is not a performance or format recommendation. Production
-  chunking should implement the hybrid policy in
-  `docs/research/axf1-chunk-sizing-policy.md`.
+  input order;
+- the first production-MVP policy flushes by target/max uncompressed byte
+  budget, max record count, max genomic span, and reference changes;
+- the initial thresholds are implementation defaults, not benchmark-tuned
+  performance claims.
 
 Current correctness coverage:
 
@@ -241,6 +239,8 @@ Suggested implementation boundary:
   columns instead of parsing SAM payload text.
 - `src/convert/bam_to_axf.hpp/.cpp` emits AXF0 by default and AXF1 through the
   separate `convert_bam_to_axf1_mvp()` function.
+- `src/convert/axf1_chunk_policy.hpp/.cpp` owns the first AXF1 hybrid chunk
+  sizing policy and its testable flush predicates.
 - `src/cli/cli.cpp` detects AXF0/AXF1 by file magic before falling back to the
   BAM/HTSlib view path. `.axf`/`.axf1` files with unknown magic are rejected
   instead of being treated as BAM.
@@ -262,8 +262,8 @@ Suggested implementation boundary:
 - Should AXF1 tests keep using `.axf1` as a readability cue while the format is
   unstable, or should they converge on `.axf` now that view routing is
   magic-based?
-- What final threshold values should the hybrid chunk sizing policy use after
-  empirical tuning?
+- What final threshold values should the implemented hybrid chunk sizing policy
+  use after empirical tuning?
 - Should optional tags remain one raw `TAGS` column for v0, or should common tags
   such as `NM` and `MD` get early per-tag streams?
 - Should `RNAME` be implicit from chunk `ref_id` only for the first slice, or

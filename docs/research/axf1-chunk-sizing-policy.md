@@ -1,23 +1,16 @@
 # AXF1 Chunk Sizing Policy
 
-Status: design note for the next converter implementation slice.
+Status: implemented as the first converter policy; thresholds still need
+empirical tuning.
 
 This note complements ADR-002, ADR-004, ADR-005, and
 `docs/research/axf1-minimal-columnar-design.md`. It defines the first
-production-oriented AXF1 chunk sizing policy. It is not a benchmark result and
-does not change the current converter by itself.
+production-oriented AXF1 chunk sizing policy. It is not a benchmark result.
 
 ## Current Status
 
-The current AXF1 toy converter deliberately emits one record per chunk:
-
-```cpp
-constexpr std::size_t kAxf1MvpMaxRecordsPerChunk = 1;
-```
-
-That setting exists to make Phase 1 correctness tests strict and simple. It is
-not a production format recommendation. The current converter is also
-mapped-only and skips unmapped or invalid-span records.
+The AXF1 converter uses the hybrid policy described below. The current
+converter is mapped-only and skips unmapped or invalid-span records.
 
 ## Goals
 
@@ -86,7 +79,7 @@ Flush on reference change or when any threshold would be exceeded:
 
 This is the recommended first production-MVP policy.
 
-## Recommended First Production-MVP Policy
+## Implemented First Production-MVP Policy
 
 Use a hybrid policy with conservative constants:
 
@@ -128,9 +121,9 @@ before benchmark or profiling runs.
 | Sparse regions | Bound by genomic-span threshold |
 | Long single records | Allow one-record oversized chunks |
 
-## Implementation Sketch
+## Implementation
 
-Introduce a small policy object near the AXF1 writer path:
+The policy object lives in `src/convert/axf1_chunk_policy.hpp`:
 
 ```cpp
 struct Axf1ChunkPolicy {
@@ -141,7 +134,7 @@ struct Axf1ChunkPolicy {
 };
 ```
 
-Track pending chunk state:
+The converter tracks pending chunk state:
 
 - reference id
 - minimum start
@@ -149,18 +142,18 @@ Track pending chunk state:
 - record count
 - estimated uncompressed column bytes
 
-The converter can then use two checks:
+The converter uses two checks:
 
 - `should_flush_before_append(policy, pending, next_record)`
 - `should_flush_after_append(policy, pending)`
 
-For the first implementation, keep the policy constants internal and test them
-through small test-only thresholds. Add user-facing tuning flags only after the
-basic policy has correctness coverage.
+The policy constants are internal and tests use small policy values to exercise
+each flush rule. Add user-facing tuning flags only after the basic policy has
+correctness coverage.
 
 ## Validation Plan
 
-Add focused tests with small thresholds:
+Focused tests with small thresholds cover:
 
 - flush by maximum record count
 - flush by maximum byte threshold
@@ -182,6 +175,5 @@ Notify the user before benchmark or profiling workloads.
 
 ## Recommendation
 
-Implement the hybrid policy next, replacing the current one-record toy chunking
-constant. Do not change the AXF1 codec or add benchmark claims in the same
-change.
+Keep the hybrid policy as the converter default, then tune thresholds only after
+correctness smoke checks and explicit benchmark/profiling confirmation.

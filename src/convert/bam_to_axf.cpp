@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "convert/axf1_chunk_policy.hpp"
 #include "format/axf1_file.hpp"
 #include "format/axf_file.hpp"
 #include "io/bam_reader.hpp"
@@ -27,15 +28,11 @@ struct PendingBlock {
 };
 
 struct PendingAxf1Chunk {
-    bool has_records = false;
-    std::int32_t start_pos = -1;
-    std::int32_t end_pos = -1;
+    Axf1ChunkState state;
     std::vector<format::Axf1Record> records;
 };
 
-// Deliberately tiny for Phase 1 toy correctness coverage. Production AXF1
-// chunk sizing should be replaced with a byte/span/record hybrid policy.
-constexpr std::size_t kAxf1MvpMaxRecordsPerChunk = 1;
+constexpr Axf1ChunkPolicy kAxf1ProductionChunkPolicy{};
 
 void append_line(PendingBlock& block, std::string_view line, const io::BamRecord& record) {
     if (!block.has_records) {
@@ -154,30 +151,19 @@ std::expected<format::Axf1Record, std::string> parse_axf1_record(std::string_vie
 }
 
 void append_axf1_record(PendingAxf1Chunk& chunk, format::Axf1Record record,
-                        const io::BamRecord& bam_record) {
-    if (!chunk.has_records) {
-        chunk.start_pos = bam_record.position;
-        chunk.end_pos = bam_record.end_position;
-        chunk.has_records = true;
-    } else {
-        if (bam_record.position < chunk.start_pos) {
-            chunk.start_pos = bam_record.position;
-        }
-        if (bam_record.end_position > chunk.end_pos) {
-            chunk.end_pos = bam_record.end_position;
-        }
-    }
+                        const Axf1RecordChunkMetrics& metrics) {
+    append_axf1_chunk_metrics(chunk.state, metrics);
     chunk.records.push_back(std::move(record));
 }
 
 void flush_axf1_chunk(format::Axf1File& file, std::uint32_t ref_id, PendingAxf1Chunk& chunk) {
-    if (!chunk.has_records) {
+    if (!chunk.state.has_records) {
         return;
     }
 
     file.chunks.push_back({.ref_id = ref_id,
-                           .start_pos = chunk.start_pos,
-                           .end_pos = chunk.end_pos,
+                           .start_pos = chunk.state.start_pos,
+                           .end_pos = chunk.state.end_pos,
                            .records = std::move(chunk.records)});
     chunk = PendingAxf1Chunk{};
 }
@@ -305,7 +291,8 @@ std::expected<void, std::string> convert_bam_to_axf1_mvp(const std::filesystem::
         file.references.push_back({.name = reference.name, .length = reference.length});
     }
 
-    std::vector<PendingAxf1Chunk> chunks(references->size());
+    std::optional<std::uint32_t> pending_ref_id;
+    PendingAxf1Chunk pending_chunk;
     for (;;) {
         auto record_view = reader->next_record_view();
         if (!record_view) {
@@ -338,15 +325,31 @@ std::expected<void, std::string> convert_bam_to_axf1_mvp(const std::filesystem::
         if (!axf1_record) {
             return std::unexpected(axf1_record.error());
         }
-        PendingAxf1Chunk& chunk = chunks.at(ref_id);
-        append_axf1_record(chunk, std::move(*axf1_record), view.record);
-        if (chunk.records.size() >= kAxf1MvpMaxRecordsPerChunk) {
-            flush_axf1_chunk(file, static_cast<std::uint32_t>(ref_id), chunk);
+
+        const auto current_ref_id = static_cast<std::uint32_t>(ref_id);
+        if (should_flush_axf1_chunk_on_reference_change(pending_ref_id, current_ref_id)) {
+            flush_axf1_chunk(file, *pending_ref_id, pending_chunk);
+        }
+        pending_ref_id = current_ref_id;
+
+        const Axf1RecordChunkMetrics next_record{
+            .start_pos = view.record.position,
+            .end_pos = view.record.end_position,
+            .estimated_uncompressed_bytes = estimate_axf1_record_uncompressed_bytes(*axf1_record)};
+        if (should_flush_axf1_chunk_before_append(kAxf1ProductionChunkPolicy, pending_chunk.state,
+                                                  next_record)) {
+            flush_axf1_chunk(file, current_ref_id, pending_chunk);
+        }
+
+        append_axf1_record(pending_chunk, std::move(*axf1_record), next_record);
+        if (should_flush_axf1_chunk_after_append(kAxf1ProductionChunkPolicy, pending_chunk.state)) {
+            flush_axf1_chunk(file, current_ref_id, pending_chunk);
+            pending_ref_id.reset();
         }
     }
 
-    for (std::size_t ref_id = 0; ref_id < chunks.size(); ++ref_id) {
-        flush_axf1_chunk(file, static_cast<std::uint32_t>(ref_id), chunks[ref_id]);
+    if (pending_ref_id.has_value()) {
+        flush_axf1_chunk(file, *pending_ref_id, pending_chunk);
     }
 
     return format::write_axf1_file(file, output_axf);
