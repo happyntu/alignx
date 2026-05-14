@@ -47,7 +47,8 @@ toy BAM tests:
 - required SAM fields: `QNAME`, `FLAG`, `RNAME`, `POS`, `MAPQ`, `CIGAR`,
   `RNEXT`, `PNEXT`, `TLEN`, `SEQ`, `QUAL`;
 - optional tags may initially be stored as a raw per-record tag text column;
-- unmapped records may remain out of scope for the first slice;
+- unmapped records are skipped by the current converter and remain out of scope
+  for the first slice;
 - paired fields should be preserved as text/integer values even if no paired
   query logic is implemented yet.
 
@@ -181,6 +182,18 @@ reference. The current implementation uses a deliberately small max-record rule
 to force multi-chunk toy coverage; production chunk sizing by byte budget,
 genomic span, or compression block behavior remains future work.
 
+Current converter chunk policy:
+
+- the Phase 1 converter is mapped-record only and skips unmapped records or
+  records whose reference span is invalid;
+- chunks are emitted deterministically as records are accepted, preserving BAM
+  input order for the toy correctness path;
+- the max-record threshold is intentionally tiny so tests exercise multi-chunk
+  view behavior without large fixtures;
+- this threshold is not a performance or format recommendation. Production
+  chunking should use a hybrid policy that considers encoded byte size, genomic
+  span, record count, and independent column decode cost.
+
 1. Add AXF1 data structs and format read/write tests in files that do not
    disturb AXF0.
 2. Add writer/reader round-trip tests using synthetic toy records.
@@ -247,6 +260,7 @@ Before replacing AXF0 in any workflow:
 
 - keep AXF0 toy, WSL, and remote HG002 correctness smoke checks passing;
 - require AXF1 round-trip and view parity tests on the toy BAM fixture;
+- require AXF1 multi-reference and multi-chunk ordering tests;
 - require malformed AXF1 payload tests to prove stdout atomicity;
 - require no-hit and missing-reference behavior to match AXF0;
 - do not run benchmark/profiling until the AXF1 correctness slice is stable.

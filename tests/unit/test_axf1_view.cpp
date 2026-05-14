@@ -158,6 +158,37 @@ TEST(Axf1View, ReturnsNoRecordsForNoHitRegion) {
     std::filesystem::remove(path);
 }
 
+TEST(Axf1View, PreservesChunkThenRecordOrderWithinQueriedReference) {
+    const auto path = temp_path("alignx_axf1_view_order");
+    alignx::format::Axf1File file{
+        .references = {{.name = "chrA", .length = 1000}, {.name = "chrB", .length = 1000}},
+        .chunks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 230,
+                    .records = {make_record("chrA_read001", 100, "10M", "NM:i:0"),
+                                make_record("chrA_read002", 220, "10M", "NM:i:1")}},
+                   {.ref_id = 1,
+                    .start_pos = 100,
+                    .end_pos = 110,
+                    .records = {make_record("chrB_read001", 100, "10M", "NM:i:0")}},
+                   {.ref_id = 0,
+                    .start_pos = 300,
+                    .end_pos = 310,
+                    .records = {make_record("chrA_read003", 300, "10M", "NM:i:2")}}}};
+    write_axf1_or_fail(file, path);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf1_region_sam(path, "chrA:1-400", out);
+
+    EXPECT_TRUE(result) << result.error();
+    EXPECT_EQ(out.str(),
+              "chrA_read001\t0\tchrA\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n"
+              "chrA_read002\t0\tchrA\t221\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:1\n"
+              "chrA_read003\t0\tchrA\t301\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:2\n");
+
+    std::filesystem::remove(path);
+}
+
 TEST(Axf1View, ReportsMissingReference) {
     const auto path = temp_path("alignx_axf1_view_missing_ref");
     write_axf1_or_fail(make_file(), path);

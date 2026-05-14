@@ -33,6 +33,8 @@ struct PendingAxf1Chunk {
     std::vector<format::Axf1Record> records;
 };
 
+// Deliberately tiny for Phase 1 toy correctness coverage. Production AXF1
+// chunk sizing should be replaced with a byte/span/record hybrid policy.
 constexpr std::size_t kAxf1MvpMaxRecordsPerChunk = 1;
 
 void append_line(PendingBlock& block, std::string_view line, const io::BamRecord& record) {

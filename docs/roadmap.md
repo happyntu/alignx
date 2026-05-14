@@ -55,9 +55,11 @@ and region-query correctness.
 - [x] AXF MVP file header, reference metadata, block payloads, and block index
 - [x] `alignx convert <bam> -o <axf>` MVP
 - [x] `alignx view <axf> <region>` MVP with toy stdout parity
+- [x] AXF1 raw-column toy correctness path with magic-based view routing
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec: POS varint delta, FLAG bit-pack, MAPQ byte/RLE, SEQ reference-delta 2-bit
+- [ ] Production AXF1 chunk sizing policy: byte budget, genomic span, record count, or hybrid
 - [ ] Round-trip fidelity: BAM → AXF → BAM → diff
 - [ ] Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
 
