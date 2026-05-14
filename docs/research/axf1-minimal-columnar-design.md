@@ -179,8 +179,9 @@ raw-codec correctness scaffold, not a benchmark claim.
 
 The AXF1 converter now emits deterministic MVP chunks instead of one chunk per
 reference. The current implementation uses a deliberately small max-record rule
-to force multi-chunk toy coverage; production chunk sizing by byte budget,
-genomic span, or compression block behavior remains future work.
+to force multi-chunk toy coverage. The first production-oriented policy is
+documented in `docs/research/axf1-chunk-sizing-policy.md` as a hybrid of byte
+budget, genomic span, and record count.
 
 Current converter chunk policy:
 
@@ -191,8 +192,8 @@ Current converter chunk policy:
 - the max-record threshold is intentionally tiny so tests exercise multi-chunk
   view behavior without large fixtures;
 - this threshold is not a performance or format recommendation. Production
-  chunking should use a hybrid policy that considers encoded byte size, genomic
-  span, record count, and independent column decode cost.
+  chunking should implement the hybrid policy in
+  `docs/research/axf1-chunk-sizing-policy.md`.
 
 Current correctness coverage:
 
@@ -250,6 +251,8 @@ Suggested implementation boundary:
 - `Axf1FileReader::read_chunk_columns()` supports selective raw-column decode
   for query filtering. Current `alignx view` uses it for `POS` and `CIGAR`,
   then falls back to full chunk decode for chunks with matching output records.
+- `docs/research/axf1-chunk-sizing-policy.md` defines the recommended first
+  production AXF1 chunk sizing policy.
 - `CMakeLists.txt` already globs `src/format/*.cpp`, `src/query/*.cpp`,
   `src/convert/*.cpp`, and `tests/unit/*.cpp`, so the proposed AXF1 source and
   test files are automatically added to `alignx_lib` and `unit_tests`.
@@ -259,9 +262,8 @@ Suggested implementation boundary:
 - Should AXF1 tests keep using `.axf1` as a readability cue while the format is
   unstable, or should they converge on `.axf` now that view routing is
   magic-based?
-- What production chunk-sizing rule should replace the current deterministic
-  MVP max-record split: byte budget, max genomic span, record count, or a hybrid
-  tuned to independent column decode?
+- What final threshold values should the hybrid chunk sizing policy use after
+  empirical tuning?
 - Should optional tags remain one raw `TAGS` column for v0, or should common tags
   such as `NM` and `MD` get early per-tag streams?
 - Should `RNAME` be implicit from chunk `ref_id` only for the first slice, or
