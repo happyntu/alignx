@@ -1,7 +1,5 @@
 #include "query/axf1_view.hpp"
 
-#include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <limits>
 #include <ostream>
@@ -11,57 +9,10 @@
 
 #include "format/axf1_file.hpp"
 #include "query/region.hpp"
+#include "query/sam_utils.hpp"
 
 namespace alignx::query {
 namespace {
-
-std::expected<std::int32_t, std::string> cigar_reference_span(std::string_view cigar) {
-    if (cigar.empty() || cigar == "*") {
-        return 1;
-    }
-
-    std::int64_t span = 0;
-    std::int64_t length = 0;
-    bool saw_op = false;
-    for (char ch : cigar) {
-        if (std::isdigit(static_cast<unsigned char>(ch))) {
-            length = length * 10 + (ch - '0');
-            if (length > std::numeric_limits<std::int32_t>::max()) {
-                return std::unexpected("CIGAR operation length is too large");
-            }
-            continue;
-        }
-
-        if (length == 0) {
-            return std::unexpected("invalid CIGAR string");
-        }
-        switch (ch) {
-        case 'M':
-        case 'D':
-        case 'N':
-        case '=':
-        case 'X':
-            span += length;
-            if (span > std::numeric_limits<std::int32_t>::max()) {
-                return std::unexpected("CIGAR reference span is too large");
-            }
-            break;
-        case 'I':
-        case 'S':
-        case 'H':
-        case 'P':
-            break;
-        default:
-            return std::unexpected("invalid CIGAR operation");
-        }
-        length = 0;
-        saw_op = true;
-    }
-    if (!saw_op || length != 0) {
-        return std::unexpected("invalid CIGAR string");
-    }
-    return static_cast<std::int32_t>(std::max<std::int64_t>(span, 1));
-}
 
 std::expected<std::uint32_t, std::string>
 find_reference_id(const std::vector<format::Axf1Reference>& references,
@@ -74,11 +25,6 @@ find_reference_id(const std::vector<format::Axf1Reference>& references,
     return std::unexpected("reference not found in AXF1: " + std::string(reference));
 }
 
-bool interval_overlaps(std::int32_t lhs_start, std::int32_t lhs_end, std::int32_t rhs_start,
-                       std::int32_t rhs_end) {
-    return lhs_start < rhs_end && rhs_start < lhs_end;
-}
-
 std::expected<bool, std::string> record_overlaps_region(const format::Axf1Record& record,
                                                         const SamRegion& region) {
     auto span = cigar_reference_span(record.cigar);
@@ -88,7 +34,7 @@ std::expected<bool, std::string> record_overlaps_region(const format::Axf1Record
     if (record.pos > std::numeric_limits<std::int32_t>::max() - *span) {
         return std::unexpected("AXF1 record reference span is too large");
     }
-    return interval_overlaps(record.pos, record.pos + *span, region.start, region.end);
+    return half_open_intervals_overlap(record.pos, record.pos + *span, region.start, region.end);
 }
 
 std::string format_sam_record(const format::Axf1Record& record, const std::string& reference) {
@@ -148,8 +94,8 @@ std::expected<void, std::string> write_axf1_region_sam(const std::filesystem::pa
     std::string output;
     for (const format::Axf1Chunk& chunk : file->chunks) {
         if (chunk.ref_id != *ref_id ||
-            !interval_overlaps(chunk.start_pos, chunk.end_pos, parsed_region->start,
-                               parsed_region->end)) {
+            !half_open_intervals_overlap(chunk.start_pos, chunk.end_pos, parsed_region->start,
+                                         parsed_region->end)) {
             continue;
         }
 

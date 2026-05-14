@@ -1,6 +1,5 @@
 #include "query/axf_view.hpp"
 
-#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <ostream>
@@ -10,6 +9,7 @@
 
 #include "format/axf_file.hpp"
 #include "query/region.hpp"
+#include "query/sam_utils.hpp"
 
 namespace alignx::query {
 namespace {
@@ -29,54 +29,6 @@ std::vector<std::string_view> split_tab_fields(std::string_view line, std::size_
     }
     fields.push_back(line.substr(begin));
     return fields;
-}
-
-std::expected<std::int32_t, std::string> cigar_reference_span(std::string_view cigar) {
-    if (cigar.empty() || cigar == "*") {
-        return 1;
-    }
-
-    std::int64_t span = 0;
-    std::int64_t length = 0;
-    bool saw_op = false;
-    for (char ch : cigar) {
-        if (std::isdigit(static_cast<unsigned char>(ch))) {
-            length = length * 10 + (ch - '0');
-            if (length > std::numeric_limits<std::int32_t>::max()) {
-                return std::unexpected("CIGAR operation length is too large");
-            }
-            continue;
-        }
-
-        if (length == 0) {
-            return std::unexpected("invalid CIGAR string");
-        }
-        switch (ch) {
-        case 'M':
-        case 'D':
-        case 'N':
-        case '=':
-        case 'X':
-            span += length;
-            if (span > std::numeric_limits<std::int32_t>::max()) {
-                return std::unexpected("CIGAR reference span is too large");
-            }
-            break;
-        case 'I':
-        case 'S':
-        case 'H':
-        case 'P':
-            break;
-        default:
-            return std::unexpected("invalid CIGAR operation");
-        }
-        length = 0;
-        saw_op = true;
-    }
-    if (!saw_op || length != 0) {
-        return std::unexpected("invalid CIGAR string");
-    }
-    return static_cast<std::int32_t>(std::max<std::int64_t>(span, 1));
 }
 
 std::expected<std::int32_t, std::string> parse_sam_pos(std::string_view text) {
@@ -125,7 +77,7 @@ std::expected<bool, std::string> sam_line_overlaps_region(std::string_view line,
 
     const std::int32_t start = *one_based_pos - 1;
     const std::int32_t end = start + *span;
-    return start < region.end && region.start < end;
+    return half_open_intervals_overlap(start, end, region.start, region.end);
 }
 
 std::expected<std::uint32_t, std::string>
