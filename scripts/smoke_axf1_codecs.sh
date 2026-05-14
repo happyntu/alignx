@@ -7,6 +7,7 @@ INSPECTOR="${AXF1_INSPECTOR:-scripts/inspect_axf1_metadata.py}"
 INPUT_BAM=""
 REGION=""
 WORK_DIR=""
+EXPECT_CODECS=()
 
 usage() {
   cat <<'USAGE'
@@ -27,6 +28,9 @@ Options:
   --input <path>      input BAM
   --region <region>   region query, for example chrToy:1-250
   --work-dir <dir>    output directory for AXF1, SAM outputs, SHA256, and codec TSVs
+  --expect-codec <column=codec>
+                      require a column to use exactly one codec across all chunks;
+                      may be repeated, for example --expect-codec cigar=cigar_token
   -h, --help          show this help
 
 This script performs no timing, repeats, profiling, or benchmark reporting.
@@ -59,6 +63,10 @@ while [[ $# -gt 0 ]]; do
       WORK_DIR="$2"
       shift 2
       ;;
+    --expect-codec)
+      EXPECT_CODECS+=("$2")
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -87,6 +95,42 @@ require_executable() {
   fi
   echo "FAIL executable: required executable not found: $exe" >&2
   exit 1
+}
+
+check_expected_codec() {
+  local expectation="$1"
+  local column="${expectation%%=*}"
+  local codec="${expectation#*=}"
+
+  if [[ "$expectation" != *=* || -z "$column" || -z "$codec" ]]; then
+    echo "FAIL usage: --expect-codec must be column=codec, got: $expectation" >&2
+    exit 2
+  fi
+
+  local rows
+  rows="$(
+    awk -F '\t' -v column="$column" \
+      'NR > 1 && ($1 == column || $2 == column) {print}' "$CODECS_OUT"
+  )"
+  if [[ -z "$rows" ]]; then
+    echo "FAIL axf1_codecs: expected column not found: $column" >&2
+    echo "  codec distribution: $CODECS_OUT" >&2
+    exit 1
+  fi
+
+  local row_count
+  row_count="$(printf '%s\n' "$rows" | wc -l)"
+  local matching_count
+  matching_count="$(
+    printf '%s\n' "$rows" | awk -F '\t' -v codec="$codec" '($3 == codec || $4 == codec) {count++} END {print count + 0}'
+  )"
+  if [[ "$row_count" -ne 1 || "$matching_count" -ne 1 ]]; then
+    echo "FAIL axf1_codecs: expected $column to use only codec $codec" >&2
+    echo "  actual rows:" >&2
+    printf '%s\n' "$rows" >&2
+    echo "  codec distribution: $CODECS_OUT" >&2
+    exit 1
+  fi
 }
 
 [[ -n "$INPUT_BAM" ]] || fail_usage "--input is required"
@@ -143,8 +187,13 @@ fi
 "$INSPECTOR" "$AXF1_FILE" --column-codecs >"$CODECS_OUT"
 "$INSPECTOR" "$AXF1_FILE" --columns >"$COLUMNS_OUT"
 
+for expectation in "${EXPECT_CODECS[@]}"; do
+  check_expected_codec "$expectation"
+done
+
 records="$(grep -cve '^$' "$AXF1_SAM" || true)"
 stdout_sha256="$(awk 'NR == 1 {print $1}' "$SHA256_OUT")"
+expected_codecs="$(IFS=,; echo "${EXPECT_CODECS[*]}")"
 
 {
   echo -e "key\tvalue"
@@ -159,6 +208,7 @@ stdout_sha256="$(awk 'NR == 1 {print $1}' "$SHA256_OUT")"
   echo -e "records\t$records"
   echo -e "column_codecs\t$CODECS_OUT"
   echo -e "columns\t$COLUMNS_OUT"
+  echo -e "expected_codecs\t$expected_codecs"
 } >"$SUMMARY_OUT"
 
 echo "OK axf1_codecs"

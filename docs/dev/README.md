@@ -140,8 +140,18 @@ scripts/smoke_axf1_codecs.sh \
   --inspector scripts/inspect_axf1_metadata.py \
   --input tests/toy_data/toy_alignment.sorted.bam \
   --region chrToy:1-250 \
-  --work-dir /tmp/alignx_axf1_codec_smoke
+  --work-dir /tmp/alignx_axf1_codec_smoke \
+  --expect-codec pos=pos_delta_varint \
+  --expect-codec flag=flag_bitpack \
+  --expect-codec cigar=cigar_token \
+  --expect-codec sequence=seq_2bit_literal
 ```
+
+Use `--expect-codec column=codec` when a smoke region is expected to use a
+specific codec for every chunk of that column. The option may be repeated and
+accepts either column names or numeric column ids, and either codec names or
+numeric codec ids. If a column falls back to raw for any chunk, the expectation
+fails and the script prints the actual codec distribution.
 
 For large BAMs, copy the script and inspector to `missmi-server00` and use a
 work directory under `/mypool/alignx/tmp`. The HG002 chr1 small-region script
@@ -162,6 +172,9 @@ Remote HG002 CIGAR token smoke on 2026-05-15 used
 `/mypool/alignx/tmp/axf1_cigar_codec_smoke_hg002_chr1_1000000_1010000_20260515`
 and confirmed byte-identical SAM stdout plus CIGAR `cigar_token`
 distribution on all 7 chunks.
+For the HG002 chr1 small-region codec smoke, the current expected codecs are
+`pos_delta_varint`, `flag_bitpack`, `mapq_rle`, `cigar_token`, and
+`seq_2bit_literal`.
 
 ## AXF0 and AXF1 development status
 
