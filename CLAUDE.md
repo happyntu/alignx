@@ -59,6 +59,7 @@ Completed:
 - AXF1 SEQ 2-bit literal codec with raw fallback for non-ACGT sequences
 - AXF1 SEQ 2-bit literal toy smoke verified byte-identical SAM stdout and `seq_2bit_literal` codec distribution
 - AXF1 SEQ 2-bit literal remote HG002 chr1 small-region correctness smoke
+- AXF1 CIGAR codec design note: prefer self-contained token stream with raw fallback before dictionary, delta, or reference-aware CIGAR codecs
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV

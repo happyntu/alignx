@@ -134,7 +134,7 @@ The minimum practical column set is:
 | `RNAME` | implicit chunk `ref_id` for mapped records | Cross-reference records can be handled later. |
 | `POS` | delta varint for monotonic chunks; raw `i32` fallback | Keep 0-based internally; print 1-based SAM POS. |
 | `MAPQ` | run-length encoded `u8`; raw `u8` fallback | Chunk-local runs only. |
-| `CIGAR` | length-prefixed strings | Op/length streams later. |
+| `CIGAR` | length-prefixed strings | Planned next step is token stream with raw fallback. |
 | `RNEXT` | length-prefixed strings or sentinel encoding | Preserve stdout first. |
 | `PNEXT` | raw `i32`/`u32` array | Preserve SAM semantics. |
 | `TLEN` | raw `i32` array | Preserve SAM semantics. |
@@ -198,6 +198,12 @@ values when that payload is smaller than raw `u16`; otherwise the writer falls
 back to raw `u16` FLAG values.
 The MAPQ column uses repeated `(run_length varint, MAPQ byte)` pairs when RLE is
 smaller than raw `u8`; otherwise the writer falls back to raw MAPQ bytes.
+The CIGAR column remains raw length-prefixed strings for now. The recommended
+next CIGAR codec is a self-contained token stream with per-record operation
+counts, varint operation lengths, one-byte operation codes, and broad raw
+fallback. It must preserve byte-identical SAM CIGAR output because `alignx view`
+uses selected `POS + CIGAR` decode for filtering and later prints the stored
+CIGAR string.
 The SEQ column uses a chunk-local 2-bit literal codec for uppercase A/C/G/T
 sequences when it is smaller than raw strings. It falls back to raw
 length-prefixed strings for ambiguity codes, lowercase bases, `*`, empty values,
@@ -588,6 +594,9 @@ Suggested implementation boundary:
 - `docs/research/axf1-seq-codec-design.md` defines the recommended SEQ codec
   path: implement self-contained 2-bit literal first and defer reference-delta
   until reference identity metadata and CIGAR/strand semantics are designed.
+- `docs/research/axf1-cigar-codec-design.md` defines the recommended CIGAR
+  codec path: implement self-contained token streams with raw fallback before
+  dictionary, delta, or reference-aware CIGAR codecs.
 - `CMakeLists.txt` already globs `src/format/*.cpp`, `src/query/*.cpp`,
   `src/convert/*.cpp`, and `tests/unit/*.cpp`, so the proposed AXF1 source and
   test files are automatically added to `alignx_lib` and `unit_tests`.
