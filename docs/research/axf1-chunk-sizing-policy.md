@@ -194,6 +194,11 @@ only an audit hint. Future cache-validation metadata should prefer low-cost
 fields such as file size, mtime, and BAM header SHA-256 before considering any
 full-content hash.
 
+If AXF1 metadata grows beyond v2, the preferred v3 direction is a typed
+key/value metadata section with required/optional entry flags. Unknown optional
+entries can be skipped; unknown required entries must be rejected before payload
+decode.
+
 Before any performance claim, run a separate remote HG002 benchmark with user
 confirmation. Notify the user before benchmark or profiling workloads.
 

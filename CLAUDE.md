@@ -46,6 +46,7 @@ Completed:
 - AXF1 v2 metadata remote HG002 chr1 small-region correctness smoke
 - AXF1 v2 metadata corruption tests cover full-file reader, metadata-only reader, and Python inspector
 - AXF1 source identity design note: keep v2 as-is for now; future identity should prefer file size, mtime, and BAM header SHA-256 over default full-content hashing
+- AXF1 metadata extensibility design note: future v3 metadata should use typed key/value entries with required/optional flags; keep v2 as active writer version for now
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV

@@ -341,10 +341,71 @@ Recommended next implementation, when needed:
   guarantees;
 - keep remote/large-data workflows able to skip expensive identity collection.
 
-Open design point: decide whether future identity fields belong in the fixed
-`FileMetadata` record or in a typed key/value metadata section. A typed metadata
-section is more flexible, but the current fixed v2 layout is simpler and easier
-to validate.
+## Metadata Extensibility Design
+
+If AXF1 needs metadata beyond v2's fixed `is_subset`, `source_path`, and
+`conversion_region`, prefer a typed key/value metadata section instead of adding
+more fixed fields. This avoids bumping the fixed layout for every new optional
+field such as source identity, producer version, codec settings, reference
+digests, or command-line provenance.
+
+Candidate AXF1 v3 metadata section:
+
+```text
+MetadataSection:
+  entry_count       u32
+  MetadataEntry repeated entry_count
+
+MetadataEntry:
+  key_id            u16
+  value_type        u8
+  flags             u8
+  value_length      u32
+  value_bytes       [value_length]
+```
+
+Suggested `value_type` values:
+
+- `1`: UTF-8 string
+- `2`: unsigned 64-bit little-endian integer
+- `3`: boolean byte, 0 or 1
+- `4`: raw bytes
+
+Suggested `flags`:
+
+- bit 0: required; readers must reject the file if `key_id` is unknown;
+- all other bits reserved and must be zero for now.
+
+Unknown optional entries should be skipped after validating `value_length`.
+Unknown required entries should fail fast before any chunk payload is decoded.
+Duplicate singleton keys should be rejected unless the key is explicitly defined
+as repeatable. Metadata entries should be sorted by `key_id` for stable output
+unless a key is repeatable.
+
+Initial key ids for a future typed section:
+
+| Key id | Name | Type | Required | Notes |
+|---:|---|---|---|---|
+| 1 | `source_path` | UTF-8 string | no | Same meaning as v2. |
+| 2 | `conversion_region` | UTF-8 string | no | Empty for full-input caches. |
+| 3 | `is_subset` | bool | yes | Distinguishes full-input and region/subset caches. |
+| 10 | `source_file_size` | u64 | no | Low-cost cache validation hint. |
+| 11 | `source_mtime_ns` | u64 | no | Local cache invalidation hint. |
+| 12 | `source_header_sha256` | raw bytes | no | 32-byte SHA-256 of BAM/SAM header text. |
+| 20 | `producer_name` | UTF-8 string | no | Example: `alignx`. |
+| 21 | `producer_version` | UTF-8 string | no | Tool version or git revision. |
+| 30 | `command_line` | UTF-8 string | no | Optional provenance; may contain local paths. |
+
+Compatibility rules:
+
+- AXF1 v1: no file metadata; readers treat it as full-input cache with empty
+  metadata.
+- AXF1 v2: fixed metadata; readers keep supporting it.
+- Future AXF1 v3: typed metadata section; readers should parse known keys,
+  skip unknown optional keys, and reject unknown required keys.
+
+Do not implement AXF1 v3 until a concrete workflow needs more metadata than v2
+provides. For now, v2 remains the active writer version.
 
 Remote boundary smoke for the HG002 AXF1 subset above:
 
@@ -416,8 +477,8 @@ Suggested implementation boundary:
   magic-based?
 - What final threshold values should the implemented hybrid chunk sizing policy
   use after empirical tuning?
-- If source identity becomes necessary, should AXF1 add fixed v3 fields or a
-  typed key/value metadata section?
+- Which metadata keys should be required if/when AXF1 v3 typed metadata is
+  implemented?
 - Should optional tags remain one raw `TAGS` column for v0, or should common tags
   such as `NM` and `MD` get early per-tag streams?
 - Should `RNAME` be implicit from chunk `ref_id` only for the first slice, or
