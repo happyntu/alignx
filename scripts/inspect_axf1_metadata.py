@@ -15,6 +15,29 @@ HEADER = struct.Struct("<4sIIQQ")
 REFERENCE_PREFIX = struct.Struct("<H")
 REFERENCE_LENGTH = struct.Struct("<I")
 INDEX_ENTRY = struct.Struct("<IiiIQQ")
+CHUNK_HEADER = struct.Struct("<IiiIH")
+COLUMN_ENTRY = struct.Struct("<HHQQ")
+
+COLUMN_NAMES = {
+    1: "qname",
+    2: "flag",
+    3: "pos",
+    4: "mapq",
+    5: "cigar",
+    6: "mate_reference",
+    7: "mate_pos",
+    8: "template_length",
+    9: "sequence",
+    10: "quality",
+    11: "tags",
+}
+
+CODEC_NAMES = {
+    0: "raw",
+    1: "pos_delta_varint",
+    2: "flag_bitpack",
+    3: "mapq_rle",
+}
 
 
 @dataclass(frozen=True)
@@ -48,6 +71,23 @@ class Axf1Metadata:
     is_subset: bool
     references: list[Reference]
     chunks: list[Chunk]
+
+
+@dataclass(frozen=True)
+class ColumnEntry:
+    chunk_index: int
+    column_id: int
+    codec_id: int
+    payload_offset: int
+    payload_length: int
+
+
+def column_name(column_id: int) -> str:
+    return COLUMN_NAMES.get(column_id, f"unknown_{column_id}")
+
+
+def codec_name(codec_id: int) -> str:
+    return CODEC_NAMES.get(codec_id, f"unknown_{codec_id}")
 
 
 def require_range(data: bytes, offset: int, size: int, label: str) -> None:
@@ -202,12 +242,95 @@ def emit_chunks(metadata: Axf1Metadata) -> None:
         )
 
 
+def read_column_entries(metadata: Axf1Metadata) -> list[ColumnEntry]:
+    data = metadata.path.read_bytes()
+    columns: list[ColumnEntry] = []
+    for chunk_index, chunk in enumerate(metadata.chunks):
+        require_range(data, chunk.chunk_offset, CHUNK_HEADER.size, f"chunk {chunk_index} header")
+        ref_id, start_pos, end_pos, record_count, column_count = CHUNK_HEADER.unpack_from(
+            data, chunk.chunk_offset
+        )
+        if (
+            ref_id != chunk.ref_id
+            or start_pos != chunk.start_pos
+            or end_pos != chunk.end_pos
+            or record_count != chunk.record_count
+        ):
+            raise ValueError(f"AXF1 chunk {chunk_index} metadata does not match index")
+
+        entries_offset = chunk.chunk_offset + CHUNK_HEADER.size
+        payload_base = entries_offset + column_count * COLUMN_ENTRY.size
+        chunk_end = chunk.chunk_offset + chunk.chunk_length
+        if payload_base > chunk_end:
+            raise ValueError(f"AXF1 chunk {chunk_index} column entries exceed chunk length")
+
+        for column_index in range(column_count):
+            entry_offset = entries_offset + column_index * COLUMN_ENTRY.size
+            require_range(
+                data,
+                entry_offset,
+                COLUMN_ENTRY.size,
+                f"chunk {chunk_index} column entry {column_index}",
+            )
+            column_id, codec_id, payload_offset, payload_length = COLUMN_ENTRY.unpack_from(
+                data, entry_offset
+            )
+            payload_file_offset = payload_base + payload_offset
+            if payload_file_offset > chunk_end or payload_length > chunk_end - payload_file_offset:
+                raise ValueError(
+                    f"AXF1 chunk {chunk_index} column {column_index} payload exceeds chunk length"
+                )
+            columns.append(
+                ColumnEntry(
+                    chunk_index=chunk_index,
+                    column_id=column_id,
+                    codec_id=codec_id,
+                    payload_offset=payload_offset,
+                    payload_length=payload_length,
+                )
+            )
+    return columns
+
+
+def emit_columns(metadata: Axf1Metadata) -> None:
+    print(
+        "chunk_index\tcolumn_id\tcolumn_name\tcodec_id\tcodec_name\t"
+        "payload_offset\tpayload_length"
+    )
+    for entry in read_column_entries(metadata):
+        print(
+            f"{entry.chunk_index}\t{entry.column_id}\t{column_name(entry.column_id)}\t"
+            f"{entry.codec_id}\t{codec_name(entry.codec_id)}\t"
+            f"{entry.payload_offset}\t{entry.payload_length}"
+        )
+
+
+def emit_column_codecs(metadata: Axf1Metadata) -> None:
+    counts: dict[tuple[int, int], int] = {}
+    for entry in read_column_entries(metadata):
+        key = (entry.column_id, entry.codec_id)
+        counts[key] = counts.get(key, 0) + 1
+
+    print("column_id\tcolumn_name\tcodec_id\tcodec_name\tchunk_count")
+    for (column_id, codec_id), count in sorted(counts.items()):
+        print(
+            f"{column_id}\t{column_name(column_id)}\t{codec_id}\t"
+            f"{codec_name(codec_id)}\t{count}"
+        )
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Inspect AXF1 header and chunk index metadata without decoding chunk payloads."
     )
     parser.add_argument("path", type=Path, help="AXF1 file to inspect")
     parser.add_argument("--chunks", action="store_true", help="print one TSV row per chunk")
+    parser.add_argument("--columns", action="store_true", help="print one TSV row per chunk column")
+    parser.add_argument(
+        "--column-codecs",
+        action="store_true",
+        help="print per-column codec distribution across chunks",
+    )
     return parser.parse_args(argv)
 
 
@@ -224,6 +347,10 @@ def main(argv: list[str]) -> int:
 
     if args.chunks:
         emit_chunks(metadata)
+    elif args.columns:
+        emit_columns(metadata)
+    elif args.column_codecs:
+        emit_column_codecs(metadata)
     else:
         emit_summary(metadata)
     return 0

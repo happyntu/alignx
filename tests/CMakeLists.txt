@@ -19,6 +19,7 @@ if(NOT GTest_FOUND)
 endif()
 
 include(GoogleTest)
+find_package(Python3 COMPONENTS Interpreter QUIET)
 
 if(UNIT_SOURCES)
   if(TARGET alignx_lib)
@@ -31,6 +32,17 @@ if(UNIT_SOURCES)
   else()
     message(WARNING "Unit tests found but alignx_lib unavailable; skipping unit_tests.")
   endif()
+endif()
+
+if(Python3_Interpreter_FOUND)
+  add_test(
+    NAME InspectAxf1MetadataScript.Columns
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_inspect_axf1_metadata.py"
+            "${CMAKE_SOURCE_DIR}/scripts/inspect_axf1_metadata.py"
+  )
+else()
+  message(STATUS "Python3 interpreter not found; skipping Python script tests.")
 endif()
 
 if(INTEGRATION_SOURCES)

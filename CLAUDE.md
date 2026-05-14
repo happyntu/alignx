@@ -110,7 +110,7 @@ caches with empty metadata.
 - `missmi-server00` alignx remote root: `/mypool/alignx/` on the large ZFS `mypool` filesystem.
 - Recommended remote layout: `/mypool/alignx/bin`, `/mypool/alignx/data`, `/mypool/alignx/refs`, `/mypool/alignx/results`, `/mypool/alignx/logs`, `/mypool/alignx/tmp`, and `/mypool/alignx/test_data`.
 - Remote alignx binaries can use the existing server HTSlib environment with `LD_LIBRARY_PATH=/home/happyntu/miniconda3/envs/hg002sv/lib`.
-- `scripts/inspect_axf1_metadata.py` can inspect AXF1 header, v2 source/subset metadata, and chunk-index metadata without decoding payloads; copy it to `/mypool/alignx/bin` for remote smoke checks when needed.
+- `scripts/inspect_axf1_metadata.py` can inspect AXF1 header, v2 source/subset metadata, chunk-index metadata, and per-chunk column codec metadata without decoding payloads; copy it to `/mypool/alignx/bin` for remote smoke checks when needed.
 - If repository scripts or binaries are needed remotely, stream the script, copy the built binary, or create a minimal runtime snapshot from the local working tree over SSH. Keep the authoritative repository and commits on the local Windows workspace.
 
 **Note:** Phase 0 includes only a minimal `alignx_lib` scaffold source for test target creation.

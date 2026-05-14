@@ -261,8 +261,8 @@ Remote HG002 hybrid chunk smoke, run on `missmi-server00` on 2026-05-14:
 This was a correctness smoke only, not a benchmark or profiling run.
 
 Chunk metadata inspection for the same AXF1 file used
-`scripts/inspect_axf1_metadata.py`, which reads only the AXF1 header and chunk
-index:
+`scripts/inspect_axf1_metadata.py`, which reads only the AXF1 header, chunk
+index, and optionally column entries:
 
 | Metric | Value |
 |---|---:|
@@ -534,9 +534,10 @@ Suggested implementation boundary:
   separate `convert_bam_to_axf1_mvp()` function.
 - `src/convert/axf1_chunk_policy.hpp/.cpp` owns the first AXF1 hybrid chunk
   sizing policy and its testable flush predicates.
-- `scripts/inspect_axf1_metadata.py` inspects AXF1 header and chunk-index
-  metadata, including v2 source/subset metadata, without decoding chunk
-  payloads.
+- `scripts/inspect_axf1_metadata.py` inspects AXF1 header, chunk-index
+  metadata, v2 source/subset metadata, and per-chunk column codec metadata
+  without decoding chunk payloads. Use `--columns` for one row per chunk column
+  and `--column-codecs` for per-column codec distribution.
 - `src/cli/cli.cpp` detects AXF0/AXF1 by file magic before falling back to the
   BAM/HTSlib view path. `.axf`/`.axf1` files with unknown magic are rejected
   instead of being treated as BAM.
