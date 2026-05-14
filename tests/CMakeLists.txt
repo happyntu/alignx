@@ -41,6 +41,12 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_inspect_axf1_metadata.py"
             "${CMAKE_SOURCE_DIR}/scripts/inspect_axf1_metadata.py"
   )
+  add_test(
+    NAME SummarizeAxf1ColumnsScript.Payloads
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_summarize_axf1_columns.py"
+            "${CMAKE_SOURCE_DIR}/scripts/summarize_axf1_columns.py"
+  )
 else()
   message(STATUS "Python3 interpreter not found; skipping Python script tests.")
 endif()

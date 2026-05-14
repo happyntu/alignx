@@ -181,6 +181,23 @@ and asserted all five expected codecs with byte-identical SAM stdout
 (`6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`)
 for 64 records. The AXF1 output was 1,172,296 bytes.
 
+## AXF1 column payload summary
+
+Use `scripts/summarize_axf1_columns.py` to summarize column payload sizes from
+AXF1 metadata without decoding payloads. This is an observability tool for
+choosing the next codec target; it is not a benchmark.
+
+```bash
+scripts/summarize_axf1_columns.py /tmp/alignx_axf1_codec_smoke/sample.axf1
+```
+
+The output is TSV with total payload bytes, chunk count, codec distribution,
+average bytes per chunk, and percent of total column payload for each column.
+The 2026-05-15 HG002 chr1 small-region AXF1 summary showed `quality` as the
+dominant remaining payload column at 77.843% of column payload bytes, followed
+by `sequence` at 19.470% and `cigar` at 1.774%. This points to QUAL as the next
+codec design target.
+
 ## AXF0 and AXF1 development status
 
 AXF0 is the row-preserving MVP path. It stores SAM-line payloads in indexed AXF

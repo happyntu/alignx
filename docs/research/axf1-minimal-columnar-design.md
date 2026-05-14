@@ -445,6 +445,27 @@ Remote AXF1 CIGAR token smoke, run on `missmi-server00` on 2026-05-15:
 
 This was a correctness smoke only, not a benchmark or profiling run.
 
+Remote AXF1 column payload summary for the expected-codec HG002 smoke output,
+computed metadata-only with `scripts/summarize_axf1_columns.py` on 2026-05-15:
+
+| Column | Codec distribution | Payload bytes | Share |
+|---|---|---:|---:|
+| `qname` | `raw:7` | 2,390 | 0.205% |
+| `flag` | `flag_bitpack:7` | 50 | 0.004% |
+| `pos` | `pos_delta_varint:7` | 114 | 0.010% |
+| `mapq` | `mapq_rle:7` | 14 | 0.001% |
+| `cigar` | `cigar_token:7` | 20,689 | 1.774% |
+| `mate_reference` | `raw:7` | 320 | 0.027% |
+| `mate_pos` | `raw:7` | 256 | 0.022% |
+| `template_length` | `raw:7` | 256 | 0.022% |
+| `sequence` | `seq_2bit_literal:7` | 227,010 | 19.470% |
+| `quality` | `raw:7` | 907,624 | 77.843% |
+| `tags` | `raw:7` | 7,249 | 0.622% |
+
+Interpretation: after POS/FLAG/MAPQ/CIGAR/SEQ codecs, raw `quality` dominates
+the remaining AXF1 payload for this HG002 small region. The next codec design
+target should be QUAL before QNAME or TAGS.
+
 ## Region-Converted AXF1 Subset Semantics
 
 `alignx convert --region` writes a subset AXF1 file containing records selected
