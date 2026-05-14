@@ -87,7 +87,8 @@ and region-query correctness.
 - [x] AXF1 QUAL alphabet bit-pack toy smoke
 - [x] AXF1 QUAL alphabet bit-pack smoke on HG002 chr1 small region
 - [x] AXF1 compressed payload wrapper design note
-- [ ] Optional compressed payload wrapper with raw/base fallback
+- [x] AXF1 `qual_pack_compressed` stored-envelope reader path with raw/base writer fallback
+- [ ] Optional zstd/LZ4 compressed payload writer path with raw/base fallback
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec design: SEQ reference-delta with reference identity metadata

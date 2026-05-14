@@ -137,6 +137,14 @@ void write_u64_at(std::vector<unsigned char>& data, std::size_t offset, std::uin
     }
 }
 
+void append_varint_u64(std::vector<unsigned char>& data, std::uint64_t value) {
+    while (value >= 0x80U) {
+        data.push_back(static_cast<unsigned char>((value & 0x7FU) | 0x80U));
+        value >>= 7U;
+    }
+    data.push_back(static_cast<unsigned char>(value));
+}
+
 std::uint64_t read_index_offset(const std::vector<unsigned char>& data) {
     return read_u64_at(data, kIndexOffsetFieldOffset);
 }
@@ -162,6 +170,61 @@ std::size_t column_payload_offset(const std::vector<unsigned char>& data,
     return static_cast<std::size_t>(read_first_chunk_offset(data)) + kChunkHeaderSize +
            11 * kColumnEntrySize +
            static_cast<std::size_t>(read_u64_at(data, entry_offset + kColumnPayloadOffsetOffset));
+}
+
+std::vector<unsigned char> make_stored_payload_envelope(std::uint64_t base_codec_id,
+                                                        const std::vector<unsigned char>& payload) {
+    std::vector<unsigned char> envelope;
+    append_varint_u64(envelope, base_codec_id);
+    append_varint_u64(envelope, 0);
+    append_varint_u64(envelope, payload.size());
+    append_varint_u64(envelope, payload.size());
+    envelope.insert(envelope.end(), payload.begin(), payload.end());
+    return envelope;
+}
+
+void replace_column_payload(std::vector<unsigned char>& data, std::size_t column_index,
+                            const std::vector<unsigned char>& replacement) {
+    const auto old_index_offset = read_index_offset(data);
+    const auto entry_offset = column_entry_offset(data, column_index);
+    const auto old_payload_offset = column_payload_offset(data, column_index);
+    const auto old_payload_length =
+        static_cast<std::size_t>(read_u64_at(data, entry_offset + kColumnLengthOffset));
+    const auto old_relative_offset = read_u64_at(data, entry_offset + kColumnPayloadOffsetOffset);
+    const auto old_size = data.size();
+
+    data.erase(data.begin() + static_cast<std::ptrdiff_t>(old_payload_offset),
+               data.begin() + static_cast<std::ptrdiff_t>(old_payload_offset + old_payload_length));
+    data.insert(data.begin() + static_cast<std::ptrdiff_t>(old_payload_offset), replacement.begin(),
+                replacement.end());
+
+    const auto new_size = data.size();
+    if (new_size >= old_size) {
+        const auto delta = static_cast<std::uint64_t>(new_size - old_size);
+        write_u64_at(data, kIndexOffsetFieldOffset, old_index_offset + delta);
+        write_u64_at(data,
+                     static_cast<std::size_t>(old_index_offset + delta) + kIndexChunkLengthOffset,
+                     read_first_chunk_length(data) + delta);
+        for (std::size_t index = column_index + 1; index < 11; ++index) {
+            const auto following_entry = column_entry_offset(data, index);
+            write_u64_at(data, following_entry + kColumnPayloadOffsetOffset,
+                         read_u64_at(data, following_entry + kColumnPayloadOffsetOffset) + delta);
+        }
+    } else {
+        const auto delta = static_cast<std::uint64_t>(old_size - new_size);
+        write_u64_at(data, kIndexOffsetFieldOffset, old_index_offset - delta);
+        write_u64_at(data,
+                     static_cast<std::size_t>(old_index_offset - delta) + kIndexChunkLengthOffset,
+                     read_first_chunk_length(data) - delta);
+        for (std::size_t index = column_index + 1; index < 11; ++index) {
+            const auto following_entry = column_entry_offset(data, index);
+            write_u64_at(data, following_entry + kColumnPayloadOffsetOffset,
+                         read_u64_at(data, following_entry + kColumnPayloadOffsetOffset) - delta);
+        }
+    }
+
+    write_u64_at(data, entry_offset + kColumnPayloadOffsetOffset, old_relative_offset);
+    write_u64_at(data, entry_offset + kColumnLengthOffset, replacement.size());
 }
 
 template <typename Mutator>
@@ -458,6 +521,130 @@ TEST(Axf1File, WritesSmallAlphabetQualityAsPack) {
     ASSERT_EQ(read->chunks[0].records.size(), 2);
     EXPECT_EQ(read->chunks[0].records[0].quality, "FFFFFFFFFF");
     EXPECT_EQ(read->chunks[0].records[1].quality, "FFFFFFFFFF");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, ReadsStoredCompressedQualPackEnvelope) {
+    const auto path = temp_path("alignx_axf1_qual_pack_compressed_stored");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto old_payload_offset = column_payload_offset(data, kQualColumnIndex);
+    const auto old_payload_length = static_cast<std::size_t>(
+        read_u64_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnLengthOffset));
+    const std::vector<unsigned char> old_payload(
+        data.begin() + static_cast<std::ptrdiff_t>(old_payload_offset),
+        data.begin() + static_cast<std::ptrdiff_t>(old_payload_offset + old_payload_length));
+    const auto envelope = make_stored_payload_envelope(
+        static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack), old_payload);
+
+    write_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack_compressed));
+    replace_column_payload(data, kQualColumnIndex, envelope);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].quality, "FFFFFFFFFF");
+    EXPECT_EQ(read->chunks[0].records[1].quality, "FFFFFFFFFF");
+
+    auto reader = alignx::format::Axf1FileReader::open(path);
+    ASSERT_TRUE(reader) << reader.error();
+    auto hits = reader->query_chunks(0, 100, 101);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 1);
+    auto chunk = reader->read_chunk_columns(*hits->at(0), {alignx::format::Axf1ColumnId::quality});
+    ASSERT_TRUE(chunk) << chunk.error();
+    ASSERT_EQ(chunk->records.size(), 2);
+    EXPECT_EQ(chunk->records[0].quality, "FFFFFFFFFF");
+    EXPECT_EQ(chunk->records[1].quality, "FFFFFFFFFF");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsUnsupportedCompressedPayloadCompression) {
+    const auto path = temp_path("alignx_axf1_unsupported_compressed_payload");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const std::vector<unsigned char> envelope{7, 1, 0, 0};
+    write_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack_compressed));
+    replace_column_payload(data, kQualColumnIndex, envelope);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("unsupported AXF1 compressed payload compression"),
+              std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsCompressedPayloadSizeMismatch) {
+    const auto path = temp_path("alignx_axf1_compressed_payload_size_mismatch");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    std::vector<unsigned char> envelope;
+    append_varint_u64(envelope, static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack));
+    append_varint_u64(envelope, 0);
+    append_varint_u64(envelope, 5);
+    append_varint_u64(envelope, 4);
+    envelope.insert(envelope.end(), {'\x01', 'F', '\x0a', '\x0a'});
+
+    write_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack_compressed));
+    replace_column_payload(data, kQualColumnIndex, envelope);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("AXF1 compressed payload size mismatch"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsUnsupportedCompressedQualBaseCodec) {
+    const auto path = temp_path("alignx_axf1_unsupported_compressed_qual_base");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto old_payload_offset = column_payload_offset(data, kQualColumnIndex);
+    const auto old_payload_length = static_cast<std::size_t>(
+        read_u64_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnLengthOffset));
+    const std::vector<unsigned char> old_payload(
+        data.begin() + static_cast<std::ptrdiff_t>(old_payload_offset),
+        data.begin() + static_cast<std::ptrdiff_t>(old_payload_offset + old_payload_length));
+    const auto envelope = make_stored_payload_envelope(
+        static_cast<std::uint16_t>(alignx::format::Axf1CodecId::raw), old_payload);
+
+    write_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack_compressed));
+    replace_column_payload(data, kQualColumnIndex, envelope);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("unsupported AXF1 compressed QUAL base codec"), std::string::npos)
+        << read.error();
 
     std::filesystem::remove(path);
 }

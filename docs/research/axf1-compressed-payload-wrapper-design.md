@@ -1,6 +1,8 @@
 # AXF1 Compressed Payload Wrapper Design
 
-Status: design note, 2026-05-15. No format change is implemented by this note.
+Status: partially implemented, 2026-05-15. AXF1 currently has a
+dependency-free `qual_pack_compressed` reader path for a stored payload envelope;
+writers still emit the smaller base codec directly and do not apply zstd/LZ4.
 
 ## Motivation
 
@@ -101,12 +103,14 @@ Initial compression registry:
 
 | id | Name | Status |
 |---:|---|---|
-| 0 | none | Invalid inside compressed envelope; use the base codec directly |
+| 0 | stored | Implemented dependency-free validation path; not emitted by default writers |
 | 1 | zstd | Future candidate |
 | 2 | lz4 | Future fast-profile candidate |
 
-The first implementation should support at most one algorithm, likely zstd,
-but the envelope should not bake zstd into the format semantics.
+The first implemented algorithm is `stored`, which preserves the envelope
+semantics without adding a compression dependency. Future zstd/LZ4 support must
+reuse the same envelope validation and fallback rules rather than creating
+one-off `*_zstd` codec ids.
 
 ## Writer Rules
 
@@ -116,6 +120,8 @@ but the envelope should not bake zstd into the format semantics.
   base payload.
 - Fall back to the base codec if compression is unavailable, unsupported for the
   selected profile, or non-beneficial.
+- Current writers do this unconditionally: they still emit the smaller base
+  codec directly and never write `qual_pack_compressed`.
 - Never apply lossy transforms in this wrapper.
 - Keep each column payload independently compressed; do not share dictionaries
   across columns or chunks in the first implementation.
@@ -156,13 +162,18 @@ without creating separate entropy-coding decisions for every column.
 ## Acceptance Criteria for a Future Implementation
 
 - Unit tests cover a compressed payload round-trip for at least one column.
+  Implemented for `qual_pack_compressed` with `stored`.
 - Unit tests cover raw/base fallback when compression is not smaller.
+  Implemented by keeping writers on the base codec path.
 - Malformed tests cover truncated envelope, unknown compression id,
   uncompressed-size mismatch, compressed-size mismatch, decompressor failure,
-  and trailing bytes.
+  and trailing bytes. Partially implemented for unsupported compression,
+  stored-size mismatch, and unsupported base codec.
 - Selected-column tests prove only requested compressed columns are decompressed.
-- Python metadata tools report wrapper codec names.
-- WSL `ctest` passes.
+  Implemented for `quality`.
+- Python metadata tools report wrapper codec names. Implemented for
+  `qual_pack_compressed`.
+- WSL `ctest` passes. Verified on 2026-05-15 with `ctest --preset wsl-debug`.
 - Toy smoke remains byte-identical to BAM and samtools stdout.
 - Remote correctness smoke is run after user confirmation and remains
   correctness-only, not benchmark/profiling.

@@ -41,6 +41,7 @@ CODEC_NAMES = {
     5: "cigar_token",
     6: "qual_rle",
     7: "qual_pack",
+    8: "qual_pack_compressed",
 }
 
 

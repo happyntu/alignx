@@ -39,6 +39,15 @@ struct EncodedColumn {
     std::vector<unsigned char> payload;
 };
 
+enum class Axf1CompressionId : std::uint64_t {
+    stored = 0,
+};
+
+struct DecodedPayloadEnvelope {
+    Axf1CodecId base_codec_id = Axf1CodecId::raw;
+    std::vector<unsigned char> payload;
+};
+
 void append_u8(std::vector<unsigned char>& bytes, std::uint8_t value) {
     bytes.push_back(value);
 }
@@ -1074,6 +1083,56 @@ read_varint_u64(Reader& reader, std::string_view truncated_error, std::string_vi
     return std::unexpected(std::string(overflow_error));
 }
 
+std::expected<DecodedPayloadEnvelope, std::string>
+decode_compressed_payload_envelope(const std::vector<unsigned char>& bytes) {
+    Reader reader(bytes);
+    auto base_codec_id = read_varint_u64(reader, "truncated AXF1 compressed payload base codec",
+                                         "AXF1 compressed payload base codec overflow");
+    if (!base_codec_id) {
+        return std::unexpected(base_codec_id.error());
+    }
+    auto compression_id = read_varint_u64(reader, "truncated AXF1 compressed payload compression",
+                                          "AXF1 compressed payload compression overflow");
+    if (!compression_id) {
+        return std::unexpected(compression_id.error());
+    }
+    auto uncompressed_size =
+        read_varint_u64(reader, "truncated AXF1 compressed payload uncompressed size",
+                        "AXF1 compressed payload uncompressed size overflow");
+    if (!uncompressed_size) {
+        return std::unexpected(uncompressed_size.error());
+    }
+    auto compressed_size = read_varint_u64(reader, "truncated AXF1 compressed payload size",
+                                           "AXF1 compressed payload size overflow");
+    if (!compressed_size) {
+        return std::unexpected(compressed_size.error());
+    }
+    if (*uncompressed_size > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) ||
+        *compressed_size > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+        return std::unexpected("AXF1 compressed payload size is too large");
+    }
+    if (*compression_id != static_cast<std::uint64_t>(Axf1CompressionId::stored)) {
+        return std::unexpected("unsupported AXF1 compressed payload compression");
+    }
+    if (*compressed_size > reader.size() - reader.offset()) {
+        return std::unexpected("truncated AXF1 compressed payload bytes");
+    }
+
+    auto payload = reader.read_string(static_cast<std::size_t>(*compressed_size));
+    if (!payload) {
+        return std::unexpected("truncated AXF1 compressed payload bytes");
+    }
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 compressed payload has trailing bytes");
+    }
+    if (*uncompressed_size != *compressed_size) {
+        return std::unexpected("AXF1 compressed payload size mismatch");
+    }
+    return DecodedPayloadEnvelope{.base_codec_id = static_cast<Axf1CodecId>(*base_codec_id),
+                                  .payload =
+                                      std::vector<unsigned char>(payload->begin(), payload->end())};
+}
+
 std::expected<std::vector<std::int32_t>, std::string>
 decode_pos_delta_varint_column(const std::vector<unsigned char>& bytes,
                                std::uint32_t record_count) {
@@ -1418,7 +1477,8 @@ bool is_supported_column_codec(Axf1ColumnId column_id, Axf1CodecId codec_id) {
            (column_id == Axf1ColumnId::cigar && codec_id == Axf1CodecId::cigar_token) ||
            (column_id == Axf1ColumnId::sequence && codec_id == Axf1CodecId::seq_2bit_literal) ||
            (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_rle) ||
-           (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_pack);
+           (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_pack) ||
+           (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_pack_compressed);
 }
 
 bool contains_column(const std::vector<Axf1ColumnId>& columns, Axf1ColumnId column_id) {
@@ -1641,6 +1701,15 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
                 values = decode_qual_rle_column(*payload, *record_count);
             } else if (entry.codec_id == Axf1CodecId::qual_pack) {
                 values = decode_qual_pack_column(*payload, *record_count);
+            } else if (entry.codec_id == Axf1CodecId::qual_pack_compressed) {
+                auto envelope = decode_compressed_payload_envelope(*payload);
+                if (!envelope) {
+                    return std::unexpected(envelope.error());
+                }
+                if (envelope->base_codec_id != Axf1CodecId::qual_pack) {
+                    return std::unexpected("unsupported AXF1 compressed QUAL base codec");
+                }
+                values = decode_qual_pack_column(envelope->payload, *record_count);
             } else {
                 values = decode_string_column(*payload, *record_count);
             }
