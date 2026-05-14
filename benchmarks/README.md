@@ -133,6 +133,16 @@ LD_LIBRARY_PATH=/home/happyntu/miniconda3/envs/hg002sv/lib \
   --region chr1:1000000-2000000
 ```
 
+Last verified remote HG002 preflight:
+
+- Date: 2026-05-14
+- Host: `missmi-server00`
+- Region: `chr1:1000000-2000000`
+- `samtools view -c`: 3143 records
+- `alignx index` preflight: passed
+- Projected AXF index metadata: 195 references, 1,293,079 intervals
+- No timed repeats, profiling, or benchmark TSV were produced.
+
 Remote benchmark command shape, run only after explicit confirmation:
 
 ```bash
