@@ -52,6 +52,8 @@ struct AxfFileIndex {
     std::vector<AxfReference> references;
     std::vector<AxfBlockIndexEntry> blocks;
     std::vector<AxfBlockRange> reference_block_ranges;
+    std::vector<std::size_t> end_sorted_block_indices;
+    std::vector<AxfBlockRange> reference_end_sorted_block_ranges;
 
     [[nodiscard]] std::expected<std::vector<const AxfBlockIndexEntry*>, std::string>
     query_blocks(std::uint32_t ref_id, std::int32_t start, std::int32_t end) const;

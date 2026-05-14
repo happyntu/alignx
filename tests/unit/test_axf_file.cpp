@@ -65,6 +65,27 @@ alignx::format::AxfFile make_multi_reference_file() {
     return file;
 }
 
+alignx::format::AxfFile make_long_overlap_file() {
+    alignx::format::AxfFile file;
+    file.references.push_back({.name = "chrLong", .length = 2000});
+    file.blocks.push_back({.ref_id = 0,
+                           .start_pos = 500,
+                           .end_pos = 600,
+                           .record_count = 2,
+                           .payload = bytes("late-short\n")});
+    file.blocks.push_back({.ref_id = 0,
+                           .start_pos = 50,
+                           .end_pos = 700,
+                           .record_count = 1,
+                           .payload = bytes("early-long\n")});
+    file.blocks.push_back({.ref_id = 0,
+                           .start_pos = 800,
+                           .end_pos = 900,
+                           .record_count = 3,
+                           .payload = bytes("after-query\n")});
+    return file;
+}
+
 std::vector<unsigned char> read_bytes(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     input.seekg(0, std::ios::end);
@@ -210,12 +231,20 @@ TEST(AxfFile, MetadataSortsBlocksAndQueriesOnlyMatchingReference) {
 
     ASSERT_EQ(metadata->blocks.size(), 5);
     ASSERT_EQ(metadata->reference_block_ranges.size(), 3);
+    ASSERT_EQ(metadata->reference_end_sorted_block_ranges.size(), 3);
     EXPECT_EQ(metadata->reference_block_ranges[0].begin, 0);
     EXPECT_EQ(metadata->reference_block_ranges[0].end, 3);
     EXPECT_EQ(metadata->reference_block_ranges[1].begin, 3);
     EXPECT_EQ(metadata->reference_block_ranges[1].end, 5);
     EXPECT_EQ(metadata->reference_block_ranges[2].begin, 5);
     EXPECT_EQ(metadata->reference_block_ranges[2].end, 5);
+    EXPECT_EQ(metadata->reference_end_sorted_block_ranges[0].begin, 0);
+    EXPECT_EQ(metadata->reference_end_sorted_block_ranges[0].end, 3);
+    EXPECT_EQ(metadata->reference_end_sorted_block_ranges[1].begin, 3);
+    EXPECT_EQ(metadata->reference_end_sorted_block_ranges[1].end, 5);
+    EXPECT_EQ(metadata->reference_end_sorted_block_ranges[2].begin, 5);
+    EXPECT_EQ(metadata->reference_end_sorted_block_ranges[2].end, 5);
+    ASSERT_EQ(metadata->end_sorted_block_indices.size(), metadata->blocks.size());
 
     EXPECT_EQ(metadata->blocks[0].ref_id, 0);
     EXPECT_EQ(metadata->blocks[0].start_pos, 100);
@@ -256,6 +285,39 @@ TEST(AxfFile, MetadataSortsBlocksAndQueriesOnlyMatchingReference) {
     auto empty_hits = metadata->query_blocks(2, 1, 100);
     ASSERT_TRUE(empty_hits) << empty_hits.error();
     EXPECT_TRUE(empty_hits->empty());
+
+    std::filesystem::remove(path);
+}
+
+TEST(AxfFile, MetadataUsesEndSortedCandidatesWithoutChangingOutputOrder) {
+    const auto path = temp_path("alignx_metadata_end_sorted_candidates.axf");
+    const auto file = make_long_overlap_file();
+
+    auto write = alignx::format::write_axf_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto metadata = alignx::format::read_axf_index_metadata(path);
+    ASSERT_TRUE(metadata) << metadata.error();
+
+    ASSERT_EQ(metadata->blocks.size(), 3);
+    EXPECT_EQ(metadata->blocks[0].record_count, 1);
+    EXPECT_EQ(metadata->blocks[1].record_count, 2);
+    EXPECT_EQ(metadata->blocks[2].record_count, 3);
+
+    ASSERT_EQ(metadata->end_sorted_block_indices.size(), 3);
+    EXPECT_EQ(metadata->end_sorted_block_indices[0], 1);
+    EXPECT_EQ(metadata->end_sorted_block_indices[1], 0);
+    EXPECT_EQ(metadata->end_sorted_block_indices[2], 2);
+
+    auto hits = metadata->query_blocks(0, 550, 560);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 2);
+    EXPECT_EQ(hits->at(0)->record_count, 1);
+    EXPECT_EQ(hits->at(1)->record_count, 2);
+
+    hits = metadata->query_blocks(0, 750, 760);
+    ASSERT_TRUE(hits) << hits.error();
+    EXPECT_TRUE(hits->empty());
 
     std::filesystem::remove(path);
 }

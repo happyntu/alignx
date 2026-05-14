@@ -312,6 +312,37 @@ void build_reference_block_ranges(AxfFileIndex& index) {
     }
 }
 
+void build_end_sorted_block_indices(AxfFileIndex& index) {
+    index.end_sorted_block_indices.clear();
+    index.end_sorted_block_indices.reserve(index.blocks.size());
+    index.reference_end_sorted_block_ranges.assign(index.references.size(), {});
+
+    for (std::size_t ref_id = 0; ref_id < index.references.size(); ++ref_id) {
+        const std::size_t begin = index.end_sorted_block_indices.size();
+        const AxfBlockRange block_range = index.reference_block_ranges.at(ref_id);
+        for (std::size_t block_index = block_range.begin; block_index < block_range.end;
+             ++block_index) {
+            index.end_sorted_block_indices.push_back(block_index);
+        }
+
+        std::sort(index.end_sorted_block_indices.begin() + static_cast<std::ptrdiff_t>(begin),
+                  index.end_sorted_block_indices.end(),
+                  [&index](std::size_t lhs_index, std::size_t rhs_index) {
+                      const AxfBlockIndexEntry& lhs = index.blocks.at(lhs_index);
+                      const AxfBlockIndexEntry& rhs = index.blocks.at(rhs_index);
+                      if (lhs.end_pos != rhs.end_pos) {
+                          return lhs.end_pos < rhs.end_pos;
+                      }
+                      if (lhs.start_pos != rhs.start_pos) {
+                          return lhs.start_pos < rhs.start_pos;
+                      }
+                      return lhs_index < rhs_index;
+                  });
+        index.reference_end_sorted_block_ranges[ref_id] = {
+            .begin = begin, .end = index.end_sorted_block_indices.size()};
+    }
+}
+
 } // namespace
 
 bool AxfBlock::overlaps(std::int32_t query_start, std::int32_t query_end) const noexcept {
@@ -353,6 +384,37 @@ AxfFileIndex::query_blocks(std::uint32_t ref_id, std::int32_t start, std::int32_
     const AxfBlockRange range = reference_block_ranges.size() == references.size()
                                     ? reference_block_ranges.at(ref_id)
                                     : AxfBlockRange{.begin = 0, .end = blocks.size()};
+
+    if (reference_end_sorted_block_ranges.size() == references.size() &&
+        end_sorted_block_indices.size() == blocks.size()) {
+        const AxfBlockRange end_sorted_range = reference_end_sorted_block_ranges.at(ref_id);
+        auto first_candidate = std::lower_bound(
+            end_sorted_block_indices.begin() + static_cast<std::ptrdiff_t>(end_sorted_range.begin),
+            end_sorted_block_indices.begin() + static_cast<std::ptrdiff_t>(end_sorted_range.end),
+            start, [this](std::size_t block_index, std::int32_t query_start) {
+                return blocks.at(block_index).end_pos <= query_start;
+            });
+
+        std::vector<std::size_t> hit_indices;
+        for (auto candidate = first_candidate;
+             candidate !=
+             end_sorted_block_indices.begin() + static_cast<std::ptrdiff_t>(end_sorted_range.end);
+             ++candidate) {
+            const std::size_t block_index = *candidate;
+            const AxfBlockIndexEntry& block = blocks.at(block_index);
+            if (block.ref_id == ref_id && block.start_pos < end && block.overlaps(start, end)) {
+                hit_indices.push_back(block_index);
+            }
+        }
+
+        std::sort(hit_indices.begin(), hit_indices.end());
+        hits.reserve(hit_indices.size());
+        for (std::size_t block_index : hit_indices) {
+            hits.push_back(&blocks.at(block_index));
+        }
+        return hits;
+    }
+
     for (std::size_t index = range.begin; index < range.end; ++index) {
         const AxfBlockIndexEntry& block = blocks.at(index);
         if (block.ref_id == ref_id && block.start_pos >= end) {
@@ -638,6 +700,7 @@ read_axf_index_metadata(const std::filesystem::path& path) {
                   return lhs.end_pos < rhs.end_pos;
               });
     build_reference_block_ranges(index);
+    build_end_sorted_block_indices(index);
     return index;
 }
 

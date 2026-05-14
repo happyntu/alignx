@@ -23,8 +23,9 @@ Current implementation characteristics:
   entries without materializing payloads.
 - `format::read_axf_block_payload()` reads payload bytes lazily by offset and
   length for query hits.
-- `AxfFileIndex::query_blocks()` scans the sorted block range for the requested
-  reference and stops once block starts pass the query end.
+- `AxfFileIndex::query_blocks()` uses a per-reference end-sorted candidate index
+  to skip blocks ending before the query start, then returns hits in the stable
+  start-sorted block order.
 - `query::write_axf_region_sam()` filters records inside the already-loaded
   row-preserving SAM payloads and writes atomic stdout after successful
   validation.
@@ -71,6 +72,9 @@ Step 1 is implemented:
 - `format::AxfFileIndex` stores references plus block index entries.
 - `format::AxfFileIndex` stores per-reference block ranges for query-time
   candidate narrowing.
+- `format::AxfFileIndex` stores a per-reference end-sorted block index because
+  the primary `ref_id/start_pos/end_pos` order does not make `end_pos`
+  monotonic.
 - `format::read_axf_index_metadata(path)` reads header, reference metadata, and
   block index entries without materializing `AxfBlock::payload`.
 - Metadata validation checks magic/version, index offset, block reference ids,
