@@ -73,6 +73,7 @@ Completed:
 - AXF1 QUAL alphabet bit-pack codec with raw fallback; writer chooses the smallest of raw, `qual_rle`, and `qual_pack`
 - AXF1 QUAL alphabet bit-pack toy smoke verified byte-identical SAM stdout and `qual_pack` codec distribution
 - AXF1 QUAL alphabet bit-pack remote HG002 chr1 small-region correctness smoke verified stdout parity and `qual_pack` on 7/7 chunks
+- AXF1 compressed payload wrapper design note: prefer shared payload envelopes over one-off `*_zstd` codec ids before adding compression dependencies
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV

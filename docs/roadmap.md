@@ -86,6 +86,8 @@ and region-query correctness.
 - [x] AXF1 QUAL alphabet bit-pack codec with raw fallback
 - [x] AXF1 QUAL alphabet bit-pack toy smoke
 - [x] AXF1 QUAL alphabet bit-pack smoke on HG002 chr1 small region
+- [x] AXF1 compressed payload wrapper design note
+- [ ] Optional compressed payload wrapper with raw/base fallback
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec design: SEQ reference-delta with reference identity metadata
@@ -119,7 +121,7 @@ and region-query correctness.
 
 **Deliverables:**
 
-- [ ] QUAL codec: Illumina 8-level binning + zstd
+- [ ] QUAL codec: stronger lossless model or compressed wrapper; lossy binning only under explicit lossy profile
 - [ ] CIGAR delta + op dictionary encoding
 - [ ] QNAME dictionary encoding
 - [ ] TAG per-stream encoding

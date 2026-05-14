@@ -510,6 +510,12 @@ with `qual_pack`, or from 77.843% to 75.468% of column payload bytes. QUAL
 remains the dominant payload column, but chunk-local alphabet packing is useful
 on this HG002 region.
 
+The next generic compression design is a compressed payload wrapper, described
+in `docs/research/axf1-compressed-payload-wrapper-design.md`. It prefers shared
+payload envelopes over one-off `*_zstd` codec ids, keeps compression optional,
+and defers dependency choices such as zstd until the envelope semantics are
+implemented.
+
 ## Region-Converted AXF1 Subset Semantics
 
 `alignx convert --region` writes a subset AXF1 file containing records selected
@@ -693,6 +699,9 @@ Suggested implementation boundary:
 - `docs/research/axf1-qual-next-codec-design.md` defines the next QUAL codec
   path: lossless chunk-local alphabet bit-pack with raw fallback before context
   models or compressed column wrappers.
+- `docs/research/axf1-compressed-payload-wrapper-design.md` defines the
+  recommended generic compression path: shared payload envelopes with
+  raw/base-codec fallback before adding zstd or other compression dependencies.
 - `CMakeLists.txt` already globs `src/format/*.cpp`, `src/query/*.cpp`,
   `src/convert/*.cpp`, and `tests/unit/*.cpp`, so the proposed AXF1 source and
   test files are automatically added to `alignx_lib` and `unit_tests`.
