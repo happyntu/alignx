@@ -50,6 +50,7 @@ Completed:
 - AXF1 POS column delta-varint codec for monotonic chunks, with raw fallback for non-monotonic record order
 - AXF1 POS delta-varint remote HG002 chr1 small-region correctness smoke
 - AXF1 FLAG bit-pack codec with raw fallback when bit-packing is not smaller
+- AXF1 FLAG bit-pack remote HG002 chr1 small-region correctness smoke
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV

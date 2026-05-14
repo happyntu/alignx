@@ -326,6 +326,31 @@ Remote AXF1 POS delta-varint smoke, run on `missmi-server00` on 2026-05-14:
 
 This was a correctness smoke only, not a benchmark or profiling run.
 
+Remote AXF1 FLAG bit-pack smoke, run on `missmi-server00` on 2026-05-14:
+
+- Output directory:
+  `/mypool/alignx/tmp/axf1_flag_bitpack_smoke_hg002_chr1_1000000_1010000_20260514`
+- AXF1 output: `hg002_chr1_small_flag_bitpack.axf1`
+- Version: 2
+- `is_subset`: true
+- `source_path`:
+  `/mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam`
+- `conversion_region`: `chr1:1000000-1010000`
+- AXF1 file size: 1,857,974 bytes
+- Chunk count: 7
+- Total records: 64
+- FLAG codec distribution: codec id `2` on 7/7 chunks
+- POS codec distribution: codec id `1` on 7/7 chunks
+- Max records per chunk: 11
+- Max span: 27,665 bp
+- Max chunk length: 294,483 bytes
+- `axf1 view`, `alignx view` on BAM, and `samtools view` stdout SHA256:
+  `6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`
+- Result: every chunk used the FLAG bit-pack codec and POS delta-varint codec,
+  and AXF1 stdout matched both BAM-backed alignx output and samtools output.
+
+This was a correctness smoke only, not a benchmark or profiling run.
+
 ## Region-Converted AXF1 Subset Semantics
 
 `alignx convert --region` writes a subset AXF1 file containing records selected
