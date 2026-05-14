@@ -32,6 +32,33 @@ alignx::format::AxfFile make_file() {
     return file;
 }
 
+alignx::format::AxfFile make_multi_reference_file() {
+    alignx::format::AxfFile file;
+    file.references.push_back({.name = "chrAlpha", .length = 1000});
+    file.references.push_back({.name = "chrBeta", .length = 2000});
+    file.blocks.push_back({.ref_id = 1,
+                           .start_pos = 300,
+                           .end_pos = 400,
+                           .record_count = 1,
+                           .payload = bytes("beta-late\n")});
+    file.blocks.push_back({.ref_id = 0,
+                           .start_pos = 100,
+                           .end_pos = 150,
+                           .record_count = 2,
+                           .payload = bytes("alpha-first\n")});
+    file.blocks.push_back({.ref_id = 1,
+                           .start_pos = 100,
+                           .end_pos = 200,
+                           .record_count = 3,
+                           .payload = bytes("beta-first\n")});
+    file.blocks.push_back({.ref_id = 0,
+                           .start_pos = 140,
+                           .end_pos = 220,
+                           .record_count = 4,
+                           .payload = bytes("alpha-second\n")});
+    return file;
+}
+
 std::vector<unsigned char> read_bytes(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     input.seekg(0, std::ios::end);
@@ -160,6 +187,52 @@ TEST(AxfFile, ReadsIndexMetadataWithoutPayloadObjects) {
     std::filesystem::remove(path);
 }
 
+TEST(AxfFile, MetadataSortsBlocksAndQueriesOnlyMatchingReference) {
+    const auto path = temp_path("alignx_metadata_multi_reference.axf");
+    const auto file = make_multi_reference_file();
+
+    auto write = alignx::format::write_axf_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto metadata = alignx::format::read_axf_index_metadata(path);
+    ASSERT_TRUE(metadata) << metadata.error();
+
+    ASSERT_EQ(metadata->references.size(), 2);
+    EXPECT_EQ(metadata->references[0].name, "chrAlpha");
+    EXPECT_EQ(metadata->references[1].name, "chrBeta");
+
+    ASSERT_EQ(metadata->blocks.size(), 4);
+    EXPECT_EQ(metadata->blocks[0].ref_id, 0);
+    EXPECT_EQ(metadata->blocks[0].start_pos, 100);
+    EXPECT_EQ(metadata->blocks[0].record_count, 2);
+    EXPECT_EQ(metadata->blocks[1].ref_id, 0);
+    EXPECT_EQ(metadata->blocks[1].start_pos, 140);
+    EXPECT_EQ(metadata->blocks[1].record_count, 4);
+    EXPECT_EQ(metadata->blocks[2].ref_id, 1);
+    EXPECT_EQ(metadata->blocks[2].start_pos, 100);
+    EXPECT_EQ(metadata->blocks[2].record_count, 3);
+    EXPECT_EQ(metadata->blocks[3].ref_id, 1);
+    EXPECT_EQ(metadata->blocks[3].start_pos, 300);
+    EXPECT_EQ(metadata->blocks[3].record_count, 1);
+
+    auto alpha_hits = metadata->query_blocks(0, 145, 160);
+    ASSERT_TRUE(alpha_hits) << alpha_hits.error();
+    ASSERT_EQ(alpha_hits->size(), 2);
+    EXPECT_EQ(alpha_hits->at(0)->record_count, 2);
+    EXPECT_EQ(alpha_hits->at(1)->record_count, 4);
+
+    auto beta_hits = metadata->query_blocks(1, 145, 160);
+    ASSERT_TRUE(beta_hits) << beta_hits.error();
+    ASSERT_EQ(beta_hits->size(), 1);
+    EXPECT_EQ(beta_hits->at(0)->record_count, 3);
+
+    beta_hits = metadata->query_blocks(1, 220, 250);
+    ASSERT_TRUE(beta_hits) << beta_hits.error();
+    EXPECT_TRUE(beta_hits->empty());
+
+    std::filesystem::remove(path);
+}
+
 TEST(AxfFile, ReadsBlockPayloadFromIndexEntry) {
     const auto path = temp_path("alignx_metadata_payload_read.axf");
     const auto file = make_file();
@@ -235,6 +308,41 @@ TEST(AxfFileReader, ReadsPayloadForQueryHit) {
     auto payload = reader->read_payload(*hits->at(0));
     ASSERT_TRUE(payload) << payload.error();
     EXPECT_EQ(*payload, file.blocks[0].payload);
+
+    std::filesystem::remove(path);
+}
+
+TEST(AxfFileReader, ReadsMultiplePayloadsInSortedQueryOrder) {
+    const auto path = temp_path("alignx_file_reader_multi_payload.axf");
+    const auto file = make_multi_reference_file();
+
+    auto write = alignx::format::write_axf_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto reader = alignx::format::AxfFileReader::open(path);
+    ASSERT_TRUE(reader) << reader.error();
+
+    auto hits = reader->query_blocks(0, 145, 160);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 2);
+    EXPECT_EQ(hits->at(0)->record_count, 2);
+    EXPECT_EQ(hits->at(1)->record_count, 4);
+
+    auto first_payload = reader->read_payload(*hits->at(0));
+    ASSERT_TRUE(first_payload) << first_payload.error();
+    EXPECT_EQ(*first_payload, bytes("alpha-first\n"));
+
+    auto second_payload = reader->read_payload(*hits->at(1));
+    ASSERT_TRUE(second_payload) << second_payload.error();
+    EXPECT_EQ(*second_payload, bytes("alpha-second\n"));
+
+    hits = reader->query_blocks(1, 145, 160);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 1);
+
+    auto beta_payload = reader->read_payload(*hits->at(0));
+    ASSERT_TRUE(beta_payload) << beta_payload.error();
+    EXPECT_EQ(*beta_payload, bytes("beta-first\n"));
 
     std::filesystem::remove(path);
 }
