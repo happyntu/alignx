@@ -194,6 +194,17 @@ Current converter chunk policy:
   chunking should use a hybrid policy that considers encoded byte size, genomic
   span, record count, and independent column decode cost.
 
+Current correctness coverage:
+
+- toy BAM -> AXF1 -> view stdout parity for mapped toy records;
+- explicit mapped-only converter behavior: the toy unmapped `read003` is not
+  written to AXF1;
+- multi-chunk query of converted AXF1 output;
+- synthetic multi-reference and multi-chunk query ordering;
+- metadata-first lazy decode, including malformed non-overlapping chunks;
+- atomic stdout behavior for malformed overlapping chunks;
+- magic-based AXF0/AXF1 CLI view routing.
+
 1. Add AXF1 data structs and format read/write tests in files that do not
    disturb AXF0.
 2. Add writer/reader round-trip tests using synthetic toy records.
@@ -260,6 +271,8 @@ Before replacing AXF0 in any workflow:
 
 - keep AXF0 toy, WSL, and remote HG002 correctness smoke checks passing;
 - require AXF1 round-trip and view parity tests on the toy BAM fixture;
+- require explicit mapped-only converter tests until unmapped AXF1 support is
+  designed;
 - require AXF1 multi-reference and multi-chunk ordering tests;
 - require malformed AXF1 payload tests to prove stdout atomicity;
 - require no-hit and missing-reference behavior to match AXF0;

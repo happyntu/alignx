@@ -226,6 +226,29 @@ TEST(BamToAxf, Axf1ViewCanQuerySecondConvertedChunk) {
     std::filesystem::remove(path);
 }
 
+TEST(BamToAxf, Axf1MvpSkipsToyUnmappedRecord) {
+    const auto path =
+        std::filesystem::temp_directory_path() / "alignx_toy_convert_mapped_only.axf1";
+
+    auto convert = alignx::convert::convert_bam_to_axf1_mvp(toy_bam_path(), path);
+    ASSERT_TRUE(convert) << convert.error();
+
+    auto axf = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(axf) << axf.error();
+
+    std::size_t record_count = 0;
+    for (const alignx::format::Axf1Chunk& chunk : axf->chunks) {
+        for (const alignx::format::Axf1Record& record : chunk.records) {
+            ++record_count;
+            EXPECT_NE(record.qname, "read003");
+            EXPECT_NE(record.flag, 4);
+        }
+    }
+    EXPECT_EQ(record_count, 2);
+
+    std::filesystem::remove(path);
+}
+
 TEST(BamToAxf, ConvertsOnlyRequestedRegionToAxf1) {
     const auto path = std::filesystem::temp_directory_path() / "alignx_toy_convert_region.axf1";
 
