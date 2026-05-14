@@ -7,6 +7,10 @@
 #include <string_view>
 #include <utility>
 
+#ifdef ALIGNX_HAVE_ZSTD
+#include <zstd.h>
+#endif
+
 namespace alignx::format {
 namespace {
 
@@ -1113,16 +1117,6 @@ decode_compressed_payload_envelope(const std::vector<unsigned char>& bytes) {
         *compressed_size > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
         return std::unexpected("AXF1 compressed payload size is too large");
     }
-    if (*compression_id == static_cast<std::uint64_t>(Axf1CompressionId::zstd)) {
-#ifdef ALIGNX_HAVE_ZSTD
-        return std::unexpected("AXF1 zstd compressed payload decompression is not implemented");
-#else
-        return std::unexpected("unsupported AXF1 compressed payload compression");
-#endif
-    }
-    if (*compression_id != static_cast<std::uint64_t>(Axf1CompressionId::stored)) {
-        return std::unexpected("unsupported AXF1 compressed payload compression");
-    }
     if (*compressed_size > reader.size() - reader.offset()) {
         return std::unexpected("truncated AXF1 compressed payload bytes");
     }
@@ -1134,12 +1128,34 @@ decode_compressed_payload_envelope(const std::vector<unsigned char>& bytes) {
     if (reader.offset() != reader.size()) {
         return std::unexpected("AXF1 compressed payload has trailing bytes");
     }
-    if (*uncompressed_size != *compressed_size) {
-        return std::unexpected("AXF1 compressed payload size mismatch");
+    std::vector<unsigned char> compressed_payload(payload->begin(), payload->end());
+    std::vector<unsigned char> decoded_payload;
+    if (*compression_id == static_cast<std::uint64_t>(Axf1CompressionId::stored)) {
+        if (*uncompressed_size != *compressed_size) {
+            return std::unexpected("AXF1 compressed payload size mismatch");
+        }
+        decoded_payload = std::move(compressed_payload);
+    } else if (*compression_id == static_cast<std::uint64_t>(Axf1CompressionId::zstd)) {
+#ifdef ALIGNX_HAVE_ZSTD
+        decoded_payload.resize(static_cast<std::size_t>(*uncompressed_size));
+        const std::size_t result =
+            ZSTD_decompress(decoded_payload.data(), decoded_payload.size(),
+                            compressed_payload.data(), compressed_payload.size());
+        if (ZSTD_isError(result) != 0) {
+            return std::unexpected(std::string("failed to decompress AXF1 zstd payload: ") +
+                                   ZSTD_getErrorName(result));
+        }
+        if (result != decoded_payload.size()) {
+            return std::unexpected("AXF1 zstd decompressed size mismatch");
+        }
+#else
+        return std::unexpected("unsupported AXF1 compressed payload compression");
+#endif
+    } else {
+        return std::unexpected("unsupported AXF1 compressed payload compression");
     }
     return DecodedPayloadEnvelope{.base_codec_id = static_cast<Axf1CodecId>(*base_codec_id),
-                                  .payload =
-                                      std::vector<unsigned char>(payload->begin(), payload->end())};
+                                  .payload = std::move(decoded_payload)};
 }
 
 std::expected<std::vector<unsigned char>, std::string>

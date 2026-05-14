@@ -2,8 +2,9 @@
 
 Status: partially implemented, 2026-05-15. AXF1 currently has a
 dependency-free `qual_pack_compressed` reader path for a stored payload envelope;
-writers still emit the smaller base codec directly. A zstd feature gate exists,
-but zstd decompression and writer emission are not implemented yet.
+zstd envelope decode is available when built with `ALIGNX_ENABLE_ZSTD=ON`.
+Writers still emit the smaller base codec directly and do not emit zstd
+wrappers.
 
 ## Motivation
 
@@ -105,7 +106,7 @@ Initial compression registry:
 | id | Name | Status |
 |---:|---|---|
 | 0 | stored | Implemented dependency-free validation path; not emitted by default writers |
-| 1 | zstd | Planned optional feature-gated implementation |
+| 1 | zstd | Implemented reader when built with `ALIGNX_ENABLE_ZSTD=ON`; writer pending |
 | 2 | lz4 | Future fast-profile candidate |
 
 The first implemented algorithm is `stored`, which preserves the envelope
@@ -170,7 +171,7 @@ gate. It must not make zstd a required dependency for normal AXF1 builds.
   clear message.
 - If detected, link `alignx_lib` to the selected zstd target and define
   `ALIGNX_HAVE_ZSTD`.
-  Implemented as feature-gate scaffolding; no zstd API is called yet.
+  Implemented.
 
 This is stricter than HTSlib's current optional behavior because enabling zstd
 is an explicit request to produce or consume zstd-compressed AXF1 payloads.
@@ -181,7 +182,7 @@ is an explicit request to produce or consume zstd-compressed AXF1 payloads.
   envelope.
 - Builds with `ALIGNX_HAVE_ZSTD` decompress the payload, require output size to
   exactly match `uncompressed_size`, then pass the bytes to the base codec
-  decoder. Not implemented yet.
+  decoder. Implemented for reader decode.
 - Builds without `ALIGNX_HAVE_ZSTD` must reject `compression_id = 1` with a
   clear "unsupported AXF1 compressed payload compression" style error.
   Implemented.
@@ -239,8 +240,9 @@ without creating separate entropy-coding decisions for every column.
 - Malformed tests cover truncated envelope, unknown compression id,
   uncompressed-size mismatch, compressed-size mismatch, decompressor failure,
   and trailing bytes. Implemented for truncated envelope fields, unsupported
-  compression, stored-size mismatch, truncated stored bytes, trailing bytes, and
-  unsupported base codec. Decompressor failure remains future zstd/LZ4 work.
+  compression, stored-size mismatch, truncated stored bytes, trailing bytes,
+  unsupported base codec, corrupt zstd payloads, and zstd decompressed-size
+  mismatch.
 - Selected-column tests prove only requested compressed columns are decompressed.
   Implemented for `quality`.
 - Python metadata tools report wrapper codec names. Implemented for

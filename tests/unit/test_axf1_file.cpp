@@ -9,6 +9,10 @@
 
 #include "format/axf1_file.hpp"
 
+#ifdef ALIGNX_HAVE_ZSTD
+#include <zstd.h>
+#endif
+
 namespace {
 
 constexpr std::size_t kIndexOffsetFieldOffset = 20;
@@ -182,6 +186,27 @@ std::vector<unsigned char> make_stored_payload_envelope(std::uint64_t base_codec
     envelope.insert(envelope.end(), payload.begin(), payload.end());
     return envelope;
 }
+
+#ifdef ALIGNX_HAVE_ZSTD
+std::vector<unsigned char>
+make_zstd_payload_envelope(std::uint64_t base_codec_id, const std::vector<unsigned char>& payload,
+                           std::uint64_t uncompressed_size_override = 0) {
+    std::vector<unsigned char> compressed(ZSTD_compressBound(payload.size()));
+    const std::size_t compressed_size =
+        ZSTD_compress(compressed.data(), compressed.size(), payload.data(), payload.size(), 1);
+    EXPECT_EQ(ZSTD_isError(compressed_size), 0U) << ZSTD_getErrorName(compressed_size);
+    compressed.resize(compressed_size);
+
+    std::vector<unsigned char> envelope;
+    append_varint_u64(envelope, base_codec_id);
+    append_varint_u64(envelope, 1);
+    append_varint_u64(envelope, uncompressed_size_override == 0 ? payload.size()
+                                                                : uncompressed_size_override);
+    append_varint_u64(envelope, compressed.size());
+    envelope.insert(envelope.end(), compressed.begin(), compressed.end());
+    return envelope;
+}
+#endif
 
 void replace_column_payload(std::vector<unsigned char>& data, std::size_t column_index,
                             const std::vector<unsigned char>& replacement) {
@@ -591,9 +616,97 @@ TEST(Axf1File, ReadsStoredCompressedQualPackEnvelope) {
 }
 
 TEST(Axf1File, RejectsZstdCompressedPayloadWhenZstdIsDisabled) {
+#ifndef ALIGNX_HAVE_ZSTD
     expect_compressed_quality_payload_rejected("alignx_axf1_zstd_compressed_payload_disabled",
                                                {7, 1, 0, 0},
                                                "unsupported AXF1 compressed payload compression");
+#endif
+}
+
+TEST(Axf1File, ReadsZstdCompressedQualPackEnvelopeWhenEnabled) {
+#ifdef ALIGNX_HAVE_ZSTD
+    const auto path = temp_path("alignx_axf1_qual_pack_compressed_zstd");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto old_payload_offset = column_payload_offset(data, kQualColumnIndex);
+    const auto old_payload_length = static_cast<std::size_t>(
+        read_u64_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnLengthOffset));
+    const std::vector<unsigned char> old_payload(
+        data.begin() + static_cast<std::ptrdiff_t>(old_payload_offset),
+        data.begin() + static_cast<std::ptrdiff_t>(old_payload_offset + old_payload_length));
+    const auto envelope = make_zstd_payload_envelope(
+        static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack), old_payload);
+
+    write_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack_compressed));
+    replace_column_payload(data, kQualColumnIndex, envelope);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].quality, "FFFFFFFFFF");
+    EXPECT_EQ(read->chunks[0].records[1].quality, "FFFFFFFFFF");
+
+    auto reader = alignx::format::Axf1FileReader::open(path);
+    ASSERT_TRUE(reader) << reader.error();
+    auto hits = reader->query_chunks(0, 100, 101);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 1);
+    auto chunk = reader->read_chunk_columns(*hits->at(0), {alignx::format::Axf1ColumnId::quality});
+    ASSERT_TRUE(chunk) << chunk.error();
+    ASSERT_EQ(chunk->records.size(), 2);
+    EXPECT_EQ(chunk->records[0].quality, "FFFFFFFFFF");
+    EXPECT_EQ(chunk->records[1].quality, "FFFFFFFFFF");
+
+    std::filesystem::remove(path);
+#endif
+}
+
+TEST(Axf1File, RejectsCorruptZstdCompressedPayloadWhenEnabled) {
+#ifdef ALIGNX_HAVE_ZSTD
+    expect_compressed_quality_payload_rejected("alignx_axf1_corrupt_zstd_payload",
+                                               {7, 1, 4, 4, 0, 0, 0, 0},
+                                               "failed to decompress AXF1 zstd payload");
+#endif
+}
+
+TEST(Axf1File, RejectsZstdDecompressedSizeMismatchWhenEnabled) {
+#ifdef ALIGNX_HAVE_ZSTD
+    const auto path = temp_path("alignx_axf1_zstd_size_mismatch");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto old_payload_offset = column_payload_offset(data, kQualColumnIndex);
+    const auto old_payload_length = static_cast<std::size_t>(
+        read_u64_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnLengthOffset));
+    const std::vector<unsigned char> old_payload(
+        data.begin() + static_cast<std::ptrdiff_t>(old_payload_offset),
+        data.begin() + static_cast<std::ptrdiff_t>(old_payload_offset + old_payload_length));
+    const auto envelope = make_zstd_payload_envelope(
+        static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack), old_payload,
+        old_payload.size() + 1);
+
+    write_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack_compressed));
+    replace_column_payload(data, kQualColumnIndex, envelope);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("AXF1 zstd decompressed size mismatch"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+#endif
 }
 
 TEST(Axf1File, RejectsUnsupportedCompressedPayloadCompression) {
