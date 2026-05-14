@@ -84,6 +84,28 @@ script also diffed `alignx view` stdout against `samtools view` stdout for each
 run. This run shows about a 1.15x median speedup for `alignx view` on this
 specific HG002 chr1 region.
 
+### HTSlib Threads=2 Follow-up
+
+A follow-up run on the same host, BAM, and region used
+`--alignx-hts-threads 2` for `alignx view` only. `samtools view` was unchanged.
+
+- Command shape:
+  `bench_region_query.sh --warmup 1 --repeats 5 --alignx-hts-threads 2`
+- Raw TSV:
+  `/mypool/alignx/results/phase1_view_chr1_samtools_threads2.tsv`
+- Summary TSV:
+  `/mypool/alignx/results/phase1_view_chr1_samtools_threads2.summary.tsv`
+
+| Tool | Runs | Avg ms | Median ms | P95 ms | Min ms | Max ms | Stdout bytes |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| alignx | 5 | 191.956 | 192.040 | 208.583 | 177.831 | 208.583 | 89,692,257 |
+| samtools | 5 | 345.669 | 338.564 | 395.029 | 324.114 | 395.029 | 89,692,257 |
+
+All runs had zero nonzero exits and identical stdout byte counts. Compared with
+the single-thread baseline, `alignx` median latency improved from 289.201 ms to
+192.040 ms, about 1.51x faster. Compared with the same-run `samtools` median,
+the threads=2 `alignx` path was about 1.76x faster for this region.
+
 ## Decision
 
 The BAM-backed `alignx view` path now has a useful low-risk improvement through
