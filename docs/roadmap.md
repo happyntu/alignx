@@ -93,7 +93,8 @@ and region-query correctness.
 - [x] AXF1 zstd compressed payload envelope reader
 - [x] Explicit AXF1 zstd quality payload writer path and CLI flag
 - [x] AXF1 zstd quality writer smoke on HG002 chr1 small region
-- [ ] Optional zstd/LZ4 compressed payload writer size policy with raw/base fallback
+- [x] AXF1 zstd quality writer size policy with raw/base fallback
+- [ ] Optional LZ4 compressed payload writer path and size policy
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec design: SEQ reference-delta with reference identity metadata

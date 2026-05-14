@@ -202,8 +202,9 @@ Remote HG002 zstd quality writer smoke on 2026-05-15 used
 with `alignx convert --format AXF1 --axf1-quality-compression zstd`.
 It confirmed byte-identical SAM stdout with the same stdout SHA-256
 (`6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`)
-for 64 records. `quality` used `qual_pack_compressed` on all 7 chunks, and the
-AXF1 output was 798,039 bytes.
+for 64 records. `quality` used `qual_pack_compressed` on all 7 chunks because
+the zstd envelope was smaller than the regular best quality payload, and the AXF1
+output was 798,039 bytes.
 
 ## AXF1 column payload summary
 

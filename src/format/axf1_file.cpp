@@ -968,25 +968,34 @@ encode_compressed_payload_envelope(Axf1CodecId base_codec_id, Axf1Compression co
 
 std::expected<EncodedColumn, std::string>
 encode_quality_column(const std::vector<Axf1Record>& records, const Axf1WriteOptions& options) {
-    if (options.quality_compression == Axf1Compression::none) {
-        return encode_quality_column(records);
-    }
     if (options.quality_compression != Axf1Compression::zstd) {
+        if (options.quality_compression == Axf1Compression::none) {
+            return encode_quality_column(records);
+        }
         return std::unexpected("unsupported AXF1 writer quality compression");
     }
 
+    auto best = encode_quality_column(records);
+
+#ifndef ALIGNX_HAVE_ZSTD
+    return std::unexpected("AXF1 zstd writer compression requires ALIGNX_ENABLE_ZSTD=ON");
+#else
     auto packed = encode_qual_pack_payload(records);
     if (!packed) {
-        return encode_quality_column(records);
+        return best;
     }
     auto envelope = encode_compressed_payload_envelope(Axf1CodecId::qual_pack,
                                                        options.quality_compression, *packed);
     if (!envelope) {
         return std::unexpected(envelope.error());
     }
+    if (envelope->size() >= best.payload.size()) {
+        return best;
+    }
     return EncodedColumn{.column_id = Axf1ColumnId::quality,
                          .codec_id = Axf1CodecId::qual_pack_compressed,
                          .payload = std::move(*envelope)};
+#endif
 }
 
 std::expected<std::vector<EncodedColumn>, std::string>
