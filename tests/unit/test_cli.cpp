@@ -171,6 +171,58 @@ TEST(Cli, ViewOutputsToyAxfRegionRecords) {
     std::filesystem::remove_all(temp_dir);
 }
 
+TEST(Cli, ViewDetectsAxf1MagicWithAxfExtension) {
+    const auto temp_dir = make_temp_dir("alignx_cli_view_axf1_magic");
+    const auto input = temp_dir / "toy.axf";
+    alignx::format::Axf1File file{.references = {{.name = "chrToy", .length = 1000}},
+                                  .chunks = {{.ref_id = 0,
+                                              .start_pos = 100,
+                                              .end_pos = 110,
+                                              .records = {{.qname = "read001",
+                                                           .flag = 0,
+                                                           .pos = 100,
+                                                           .mapq = 60,
+                                                           .cigar = "10M",
+                                                           .mate_reference = "*",
+                                                           .mate_pos = 0,
+                                                           .template_length = 0,
+                                                           .sequence = "ACGTACGTAA",
+                                                           .quality = "FFFFFFFFFF",
+                                                           .tags = "NM:i:0"}}}}};
+    auto write = alignx::format::write_axf1_file(file, input);
+    ASSERT_TRUE(write) << write.error();
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "view", input.string(), "chrToy:101-110"}, out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(err.str(), "");
+    EXPECT_EQ(out.str(),
+              "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n");
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ViewRejectsUnknownAxfMagic) {
+    const auto temp_dir = make_temp_dir("alignx_cli_view_bad_axf_magic");
+    const auto input = temp_dir / "bad.axf";
+    {
+        std::ofstream output(input, std::ios::binary);
+        output << "NOPE";
+    }
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "view", input.string(), "chrToy:101-110"}, out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("unsupported AXF file magic"), std::string::npos);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
 TEST(Cli, ViewToyAxfNoHitRegionReturnsEmptyOutput) {
     const auto temp_dir = make_temp_dir("alignx_cli_view_axf_no_hit");
     const auto input = temp_dir / "toy.axf";

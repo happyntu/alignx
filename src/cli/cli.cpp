@@ -1,12 +1,14 @@
 #include <CLI/CLI.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -30,6 +32,13 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 std::string lower_extension(const std::filesystem::path& path);
+
+enum class ViewInputFormat {
+    bam_or_unknown,
+    axf0,
+    axf1,
+    unsupported_axf,
+};
 
 struct ViewProfile {
     std::uint64_t records = 0;
@@ -85,6 +94,29 @@ bool is_axf1_path(const std::filesystem::path& path) {
     return lower_extension(path) == ".axf1";
 }
 
+ViewInputFormat detect_view_input_format(const std::filesystem::path& input) {
+    std::ifstream stream(input, std::ios::binary);
+    if (!stream) {
+        return ViewInputFormat::bam_or_unknown;
+    }
+
+    std::array<char, 4> magic{};
+    stream.read(magic.data(), static_cast<std::streamsize>(magic.size()));
+    if (stream.gcount() == static_cast<std::streamsize>(magic.size())) {
+        if (magic == std::array<char, 4>{'A', 'X', 'F', '0'}) {
+            return ViewInputFormat::axf0;
+        }
+        if (magic == std::array<char, 4>{'A', 'X', 'F', '1'}) {
+            return ViewInputFormat::axf1;
+        }
+    }
+
+    if (is_axf_path(input) || is_axf1_path(input)) {
+        return ViewInputFormat::unsupported_axf;
+    }
+    return ViewInputFormat::bam_or_unknown;
+}
+
 int run_axf_view(const std::filesystem::path& input, const std::string& region, std::ostream& out,
                  std::ostream& err) {
     auto result = query::write_axf_region_sam(input, region, out);
@@ -107,11 +139,16 @@ int run_axf1_view(const std::filesystem::path& input, const std::string& region,
 
 int run_view(const std::filesystem::path& input, const std::string& region,
              std::optional<int> hts_threads, std::ostream& out, std::ostream& err) {
-    if (is_axf_path(input)) {
+    switch (detect_view_input_format(input)) {
+    case ViewInputFormat::axf0:
         return run_axf_view(input, region, out, err);
-    }
-    if (is_axf1_path(input)) {
+    case ViewInputFormat::axf1:
         return run_axf1_view(input, region, out, err);
+    case ViewInputFormat::unsupported_axf:
+        err << "alignx view: unsupported AXF file magic\n";
+        return 1;
+    case ViewInputFormat::bam_or_unknown:
+        break;
     }
 
     const bool profile_enabled = view_profile_enabled();

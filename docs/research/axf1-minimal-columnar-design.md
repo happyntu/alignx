@@ -162,8 +162,9 @@ AXF1 should inherit the AXF0 query behavior:
 
 Status as of 2026-05-14: this slice is implemented through opt-in CLI routing.
 `alignx convert` still defaults to AXF0, while `alignx convert --format AXF1`
-writes `.axf1` raw-column MVP files and `alignx view <input.axf1> <region>`
-routes to the AXF1 view helper.
+writes raw-column MVP files. `alignx view` detects AXF0 vs AXF1 from file
+magic, so `.axf1` is no longer required for the view path, although tests may
+continue to use it as a readability cue while the format is unstable.
 
 The AXF1 query path now uses a metadata-first reader: it streams the file
 header/reference/index metadata, selects overlapping chunks by 0-based
@@ -212,8 +213,9 @@ Suggested implementation boundary:
   columns instead of parsing SAM payload text.
 - `src/convert/bam_to_axf.hpp/.cpp` emits AXF0 by default and AXF1 through the
   separate `convert_bam_to_axf1_mvp()` function.
-- `src/cli/cli.cpp` detects `.axf` as AXF0 and `.axf1` as AXF1. Magic-based
-  AXF0/AXF1 routing remains a separate compatibility change.
+- `src/cli/cli.cpp` detects AXF0/AXF1 by file magic before falling back to the
+  BAM/HTSlib view path. `.axf`/`.axf1` files with unknown magic are rejected
+  instead of being treated as BAM.
 - `format::Axf1FileReader` is the preferred AXF1 query API. It loads
   references and chunk index metadata first, then reads and decodes selected
   chunk byte ranges on demand. `read_axf1_file()` remains the full-file
@@ -227,8 +229,9 @@ Suggested implementation boundary:
 
 ## Open Questions
 
-- Should AXF1 use `.axf` with magic detection only, or a temporary `.axf1`
-  extension in tests while the format is unstable?
+- Should AXF1 tests keep using `.axf1` as a readability cue while the format is
+  unstable, or should they converge on `.axf` now that view routing is
+  magic-based?
 - What production chunk-sizing rule should replace the current deterministic
   MVP max-record split: byte budget, max genomic span, record count, or a hybrid
   tuned to independent column decode?

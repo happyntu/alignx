@@ -35,6 +35,7 @@ Completed:
 - AXF1 metadata-first reader for `.axf1` region view; query decodes only overlapping chunks
 - AXF1 view uses selective `POS` + `CIGAR` column decode before full output decode
 - AXF1 converter writes deterministic MVP chunks for toy correctness work
+- `alignx view` detects AXF0/AXF1 inputs by file magic before extension assumptions
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
