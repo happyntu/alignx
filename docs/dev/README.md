@@ -227,6 +227,11 @@ After adding size-policy fallback, the same correctness smoke was rerun with
 The result remained byte-identical with the same stdout SHA-256, `quality` still
 used `qual_pack_compressed` on all 7 chunks, and the AXF1 output remained
 798,039 bytes.
+The reusable script path was verified on 2026-05-15 under
+`/mypool/alignx/tmp/axf1_zstd_quality_size_policy_script_smoke_hg002_chr1_1000000_1010000_20260515`
+using `scripts/smoke_axf1_codecs.sh --axf1-quality-compression zstd
+--expect-codec quality=qual_pack_compressed`. It reported `OK axf1_codecs`,
+`axf1_quality_compression=zstd`, the same stdout SHA-256, and 64 records.
 
 ## AXF1 column payload summary
 

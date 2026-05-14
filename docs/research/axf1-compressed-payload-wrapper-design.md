@@ -281,6 +281,23 @@ used `qual_pack_compressed` on all 7 chunks, and the AXF1 output remained
 wrapper for this region because it is smaller than the regular best quality
 payload.
 
+The reusable smoke script path was also verified on 2026-05-15:
+
+```bash
+/mypool/alignx/bin/smoke_axf1_codecs.sh \
+  --alignx /mypool/alignx/bin/alignx_zstd_quality_size_policy_3e7f980 \
+  --samtools samtools \
+  --inspector /mypool/alignx/bin/inspect_axf1_metadata.py \
+  --input /mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam \
+  --region chr1:1000000-1010000 \
+  --work-dir /mypool/alignx/tmp/axf1_zstd_quality_size_policy_script_smoke_hg002_chr1_1000000_1010000_20260515 \
+  --axf1-quality-compression zstd \
+  --expect-codec quality=qual_pack_compressed
+```
+
+The script reported `OK axf1_codecs`, `axf1_quality_compression=zstd`, the same
+stdout SHA-256, and 64 records.
+
 ## Acceptance Criteria for a Future Implementation
 
 - Unit tests cover a compressed payload round-trip for at least one column.
