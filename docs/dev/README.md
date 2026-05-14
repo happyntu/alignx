@@ -145,7 +145,7 @@ scripts/smoke_axf1_codecs.sh \
   --expect-codec flag=flag_bitpack \
   --expect-codec cigar=cigar_token \
   --expect-codec sequence=seq_2bit_literal \
-  --expect-codec quality=qual_rle
+  --expect-codec quality=qual_pack
 ```
 
 Use `--expect-codec column=codec` when a smoke region is expected to use a
@@ -166,6 +166,8 @@ It has also verified CIGAR `cigar_token` distribution after the CIGAR token
 codec was added.
 It has also verified QUAL `qual_rle` distribution after the QUAL byte RLE codec
 was added.
+It has also verified QUAL `qual_pack` distribution after the QUAL alphabet
+bit-pack codec was added.
 
 Remote HG002 SEQ 2-bit literal smoke on 2026-05-14 used
 `/mypool/alignx/tmp/axf1_seq_codec_smoke_hg002_chr1_1000000_1010000_20260514`
@@ -178,7 +180,7 @@ distribution on all 7 chunks.
 For the HG002 chr1 small-region codec smoke, the current expected codecs are
 `pos_delta_varint`, `flag_bitpack`, `mapq_rle`, `cigar_token`, and
 `seq_2bit_literal`. QUAL may still fall back to raw on HG002 regions unless
-`qual_rle` is smaller for every chunk.
+`qual_rle` or `qual_pack` is smaller for every chunk.
 Remote HG002 QUAL byte RLE smoke on 2026-05-15 used
 `/mypool/alignx/tmp/axf1_qual_rle_smoke_hg002_chr1_1000000_1010000_20260515`
 and confirmed byte-identical SAM stdout with the same stdout SHA-256

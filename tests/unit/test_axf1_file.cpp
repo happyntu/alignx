@@ -75,6 +75,14 @@ alignx::format::Axf1File make_file() {
     return file;
 }
 
+alignx::format::Axf1File make_single_record_file(std::string quality) {
+    auto file = make_file();
+    file.chunks[0].end_pos = 110;
+    file.chunks[0].records.resize(1);
+    file.chunks[0].records[0].quality = std::move(quality);
+    return file;
+}
+
 std::vector<unsigned char> read_bytes(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     input.seekg(0, std::ios::end);
@@ -431,9 +439,32 @@ TEST(Axf1File, FallsBackToRawSequenceForNonAcgtBases) {
     }
 }
 
-TEST(Axf1File, WritesRepeatedQualityAsRle) {
-    const auto path = temp_path("alignx_axf1_qual_rle");
+TEST(Axf1File, WritesSmallAlphabetQualityAsPack) {
+    const auto path = temp_path("alignx_axf1_qual_pack");
     const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack));
+    EXPECT_EQ(read_u64_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnLengthOffset),
+              4);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].quality, "FFFFFFFFFF");
+    EXPECT_EQ(read->chunks[0].records[1].quality, "FFFFFFFFFF");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, KeepsQualRleWhenPackIsNotSmaller) {
+    const auto path = temp_path("alignx_axf1_qual_rle");
+    const auto file = make_single_record_file("FFFFHHHH");
 
     auto write = alignx::format::write_axf1_file(file, path);
     ASSERT_TRUE(write) << write.error();
@@ -442,14 +473,13 @@ TEST(Axf1File, WritesRepeatedQualityAsRle) {
     EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset),
               static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_rle));
     EXPECT_EQ(read_u64_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnLengthOffset),
-              6);
+              5);
 
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_TRUE(read) << read.error();
     ASSERT_EQ(read->chunks.size(), 1);
-    ASSERT_EQ(read->chunks[0].records.size(), 2);
-    EXPECT_EQ(read->chunks[0].records[0].quality, "FFFFFFFFFF");
-    EXPECT_EQ(read->chunks[0].records[1].quality, "FFFFFFFFFF");
+    ASSERT_EQ(read->chunks[0].records.size(), 1);
+    EXPECT_EQ(read->chunks[0].records[0].quality, "FFFFHHHH");
 
     std::filesystem::remove(path);
 }
@@ -796,7 +826,7 @@ TEST(Axf1FileReader, ReadsSelectedTwoBitSequenceColumn) {
     std::filesystem::remove(path);
 }
 
-TEST(Axf1FileReader, ReadsSelectedQualityRleColumn) {
+TEST(Axf1FileReader, ReadsSelectedPackedQualityColumn) {
     const auto path = temp_path("alignx_axf1_file_reader_quality_column");
     const auto file = make_file();
 
@@ -1192,7 +1222,7 @@ TEST(Axf1File, RejectsTruncatedSeqTwoBitBases) {
 
 TEST(Axf1File, RejectsTruncatedQualRleLength) {
     const auto path = temp_path("alignx_axf1_truncated_qual_rle_length");
-    const auto file = make_file();
+    const auto file = make_single_record_file("FFFFHHHH");
     auto write = alignx::format::write_axf1_file(file, path);
     ASSERT_TRUE(write) << write.error();
 
@@ -1211,7 +1241,7 @@ TEST(Axf1File, RejectsTruncatedQualRleLength) {
 
 TEST(Axf1File, RejectsTruncatedQualRleRunLength) {
     const auto path = temp_path("alignx_axf1_truncated_qual_rle_run_length");
-    const auto file = make_file();
+    const auto file = make_single_record_file("FFFFHHHH");
     auto write = alignx::format::write_axf1_file(file, path);
     ASSERT_TRUE(write) << write.error();
 
@@ -1231,7 +1261,7 @@ TEST(Axf1File, RejectsTruncatedQualRleRunLength) {
 
 TEST(Axf1File, RejectsTruncatedQualRleValue) {
     const auto path = temp_path("alignx_axf1_truncated_qual_rle_value");
-    const auto file = make_file();
+    const auto file = make_single_record_file("FFFFHHHH");
     auto write = alignx::format::write_axf1_file(file, path);
     ASSERT_TRUE(write) << write.error();
 
@@ -1249,7 +1279,7 @@ TEST(Axf1File, RejectsTruncatedQualRleValue) {
 
 TEST(Axf1File, RejectsZeroQualRleRunLength) {
     const auto path = temp_path("alignx_axf1_zero_qual_rle_run_length");
-    const auto file = make_file();
+    const auto file = make_single_record_file("FFFFHHHH");
     auto write = alignx::format::write_axf1_file(file, path);
     ASSERT_TRUE(write) << write.error();
 
@@ -1267,7 +1297,7 @@ TEST(Axf1File, RejectsZeroQualRleRunLength) {
 
 TEST(Axf1File, RejectsQualRleDecodedLengthMismatch) {
     const auto path = temp_path("alignx_axf1_qual_rle_length_mismatch");
-    const auto file = make_file();
+    const auto file = make_single_record_file("FFFFHHHH");
     auto write = alignx::format::write_axf1_file(file, path);
     ASSERT_TRUE(write) << write.error();
 
@@ -1285,7 +1315,7 @@ TEST(Axf1File, RejectsQualRleDecodedLengthMismatch) {
 
 TEST(Axf1File, RejectsQualRleTrailingBytes) {
     const auto path = temp_path("alignx_axf1_qual_rle_trailing_bytes");
-    const auto file = make_file();
+    const auto file = make_single_record_file("FFFFHHHH");
     auto write = alignx::format::write_axf1_file(file, path);
     ASSERT_TRUE(write) << write.error();
 
@@ -1296,6 +1326,141 @@ TEST(Axf1File, RejectsQualRleTrailingBytes) {
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
     EXPECT_NE(read.error().find("AXF1 QUAL RLE column has trailing bytes"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedQualPackAlphabetCount) {
+    const auto path = temp_path("alignx_axf1_truncated_qual_pack_alphabet_count");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u8_at(data, column_payload_offset(data, kQualColumnIndex), 0x80);
+    write_u64_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnLengthOffset, 1);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("truncated AXF1 QUAL pack alphabet count"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedQualPackAlphabet) {
+    const auto path = temp_path("alignx_axf1_truncated_qual_pack_alphabet");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u64_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnLengthOffset, 1);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("truncated AXF1 QUAL pack alphabet"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsEmptyQualPackAlphabet) {
+    const auto path = temp_path("alignx_axf1_empty_qual_pack_alphabet");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u8_at(data, column_payload_offset(data, kQualColumnIndex), 0);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("AXF1 QUAL pack alphabet is empty"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsUnsortedQualPackAlphabet) {
+    const auto path = temp_path("alignx_axf1_unsorted_qual_pack_alphabet");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto payload_offset = column_payload_offset(data, kQualColumnIndex);
+    write_u8_at(data, payload_offset, 2);
+    write_u8_at(data, payload_offset + 1, 'G');
+    write_u8_at(data, payload_offset + 2, 'F');
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("AXF1 QUAL pack alphabet is not strictly ascending"),
+              std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedQualPackLength) {
+    const auto path = temp_path("alignx_axf1_truncated_qual_pack_length");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u64_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnLengthOffset, 2);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("truncated AXF1 QUAL pack length"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedQualPackCodes) {
+    const auto path = temp_path("alignx_axf1_truncated_qual_pack_codes");
+    auto file = make_file();
+    file.chunks[0].records[0].quality = "FFFFFFFFHH";
+    file.chunks[0].records[1].quality = "FFFFFFFFHH";
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack));
+    write_u64_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnLengthOffset, 8);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("truncated AXF1 QUAL pack codes"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsQualPackTrailingBytes) {
+    const auto path = temp_path("alignx_axf1_qual_pack_trailing_bytes");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u64_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnLengthOffset, 5);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("AXF1 QUAL pack column has trailing bytes"), std::string::npos)
         << read.error();
 
     std::filesystem::remove(path);

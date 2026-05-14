@@ -488,11 +488,17 @@ payload summary therefore stayed unchanged for this region: `quality` remains
 result and indicates that HG002-style QUAL needs a stronger future lossless
 codec than simple byte RLE.
 
-The next recommended QUAL codec is a chunk-local alphabet bit-pack
-(`qual_pack`) with raw fallback, described in
-`docs/research/axf1-qual-next-codec-design.md`. It should be implemented before
-QUAL context models, rANS/arithmetic coding, FQZComp-like compression, or a
-generic compressed column wrapper.
+The next QUAL codec, `qual_pack`, is implemented as a chunk-local alphabet
+bit-pack with raw fallback, described in
+`docs/research/axf1-qual-next-codec-design.md`. The writer chooses the smallest
+payload among raw strings, `qual_rle`, and `qual_pack`. QUAL context models,
+rANS/arithmetic coding, FQZComp-like compression, and a generic compressed
+column wrapper remain deferred.
+
+Toy correctness smoke on 2026-05-15 used `/tmp/alignx_axf1_qual_pack_smoke`,
+confirmed byte-identical SAM stdout
+(`e62402c0450decf357ef797750af1dfb0be065eeeb3b87f157953a7f7ae1feb9`) for 2
+records, and reported `qual_pack` for the `quality` column.
 
 ## Region-Converted AXF1 Subset Semantics
 
@@ -675,8 +681,8 @@ Suggested implementation boundary:
   path: implement lossless byte RLE with raw fallback before context models,
   zstd wrappers, or lossy binning.
 - `docs/research/axf1-qual-next-codec-design.md` defines the next QUAL codec
-  path: implement lossless chunk-local alphabet bit-pack with raw fallback
-  before context models or compressed column wrappers.
+  path: lossless chunk-local alphabet bit-pack with raw fallback before context
+  models or compressed column wrappers.
 - `CMakeLists.txt` already globs `src/format/*.cpp`, `src/query/*.cpp`,
   `src/convert/*.cpp`, and `tests/unit/*.cpp`, so the proposed AXF1 source and
   test files are automatically added to `alignx_lib` and `unit_tests`.

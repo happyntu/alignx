@@ -1,6 +1,6 @@
 # AXF1 Next QUAL Codec Design
 
-Status: design note, 2026-05-15. No format change is implemented by this note.
+Status: implemented, 2026-05-15. `qual_pack` is codec id 7.
 
 ## Motivation
 
@@ -54,11 +54,11 @@ codec should still be lossless, chunk-local, and easy to validate.
 | Generic compressed column wrapper | Helps broad noisy data | Requires wrapper design and dependency policy | Separate design |
 | FQZComp-like model | Strong specialized compression | High complexity and harder correctness isolation | v1.0+ |
 
-## Recommended Next Codec: `qual_pack`
+## Implemented Codec: `qual_pack`
 
-The recommended next implementation is a lossless chunk-local alphabet
-bit-packing codec with raw fallback. The exact codec id should be assigned when
-implemented.
+The implemented next codec is a lossless chunk-local alphabet bit-packing codec
+with raw fallback. The writer chooses the smallest payload among raw strings,
+`qual_rle`, and `qual_pack`.
 
 Payload shape:
 
@@ -136,6 +136,15 @@ models, without adding those complexities prematurely.
 - WSL `ctest` passes.
 - Toy codec smoke passes on a region where `quality=qual_pack` is expected.
 - Remote HG002 smoke is correctness-only and run after user confirmation.
+
+## Toy Smoke
+
+Toy correctness smoke on 2026-05-15 used `/tmp/alignx_axf1_qual_pack_smoke` and
+confirmed byte-identical SAM stdout
+(`e62402c0450decf357ef797750af1dfb0be065eeeb3b87f157953a7f7ae1feb9`) for 2
+records. The smoke asserted `quality=qual_pack` along with the existing
+POS/FLAG/CIGAR/SEQ expected codecs. This is a correctness smoke, not a
+benchmark.
 
 ## Deferred Work
 

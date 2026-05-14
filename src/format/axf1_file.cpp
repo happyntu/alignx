@@ -817,15 +817,102 @@ encode_qual_rle_payload(const std::vector<Axf1Record>& records) {
     return bytes;
 }
 
+std::uint8_t bit_width_for_alphabet_size(std::size_t alphabet_size) {
+    if (alphabet_size <= 1) {
+        return 0;
+    }
+    std::uint8_t width = 0;
+    std::size_t values = 1;
+    while (values < alphabet_size) {
+        values <<= 1U;
+        ++width;
+    }
+    return width;
+}
+
+std::expected<std::vector<unsigned char>, std::string>
+encode_qual_pack_payload(const std::vector<Axf1Record>& records) {
+    std::array<bool, 256> present{};
+    std::size_t alphabet_size = 0;
+    for (const Axf1Record& record : records) {
+        if (record.quality.empty() || record.quality == "*") {
+            return std::unexpected("AXF1 QUAL pack requires concrete quality");
+        }
+        for (unsigned char value : record.quality) {
+            if (!present.at(value)) {
+                present.at(value) = true;
+                ++alphabet_size;
+            }
+        }
+    }
+    if (alphabet_size == 0 || alphabet_size > 128) {
+        return std::unexpected("AXF1 QUAL pack alphabet is unsupported");
+    }
+
+    std::array<std::uint8_t, 256> code_by_value{};
+    std::vector<std::uint8_t> alphabet;
+    alphabet.reserve(alphabet_size);
+    for (std::size_t value = 0; value < present.size(); ++value) {
+        if (present.at(value)) {
+            code_by_value.at(value) = static_cast<std::uint8_t>(alphabet.size());
+            alphabet.push_back(static_cast<std::uint8_t>(value));
+        }
+    }
+
+    const std::uint8_t bit_width = bit_width_for_alphabet_size(alphabet.size());
+    std::vector<unsigned char> bytes;
+    append_varint_u64(bytes, alphabet.size());
+    for (std::uint8_t value : alphabet) {
+        append_u8(bytes, value);
+    }
+
+    for (const Axf1Record& record : records) {
+        append_varint_u64(bytes, record.quality.size());
+        if (bit_width == 0) {
+            continue;
+        }
+
+        std::uint8_t packed = 0;
+        std::uint8_t bits_in_byte = 0;
+        for (unsigned char value : record.quality) {
+            std::uint8_t code = code_by_value.at(value);
+            for (std::uint8_t bit = 0; bit < bit_width; ++bit) {
+                if (((code >> bit) & 1U) != 0) {
+                    packed |= static_cast<std::uint8_t>(1U << bits_in_byte);
+                }
+                ++bits_in_byte;
+                if (bits_in_byte == 8) {
+                    append_u8(bytes, packed);
+                    packed = 0;
+                    bits_in_byte = 0;
+                }
+            }
+        }
+        if (bits_in_byte != 0) {
+            append_u8(bytes, packed);
+        }
+    }
+
+    return bytes;
+}
+
 EncodedColumn encode_quality_column(const std::vector<Axf1Record>& records) {
     const auto raw = encode_strings(records, &Axf1Record::quality);
+    EncodedColumn best{
+        .column_id = Axf1ColumnId::quality, .codec_id = Axf1CodecId::raw, .payload = raw};
     auto encoded = encode_qual_rle_payload(records);
     if (encoded && encoded->size() < raw.size()) {
-        return {.column_id = Axf1ColumnId::quality,
+        best = {.column_id = Axf1ColumnId::quality,
                 .codec_id = Axf1CodecId::qual_rle,
                 .payload = std::move(*encoded)};
     }
-    return {.column_id = Axf1ColumnId::quality, .codec_id = Axf1CodecId::raw, .payload = raw};
+    auto packed = encode_qual_pack_payload(records);
+    if (packed && packed->size() < best.payload.size()) {
+        best = {.column_id = Axf1ColumnId::quality,
+                .codec_id = Axf1CodecId::qual_pack,
+                .payload = std::move(*packed)};
+    }
+    return best;
 }
 
 std::vector<EncodedColumn> encode_columns(const Axf1Chunk& chunk) {
@@ -1232,6 +1319,90 @@ decode_qual_rle_column(const std::vector<unsigned char>& bytes, std::uint32_t re
     return values;
 }
 
+std::expected<std::vector<std::string>, std::string>
+decode_qual_pack_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
+    Reader reader(bytes);
+    auto alphabet_count = read_varint_u64(reader, "truncated AXF1 QUAL pack alphabet count",
+                                          "AXF1 QUAL pack alphabet count overflow");
+    if (!alphabet_count) {
+        return std::unexpected(alphabet_count.error());
+    }
+    if (*alphabet_count == 0) {
+        return std::unexpected("AXF1 QUAL pack alphabet is empty");
+    }
+    if (*alphabet_count > 128) {
+        return std::unexpected("AXF1 QUAL pack alphabet is too large");
+    }
+
+    std::vector<std::uint8_t> alphabet;
+    alphabet.reserve(static_cast<std::size_t>(*alphabet_count));
+    std::uint8_t previous = 0;
+    for (std::uint64_t index = 0; index < *alphabet_count; ++index) {
+        auto value = reader.read_u8();
+        if (!value) {
+            return std::unexpected("truncated AXF1 QUAL pack alphabet");
+        }
+        if (index > 0 && *value <= previous) {
+            return std::unexpected("AXF1 QUAL pack alphabet is not strictly ascending");
+        }
+        alphabet.push_back(*value);
+        previous = *value;
+    }
+
+    const std::uint8_t bit_width = bit_width_for_alphabet_size(alphabet.size());
+    std::vector<std::string> values;
+    values.reserve(record_count);
+    for (std::uint32_t record_index = 0; record_index < record_count; ++record_index) {
+        auto length = read_varint_u64(reader, "truncated AXF1 QUAL pack length",
+                                      "AXF1 QUAL pack length overflow");
+        if (!length) {
+            return std::unexpected(length.error());
+        }
+        if (*length > static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())) {
+            return std::unexpected("AXF1 QUAL pack length is too large");
+        }
+
+        std::string quality;
+        quality.reserve(static_cast<std::size_t>(*length));
+        if (bit_width == 0) {
+            quality.assign(static_cast<std::size_t>(*length), static_cast<char>(alphabet.front()));
+            values.push_back(std::move(quality));
+            continue;
+        }
+
+        std::uint8_t packed = 0;
+        std::uint8_t bits_remaining = 0;
+        for (std::uint64_t index = 0; index < *length; ++index) {
+            std::uint8_t code = 0;
+            for (std::uint8_t bit = 0; bit < bit_width; ++bit) {
+                if (bits_remaining == 0) {
+                    auto byte = reader.read_u8();
+                    if (!byte) {
+                        return std::unexpected("truncated AXF1 QUAL pack codes");
+                    }
+                    packed = *byte;
+                    bits_remaining = 8;
+                }
+                if ((packed & 1U) != 0) {
+                    code |= static_cast<std::uint8_t>(1U << bit);
+                }
+                packed >>= 1U;
+                --bits_remaining;
+            }
+            if (code >= alphabet.size()) {
+                return std::unexpected("AXF1 QUAL pack code is outside alphabet");
+            }
+            quality.push_back(static_cast<char>(alphabet.at(code)));
+        }
+        values.push_back(std::move(quality));
+    }
+
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 QUAL pack column has trailing bytes");
+    }
+    return values;
+}
+
 bool is_known_column(Axf1ColumnId column_id) {
     return std::find(kRequiredColumns.begin(), kRequiredColumns.end(), column_id) !=
            kRequiredColumns.end();
@@ -1246,7 +1417,8 @@ bool is_supported_column_codec(Axf1ColumnId column_id, Axf1CodecId codec_id) {
            (column_id == Axf1ColumnId::mapq && codec_id == Axf1CodecId::mapq_rle) ||
            (column_id == Axf1ColumnId::cigar && codec_id == Axf1CodecId::cigar_token) ||
            (column_id == Axf1ColumnId::sequence && codec_id == Axf1CodecId::seq_2bit_literal) ||
-           (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_rle);
+           (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_rle) ||
+           (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_pack);
 }
 
 bool contains_column(const std::vector<Axf1ColumnId>& columns, Axf1ColumnId column_id) {
@@ -1463,9 +1635,15 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
             break;
         }
         case Axf1ColumnId::quality: {
-            auto values = entry.codec_id == Axf1CodecId::qual_rle
-                              ? decode_qual_rle_column(*payload, *record_count)
-                              : decode_string_column(*payload, *record_count);
+            std::expected<std::vector<std::string>, std::string> values =
+                std::unexpected("unsupported AXF1 QUAL codec");
+            if (entry.codec_id == Axf1CodecId::qual_rle) {
+                values = decode_qual_rle_column(*payload, *record_count);
+            } else if (entry.codec_id == Axf1CodecId::qual_pack) {
+                values = decode_qual_pack_column(*payload, *record_count);
+            } else {
+                values = decode_string_column(*payload, *record_count);
+            }
             if (!values) {
                 return std::unexpected(values.error());
             }

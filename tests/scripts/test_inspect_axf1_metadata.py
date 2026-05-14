@@ -42,7 +42,7 @@ def write_fixture(path: Path) -> None:
         (4, 3, 2, 1),  # MAPQ RLE
         (5, 5, 3, 1),  # CIGAR token
         (9, 4, 4, 1),  # SEQ 2-bit literal
-        (10, 6, 5, 1),  # QUAL RLE
+        (10, 7, 5, 1),  # QUAL pack
         (99, 77, 6, 1),  # unknown numeric fallback
     ]
     data.extend(CHUNK_HEADER.pack(0, 100, 160, records, len(columns)))
@@ -81,7 +81,7 @@ class InspectAxf1MetadataTest(unittest.TestCase):
             self.assertIn("0\t4\tmapq\t3\tmapq_rle\t2\t1", columns)
             self.assertIn("0\t5\tcigar\t5\tcigar_token\t3\t1", columns)
             self.assertIn("0\t9\tsequence\t4\tseq_2bit_literal\t4\t1", columns)
-            self.assertIn("0\t10\tquality\t6\tqual_rle\t5\t1", columns)
+            self.assertIn("0\t10\tquality\t7\tqual_pack\t5\t1", columns)
             self.assertIn("0\t99\tunknown_99\t77\tunknown_77\t6\t1", columns)
 
             codecs = self.run_inspector(fixture, "--column-codecs")
@@ -91,7 +91,7 @@ class InspectAxf1MetadataTest(unittest.TestCase):
             self.assertIn("4\tmapq\t3\tmapq_rle\t1", codecs)
             self.assertIn("5\tcigar\t5\tcigar_token\t1", codecs)
             self.assertIn("9\tsequence\t4\tseq_2bit_literal\t1", codecs)
-            self.assertIn("10\tquality\t6\tqual_rle\t1", codecs)
+            self.assertIn("10\tquality\t7\tqual_pack\t1", codecs)
             self.assertIn("99\tunknown_99\t77\tunknown_77\t1", codecs)
 
 

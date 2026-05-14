@@ -30,6 +30,7 @@ enum class Axf1CodecId : std::uint16_t {
     seq_2bit_literal = 4,
     cigar_token = 5,
     qual_rle = 6,
+    qual_pack = 7,
 };
 
 struct Axf1Reference {
