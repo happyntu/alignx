@@ -77,6 +77,7 @@ and region-query correctness.
 - [x] AXF1 CIGAR codec design note
 - [x] AXF1 CIGAR token stream codec with raw fallback
 - [x] AXF1 CIGAR token stream toy smoke
+- [x] AXF1 CIGAR token stream smoke on HG002 chr1 small region
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec design: SEQ reference-delta with reference identity metadata

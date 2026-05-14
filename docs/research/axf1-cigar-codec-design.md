@@ -45,6 +45,8 @@ falls back to raw strings for `*`, empty CIGAR, unsupported operations, missing
 lengths, trailing numeric text, zero lengths, leading-zero lengths, overflow,
 or non-beneficial payloads. WSL `ctest` and toy
 `scripts/smoke_axf1_codecs.sh` coverage were checked on 2026-05-14.
+The remote HG002 chr1 small-region smoke also passed on 2026-05-15, with
+`cigar_token` used on all 7 chunks.
 
 Toy CIGAR token smoke, run locally in WSL on 2026-05-14:
 
@@ -57,6 +59,23 @@ Toy CIGAR token smoke, run locally in WSL on 2026-05-14:
 - Codec distribution: `cigar_token`, `seq_2bit_literal`, `pos_delta_varint`,
   and `flag_bitpack` on the toy chunk. Toy MAPQ remained raw because RLE was
   not smaller for this input.
+
+This was a correctness smoke only, not a benchmark or profiling run.
+
+Remote HG002 CIGAR token smoke, run on `missmi-server00` on 2026-05-15:
+
+- BAM:
+  `/mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam`
+- Region: `chr1:1000000-1010000`
+- Output directory:
+  `/mypool/alignx/tmp/axf1_cigar_codec_smoke_hg002_chr1_1000000_1010000_20260515`
+- AXF1 output: `sample.axf1`
+- AXF1 file size: 1,172,296 bytes
+- Records: 64
+- `axf1 view`, `alignx view` on BAM, and `samtools view` stdout SHA256:
+  `6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`
+- Codec distribution: `cigar_token`, `seq_2bit_literal`, `pos_delta_varint`,
+  `flag_bitpack`, and `mapq_rle` on all 7 chunks.
 
 This was a correctness smoke only, not a benchmark or profiling run.
 

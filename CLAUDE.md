@@ -62,6 +62,7 @@ Completed:
 - AXF1 CIGAR codec design note: prefer self-contained token stream with raw fallback before dictionary, delta, or reference-aware CIGAR codecs
 - AXF1 CIGAR token codec with raw fallback for non-tokenizable CIGAR strings
 - AXF1 CIGAR token toy smoke verified byte-identical SAM stdout and `cigar_token` codec distribution
+- AXF1 CIGAR token remote HG002 chr1 small-region correctness smoke
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV

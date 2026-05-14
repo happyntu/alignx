@@ -158,6 +158,10 @@ Remote HG002 SEQ 2-bit literal smoke on 2026-05-14 used
 `/mypool/alignx/tmp/axf1_seq_codec_smoke_hg002_chr1_1000000_1010000_20260514`
 and confirmed byte-identical SAM stdout plus SEQ `seq_2bit_literal`
 distribution on all 7 chunks.
+Remote HG002 CIGAR token smoke on 2026-05-15 used
+`/mypool/alignx/tmp/axf1_cigar_codec_smoke_hg002_chr1_1000000_1010000_20260515`
+and confirmed byte-identical SAM stdout plus CIGAR `cigar_token`
+distribution on all 7 chunks.
 
 ## AXF0 and AXF1 development status
 
