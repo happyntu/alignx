@@ -11,6 +11,16 @@
 
 namespace {
 
+constexpr std::size_t kIndexOffsetFieldOffset = 20;
+constexpr std::size_t kIndexRecordCountOffset = 12;
+constexpr std::size_t kIndexChunkOffsetOffset = 16;
+constexpr std::size_t kChunkStartPosOffset = 4;
+constexpr std::size_t kChunkRecordCountOffset = 12;
+constexpr std::size_t kChunkHeaderSize = 18;
+constexpr std::size_t kColumnEntrySize = 20;
+constexpr std::size_t kColumnIdOffset = 0;
+constexpr std::size_t kColumnLengthOffset = 12;
+
 std::filesystem::path temp_path(std::string_view label) {
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     return std::filesystem::temp_directory_path() /
@@ -78,10 +88,30 @@ void write_u16_at(std::vector<unsigned char>& data, std::size_t offset, std::uin
     }
 }
 
+void write_u32_at(std::vector<unsigned char>& data, std::size_t offset, std::uint32_t value) {
+    for (std::size_t byte = 0; byte < sizeof(value); ++byte) {
+        data.at(offset + byte) = static_cast<unsigned char>((value >> (byte * 8U)) & 0xFFU);
+    }
+}
+
 void write_u64_at(std::vector<unsigned char>& data, std::size_t offset, std::uint64_t value) {
     for (std::size_t byte = 0; byte < sizeof(value); ++byte) {
         data.at(offset + byte) = static_cast<unsigned char>((value >> (byte * 8U)) & 0xFFU);
     }
+}
+
+std::uint64_t read_index_offset(const std::vector<unsigned char>& data) {
+    return read_u64_at(data, kIndexOffsetFieldOffset);
+}
+
+std::uint64_t read_first_chunk_offset(const std::vector<unsigned char>& data) {
+    return read_u64_at(data,
+                       static_cast<std::size_t>(read_index_offset(data)) + kIndexChunkOffsetOffset);
+}
+
+std::size_t column_entry_offset(const std::vector<unsigned char>& data, std::size_t column_index) {
+    return static_cast<std::size_t>(read_first_chunk_offset(data)) + kChunkHeaderSize +
+           column_index * kColumnEntrySize;
 }
 
 } // namespace
@@ -156,18 +186,48 @@ TEST(Axf1File, RejectsMissingRequiredColumn) {
     ASSERT_TRUE(write) << write.error();
 
     auto data = read_bytes(path);
-    constexpr std::size_t index_offset_field_offset = 20;
-    const std::uint64_t index_offset = read_u64_at(data, index_offset_field_offset);
-    constexpr std::size_t chunk_offset_field_offset = 16;
-    const std::uint64_t chunk_offset =
-        read_u64_at(data, static_cast<std::size_t>(index_offset) + chunk_offset_field_offset);
-    constexpr std::size_t chunk_header_size = 18;
-    write_u16_at(data, static_cast<std::size_t>(chunk_offset) + chunk_header_size, 99);
+    write_u16_at(data, column_entry_offset(data, 0) + kColumnIdOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1ColumnId::mapq));
     write_bytes(path, data);
 
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
     EXPECT_NE(read.error().find("missing required column"), std::string::npos);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsDuplicateRequiredColumn) {
+    const auto path = temp_path("alignx_axf1_duplicate_column");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u16_at(data, column_entry_offset(data, 10) + kColumnIdOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1ColumnId::qname));
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("duplicate AXF1 required column"), std::string::npos);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsUnknownColumn) {
+    const auto path = temp_path("alignx_axf1_unknown_column");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u16_at(data, column_entry_offset(data, 10) + kColumnIdOffset, 99);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("unknown AXF1 column id"), std::string::npos);
 
     std::filesystem::remove(path);
 }
@@ -179,19 +239,68 @@ TEST(Axf1File, RejectsColumnPayloadOutsideChunk) {
     ASSERT_TRUE(write) << write.error();
 
     auto data = read_bytes(path);
-    constexpr std::size_t index_offset_field_offset = 20;
-    const std::uint64_t index_offset = read_u64_at(data, index_offset_field_offset);
-    constexpr std::size_t chunk_offset_field_offset = 16;
-    const std::uint64_t chunk_offset =
-        read_u64_at(data, static_cast<std::size_t>(index_offset) + chunk_offset_field_offset);
-    constexpr std::size_t first_column_length_offset = 18 + 2 + 2 + 8;
-    write_u64_at(data, static_cast<std::size_t>(chunk_offset) + first_column_length_offset,
-                 1'000'000);
+    write_u64_at(data, column_entry_offset(data, 0) + kColumnLengthOffset, 1'000'000);
     write_bytes(path, data);
 
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
     EXPECT_NE(read.error().find("column payload points outside chunk"), std::string::npos);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsChunkMetadataMismatchWithIndex) {
+    const auto path = temp_path("alignx_axf1_chunk_metadata_mismatch");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u32_at(
+        data, static_cast<std::size_t>(read_first_chunk_offset(data)) + kChunkStartPosOffset, 101);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("chunk metadata does not match index"), std::string::npos);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsColumnValueCountMismatch) {
+    const auto path = temp_path("alignx_axf1_value_count_mismatch");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u32_at(data, static_cast<std::size_t>(read_index_offset(data)) + kIndexRecordCountOffset,
+                 3);
+    write_u32_at(
+        data, static_cast<std::size_t>(read_first_chunk_offset(data)) + kChunkRecordCountOffset, 3);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("column value count mismatch"), std::string::npos);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsColumnTrailingBytes) {
+    const auto path = temp_path("alignx_axf1_column_trailing_bytes");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const std::size_t qname_length_offset = column_entry_offset(data, 0) + kColumnLengthOffset;
+    write_u64_at(data, qname_length_offset, read_u64_at(data, qname_length_offset) + 1);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("string column has trailing bytes"), std::string::npos);
 
     std::filesystem::remove(path);
 }
@@ -203,10 +312,7 @@ TEST(Axf1File, RejectsChunkPayloadOutsideFile) {
     ASSERT_TRUE(write) << write.error();
 
     auto data = read_bytes(path);
-    constexpr std::size_t index_offset_field_offset = 20;
-    const std::uint64_t index_offset = read_u64_at(data, index_offset_field_offset);
-    constexpr std::size_t chunk_offset_field_offset = 16;
-    write_u64_at(data, static_cast<std::size_t>(index_offset) + chunk_offset_field_offset,
+    write_u64_at(data, static_cast<std::size_t>(read_index_offset(data)) + kIndexChunkOffsetOffset,
                  1'000'000);
     write_bytes(path, data);
 

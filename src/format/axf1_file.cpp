@@ -17,6 +17,13 @@ constexpr std::uint64_t kHeaderSize = kMagic.size() + sizeof(std::uint32_t) +
                                       sizeof(std::uint64_t);
 constexpr std::uint16_t kColumnEntrySize =
     sizeof(std::uint16_t) + sizeof(std::uint16_t) + sizeof(std::uint64_t) + sizeof(std::uint64_t);
+constexpr std::array<Axf1ColumnId, 11> kRequiredColumns{
+    Axf1ColumnId::qname,    Axf1ColumnId::flag,
+    Axf1ColumnId::pos,      Axf1ColumnId::mapq,
+    Axf1ColumnId::cigar,    Axf1ColumnId::mate_reference,
+    Axf1ColumnId::mate_pos, Axf1ColumnId::template_length,
+    Axf1ColumnId::sequence, Axf1ColumnId::quality,
+    Axf1ColumnId::tags};
 
 struct ColumnEntry {
     Axf1ColumnId column_id = Axf1ColumnId::qname;
@@ -320,11 +327,11 @@ decode_string_column(const std::vector<unsigned char>& bytes, std::uint32_t reco
     for (std::uint32_t index = 0; index < record_count; ++index) {
         auto size = reader.read_u32();
         if (!size) {
-            return std::unexpected(size.error());
+            return std::unexpected("AXF1 column value count mismatch");
         }
         auto value = reader.read_string(*size);
         if (!value) {
-            return std::unexpected(value.error());
+            return std::unexpected("AXF1 string column value is truncated");
         }
         values.push_back(std::move(*value));
     }
@@ -344,7 +351,7 @@ decode_fixed_column(const std::vector<unsigned char>& bytes, std::uint32_t recor
     for (std::uint32_t index = 0; index < record_count; ++index) {
         auto value = (reader.*read_value)();
         if (!value) {
-            return std::unexpected(value.error());
+            return std::unexpected("AXF1 column value count mismatch");
         }
         values.push_back(*value);
     }
@@ -354,10 +361,31 @@ decode_fixed_column(const std::vector<unsigned char>& bytes, std::uint32_t recor
     return values;
 }
 
-bool has_column(const std::vector<ColumnEntry>& entries, Axf1ColumnId column_id) {
-    return std::any_of(entries.begin(), entries.end(), [column_id](const ColumnEntry& entry) {
-        return entry.column_id == column_id;
-    });
+bool is_known_column(Axf1ColumnId column_id) {
+    return std::find(kRequiredColumns.begin(), kRequiredColumns.end(), column_id) !=
+           kRequiredColumns.end();
+}
+
+std::expected<void, std::string> validate_column_entries(const std::vector<ColumnEntry>& entries) {
+    for (const ColumnEntry& entry : entries) {
+        if (!is_known_column(entry.column_id)) {
+            return std::unexpected("unknown AXF1 column id");
+        }
+    }
+
+    for (Axf1ColumnId required : kRequiredColumns) {
+        const auto count =
+            std::count_if(entries.begin(), entries.end(), [required](const ColumnEntry& entry) {
+                return entry.column_id == required;
+            });
+        if (count == 0) {
+            return std::unexpected("AXF1 chunk is missing required column");
+        }
+        if (count > 1) {
+            return std::unexpected("duplicate AXF1 required column");
+        }
+    }
+    return {};
 }
 
 std::expected<std::vector<unsigned char>, std::string>
@@ -417,14 +445,9 @@ std::expected<Axf1Chunk, std::string> read_chunk(const std::vector<unsigned char
                            .length = *length});
     }
 
-    for (Axf1ColumnId required :
-         {Axf1ColumnId::qname, Axf1ColumnId::flag, Axf1ColumnId::pos, Axf1ColumnId::mapq,
-          Axf1ColumnId::cigar, Axf1ColumnId::mate_reference, Axf1ColumnId::mate_pos,
-          Axf1ColumnId::template_length, Axf1ColumnId::sequence, Axf1ColumnId::quality,
-          Axf1ColumnId::tags}) {
-        if (!has_column(entries, required)) {
-            return std::unexpected("AXF1 chunk is missing required column");
-        }
+    auto column_validation = validate_column_entries(entries);
+    if (!column_validation) {
+        return std::unexpected(column_validation.error());
     }
 
     const std::size_t payload_start = static_cast<std::size_t>(reader.offset());
