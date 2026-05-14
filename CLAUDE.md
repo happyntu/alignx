@@ -69,6 +69,7 @@ Completed:
 - AXF1 QUAL byte RLE codec with raw fallback for `*`, empty, and non-beneficial quality strings
 - AXF1 QUAL byte RLE toy smoke verified byte-identical SAM stdout and `qual_rle` codec distribution
 - AXF1 QUAL byte RLE remote HG002 chr1 small-region correctness smoke verified stdout parity; QUAL fell back to raw on 7/7 chunks
+- AXF1 next QUAL codec design note: prefer lossless chunk-local alphabet bit-pack (`qual_pack`) with raw fallback before context models or compressed column wrappers
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV

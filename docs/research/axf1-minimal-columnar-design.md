@@ -488,6 +488,12 @@ payload summary therefore stayed unchanged for this region: `quality` remains
 result and indicates that HG002-style QUAL needs a stronger future lossless
 codec than simple byte RLE.
 
+The next recommended QUAL codec is a chunk-local alphabet bit-pack
+(`qual_pack`) with raw fallback, described in
+`docs/research/axf1-qual-next-codec-design.md`. It should be implemented before
+QUAL context models, rANS/arithmetic coding, FQZComp-like compression, or a
+generic compressed column wrapper.
+
 ## Region-Converted AXF1 Subset Semantics
 
 `alignx convert --region` writes a subset AXF1 file containing records selected
@@ -668,6 +674,9 @@ Suggested implementation boundary:
 - `docs/research/axf1-qual-codec-design.md` defines the recommended QUAL codec
   path: implement lossless byte RLE with raw fallback before context models,
   zstd wrappers, or lossy binning.
+- `docs/research/axf1-qual-next-codec-design.md` defines the next QUAL codec
+  path: implement lossless chunk-local alphabet bit-pack with raw fallback
+  before context models or compressed column wrappers.
 - `CMakeLists.txt` already globs `src/format/*.cpp`, `src/query/*.cpp`,
   `src/convert/*.cpp`, and `tests/unit/*.cpp`, so the proposed AXF1 source and
   test files are automatically added to `alignx_lib` and `unit_tests`.
