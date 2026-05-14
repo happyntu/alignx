@@ -187,6 +187,11 @@ and confirmed byte-identical SAM stdout with the same stdout SHA-256
 (`6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`)
 for 64 records. `quality` fell back to raw on all 7 chunks, so `qual_rle` is
 not currently an expected HG002 codec for this region.
+Remote HG002 QUAL alphabet bit-pack smoke on 2026-05-15 used
+`/mypool/alignx/tmp/axf1_qual_pack_smoke_hg002_chr1_1000000_1010000_20260515`
+and confirmed byte-identical SAM stdout with the same stdout SHA-256
+(`6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`)
+for 64 records. `quality` used `qual_pack` on all 7 chunks.
 Remote HG002 expected-codec smoke on 2026-05-15 used
 `/mypool/alignx/tmp/axf1_expect_codec_smoke_hg002_chr1_1000000_1010000_20260515`
 and asserted all five expected codecs with byte-identical SAM stdout
@@ -210,6 +215,9 @@ dominant remaining payload column at 77.843% of column payload bytes, followed
 by `sequence` at 19.470% and `cigar` at 1.774%. After `qual_rle`, the same
 HG002 region still falls back to raw for QUAL, so this points to a future
 lossless QUAL codec beyond simple byte RLE.
+After `qual_pack`, the same region used `qual_pack` on all 7 chunks and reduced
+`quality` payload from 907,624 bytes to 794,762 bytes, or 75.468% of column
+payload bytes.
 
 ## AXF0 and AXF1 development status
 

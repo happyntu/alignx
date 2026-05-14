@@ -146,6 +146,28 @@ records. The smoke asserted `quality=qual_pack` along with the existing
 POS/FLAG/CIGAR/SEQ expected codecs. This is a correctness smoke, not a
 benchmark.
 
+## Remote HG002 Smoke
+
+Remote HG002 correctness smoke on 2026-05-15 used
+`/mypool/alignx/tmp/axf1_qual_pack_smoke_hg002_chr1_1000000_1010000_20260515`
+for `chr1:1000000-1010000`. It preserved byte-identical SAM stdout
+(`6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`) for 64
+records and used `qual_pack` for `quality` on all 7 chunks.
+
+Metadata-only summary:
+
+| Column | Codec distribution | Payload bytes | Share |
+|---|---|---:|---:|
+| `quality` | `qual_pack:7` | 794,762 | 75.468% |
+| `sequence` | `seq_2bit_literal:7` | 227,010 | 21.556% |
+| `cigar` | `cigar_token:7` | 20,689 | 1.965% |
+| `tags` | `raw:7` | 7,249 | 0.688% |
+| `qname` | `raw:7` | 2,390 | 0.227% |
+
+Compared with the previous raw QUAL payload for the same region, `qual_pack`
+reduced `quality` from 907,624 bytes to 794,762 bytes. This is a correctness
+smoke and metadata summary, not a benchmark.
+
 ## Deferred Work
 
 If `qual_pack` does not improve HG002-style data, the next design should focus

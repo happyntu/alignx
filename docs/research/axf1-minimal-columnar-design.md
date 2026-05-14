@@ -500,6 +500,16 @@ confirmed byte-identical SAM stdout
 (`e62402c0450decf357ef797750af1dfb0be065eeeb3b87f157953a7f7ae1feb9`) for 2
 records, and reported `qual_pack` for the `quality` column.
 
+Remote HG002 QUAL alphabet bit-pack correctness smoke on 2026-05-15 used
+`/mypool/alignx/tmp/axf1_qual_pack_smoke_hg002_chr1_1000000_1010000_20260515`
+and confirmed byte-identical SAM stdout
+(`6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`) for 64
+records. `quality` used `qual_pack` on all 7 chunks. The metadata-only payload
+summary changed the `quality` column from 907,624 bytes raw to 794,762 bytes
+with `qual_pack`, or from 77.843% to 75.468% of column payload bytes. QUAL
+remains the dominant payload column, but chunk-local alphabet packing is useful
+on this HG002 region.
+
 ## Region-Converted AXF1 Subset Semantics
 
 `alignx convert --region` writes a subset AXF1 file containing records selected
