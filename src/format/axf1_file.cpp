@@ -33,6 +33,12 @@ struct ColumnEntry {
     std::uint64_t length = 0;
 };
 
+struct EncodedColumn {
+    Axf1ColumnId column_id = Axf1ColumnId::qname;
+    Axf1CodecId codec_id = Axf1CodecId::raw;
+    std::vector<unsigned char> payload;
+};
+
 void append_u8(std::vector<unsigned char>& bytes, std::uint8_t value) {
     bytes.push_back(value);
 }
@@ -57,6 +63,14 @@ void append_u64(std::vector<unsigned char>& bytes, std::uint64_t value) {
     for (std::size_t byte = 0; byte < sizeof(value); ++byte) {
         bytes.push_back(static_cast<unsigned char>((value >> (byte * 8U)) & 0xFFU));
     }
+}
+
+void append_varint_u64(std::vector<unsigned char>& bytes, std::uint64_t value) {
+    while (value >= 0x80U) {
+        bytes.push_back(static_cast<unsigned char>((value & 0x7FU) | 0x80U));
+        value >>= 7U;
+    }
+    bytes.push_back(static_cast<unsigned char>(value));
 }
 
 void append_string(std::vector<unsigned char>& bytes, std::string_view value) {
@@ -491,6 +505,42 @@ std::vector<unsigned char> encode_i32(const std::vector<Axf1Record>& records,
     return bytes;
 }
 
+std::expected<std::vector<unsigned char>, std::string>
+encode_pos_delta_varint(const std::vector<Axf1Record>& records) {
+    std::vector<unsigned char> bytes;
+    if (records.empty()) {
+        return bytes;
+    }
+
+    std::int32_t previous_pos = records.front().pos;
+    if (previous_pos < 0) {
+        return std::unexpected("AXF1 POS delta codec requires non-negative positions");
+    }
+    append_varint_u64(bytes, static_cast<std::uint64_t>(previous_pos));
+
+    for (std::size_t index = 1; index < records.size(); ++index) {
+        const std::int32_t current_pos = records.at(index).pos;
+        if (current_pos < previous_pos) {
+            return std::unexpected("AXF1 POS delta codec requires monotonic positions");
+        }
+        append_varint_u64(bytes, static_cast<std::uint64_t>(current_pos - previous_pos));
+        previous_pos = current_pos;
+    }
+    return bytes;
+}
+
+EncodedColumn encode_pos_column(const std::vector<Axf1Record>& records) {
+    auto encoded = encode_pos_delta_varint(records);
+    if (encoded) {
+        return {.column_id = Axf1ColumnId::pos,
+                .codec_id = Axf1CodecId::pos_delta_varint,
+                .payload = std::move(*encoded)};
+    }
+    return {.column_id = Axf1ColumnId::pos,
+            .codec_id = Axf1CodecId::raw,
+            .payload = encode_i32(records, &Axf1Record::pos)};
+}
+
 std::vector<unsigned char> encode_u8(const std::vector<Axf1Record>& records,
                                      std::uint8_t Axf1Record::* field) {
     std::vector<unsigned char> bytes;
@@ -500,20 +550,38 @@ std::vector<unsigned char> encode_u8(const std::vector<Axf1Record>& records,
     return bytes;
 }
 
-std::vector<std::pair<Axf1ColumnId, std::vector<unsigned char>>>
-encode_columns(const Axf1Chunk& chunk) {
-    return {
-        {Axf1ColumnId::qname, encode_strings(chunk.records, &Axf1Record::qname)},
-        {Axf1ColumnId::flag, encode_u16(chunk.records, &Axf1Record::flag)},
-        {Axf1ColumnId::pos, encode_i32(chunk.records, &Axf1Record::pos)},
-        {Axf1ColumnId::mapq, encode_u8(chunk.records, &Axf1Record::mapq)},
-        {Axf1ColumnId::cigar, encode_strings(chunk.records, &Axf1Record::cigar)},
-        {Axf1ColumnId::mate_reference, encode_strings(chunk.records, &Axf1Record::mate_reference)},
-        {Axf1ColumnId::mate_pos, encode_i32(chunk.records, &Axf1Record::mate_pos)},
-        {Axf1ColumnId::template_length, encode_i32(chunk.records, &Axf1Record::template_length)},
-        {Axf1ColumnId::sequence, encode_strings(chunk.records, &Axf1Record::sequence)},
-        {Axf1ColumnId::quality, encode_strings(chunk.records, &Axf1Record::quality)},
-        {Axf1ColumnId::tags, encode_strings(chunk.records, &Axf1Record::tags)}};
+std::vector<EncodedColumn> encode_columns(const Axf1Chunk& chunk) {
+    return {{.column_id = Axf1ColumnId::qname,
+             .codec_id = Axf1CodecId::raw,
+             .payload = encode_strings(chunk.records, &Axf1Record::qname)},
+            {.column_id = Axf1ColumnId::flag,
+             .codec_id = Axf1CodecId::raw,
+             .payload = encode_u16(chunk.records, &Axf1Record::flag)},
+            encode_pos_column(chunk.records),
+            {.column_id = Axf1ColumnId::mapq,
+             .codec_id = Axf1CodecId::raw,
+             .payload = encode_u8(chunk.records, &Axf1Record::mapq)},
+            {.column_id = Axf1ColumnId::cigar,
+             .codec_id = Axf1CodecId::raw,
+             .payload = encode_strings(chunk.records, &Axf1Record::cigar)},
+            {.column_id = Axf1ColumnId::mate_reference,
+             .codec_id = Axf1CodecId::raw,
+             .payload = encode_strings(chunk.records, &Axf1Record::mate_reference)},
+            {.column_id = Axf1ColumnId::mate_pos,
+             .codec_id = Axf1CodecId::raw,
+             .payload = encode_i32(chunk.records, &Axf1Record::mate_pos)},
+            {.column_id = Axf1ColumnId::template_length,
+             .codec_id = Axf1CodecId::raw,
+             .payload = encode_i32(chunk.records, &Axf1Record::template_length)},
+            {.column_id = Axf1ColumnId::sequence,
+             .codec_id = Axf1CodecId::raw,
+             .payload = encode_strings(chunk.records, &Axf1Record::sequence)},
+            {.column_id = Axf1ColumnId::quality,
+             .codec_id = Axf1CodecId::raw,
+             .payload = encode_strings(chunk.records, &Axf1Record::quality)},
+            {.column_id = Axf1ColumnId::tags,
+             .codec_id = Axf1CodecId::raw,
+             .payload = encode_strings(chunk.records, &Axf1Record::tags)}};
 }
 
 std::vector<unsigned char> write_chunk(const Axf1Chunk& chunk) {
@@ -522,12 +590,12 @@ std::vector<unsigned char> write_chunk(const Axf1Chunk& chunk) {
     entries.reserve(encoded_columns.size());
 
     std::uint64_t payload_offset = 0;
-    for (const auto& [column_id, payload] : encoded_columns) {
-        entries.push_back({.column_id = column_id,
-                           .codec_id = Axf1CodecId::raw,
+    for (const EncodedColumn& column : encoded_columns) {
+        entries.push_back({.column_id = column.column_id,
+                           .codec_id = column.codec_id,
                            .offset = payload_offset,
-                           .length = static_cast<std::uint64_t>(payload.size())});
-        payload_offset += payload.size();
+                           .length = static_cast<std::uint64_t>(column.payload.size())});
+        payload_offset += column.payload.size();
     }
 
     std::vector<unsigned char> bytes;
@@ -542,9 +610,8 @@ std::vector<unsigned char> write_chunk(const Axf1Chunk& chunk) {
         append_u64(bytes, entry.offset);
         append_u64(bytes, entry.length);
     }
-    for (const auto& [unused_column_id, payload] : encoded_columns) {
-        (void)unused_column_id;
-        bytes.insert(bytes.end(), payload.begin(), payload.end());
+    for (const EncodedColumn& column : encoded_columns) {
+        bytes.insert(bytes.end(), column.payload.begin(), column.payload.end());
     }
     return bytes;
 }
@@ -591,9 +658,66 @@ decode_fixed_column(const std::vector<unsigned char>& bytes, std::uint32_t recor
     return values;
 }
 
+std::expected<std::uint64_t, std::string> read_varint_u64(Reader& reader) {
+    std::uint64_t value = 0;
+    for (std::size_t byte_index = 0; byte_index < 10; ++byte_index) {
+        auto byte = reader.read_u8();
+        if (!byte) {
+            return std::unexpected("truncated AXF1 POS delta varint");
+        }
+        if (byte_index == 9 && (*byte & 0xFEU) != 0) {
+            return std::unexpected("AXF1 POS delta varint overflow");
+        }
+        value |= static_cast<std::uint64_t>(*byte & 0x7FU) << (byte_index * 7U);
+        if ((*byte & 0x80U) == 0) {
+            return value;
+        }
+    }
+    return std::unexpected("AXF1 POS delta varint overflow");
+}
+
+std::expected<std::vector<std::int32_t>, std::string>
+decode_pos_delta_varint_column(const std::vector<unsigned char>& bytes,
+                               std::uint32_t record_count) {
+    Reader reader(bytes);
+    std::vector<std::int32_t> values;
+    values.reserve(record_count);
+    std::uint64_t current_pos = 0;
+    for (std::uint32_t index = 0; index < record_count; ++index) {
+        auto encoded_value = read_varint_u64(reader);
+        if (!encoded_value) {
+            return std::unexpected(encoded_value.error());
+        }
+        if (index == 0) {
+            current_pos = *encoded_value;
+        } else if (*encoded_value >
+                   static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()) -
+                       current_pos) {
+            return std::unexpected("AXF1 POS delta value is too large");
+        } else {
+            current_pos += *encoded_value;
+        }
+        if (current_pos > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) {
+            return std::unexpected("AXF1 POS delta value is too large");
+        }
+        values.push_back(static_cast<std::int32_t>(current_pos));
+    }
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 POS delta column has trailing bytes");
+    }
+    return values;
+}
+
 bool is_known_column(Axf1ColumnId column_id) {
     return std::find(kRequiredColumns.begin(), kRequiredColumns.end(), column_id) !=
            kRequiredColumns.end();
+}
+
+bool is_supported_column_codec(Axf1ColumnId column_id, Axf1CodecId codec_id) {
+    if (codec_id == Axf1CodecId::raw) {
+        return true;
+    }
+    return column_id == Axf1ColumnId::pos && codec_id == Axf1CodecId::pos_delta_varint;
 }
 
 bool contains_column(const std::vector<Axf1ColumnId>& columns, Axf1ColumnId column_id) {
@@ -604,6 +728,9 @@ std::expected<void, std::string> validate_column_entries(const std::vector<Colum
     for (const ColumnEntry& entry : entries) {
         if (!is_known_column(entry.column_id)) {
             return std::unexpected("unknown AXF1 column id");
+        }
+        if (!is_supported_column_codec(entry.column_id, entry.codec_id)) {
+            return std::unexpected("unsupported AXF1 column codec");
         }
     }
 
@@ -628,6 +755,9 @@ validate_selected_column_entries(const std::vector<ColumnEntry>& entries,
     for (const ColumnEntry& entry : entries) {
         if (!is_known_column(entry.column_id)) {
             return std::unexpected("unknown AXF1 column id");
+        }
+        if (!is_supported_column_codec(entry.column_id, entry.codec_id)) {
+            return std::unexpected("unsupported AXF1 column codec");
         }
     }
 
@@ -686,9 +816,6 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
         if (!column_id || !codec_id || !offset || !length) {
             return std::unexpected("truncated AXF1 column entry");
         }
-        if (*codec_id != static_cast<std::uint16_t>(Axf1CodecId::raw)) {
-            return std::unexpected("unsupported AXF1 column codec");
-        }
         entries.push_back({.column_id = static_cast<Axf1ColumnId>(*column_id),
                            .codec_id = static_cast<Axf1CodecId>(*codec_id),
                            .offset = *offset,
@@ -741,7 +868,9 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
         }
         case Axf1ColumnId::pos: {
             auto values =
-                decode_fixed_column<std::int32_t>(*payload, *record_count, &Reader::read_i32);
+                entry.codec_id == Axf1CodecId::pos_delta_varint
+                    ? decode_pos_delta_varint_column(*payload, *record_count)
+                    : decode_fixed_column<std::int32_t>(*payload, *record_count, &Reader::read_i32);
             if (!values) {
                 return std::unexpected(values.error());
             }

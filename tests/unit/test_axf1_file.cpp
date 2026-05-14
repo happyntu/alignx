@@ -27,7 +27,11 @@ constexpr std::size_t kChunkRecordCountOffset = 12;
 constexpr std::size_t kChunkHeaderSize = 18;
 constexpr std::size_t kColumnEntrySize = 20;
 constexpr std::size_t kColumnIdOffset = 0;
+constexpr std::size_t kColumnCodecOffset = 2;
+constexpr std::size_t kColumnPayloadOffsetOffset = 4;
 constexpr std::size_t kColumnLengthOffset = 12;
+constexpr std::size_t kIndexChunkLengthOffset = 24;
+constexpr std::size_t kPosColumnIndex = 2;
 
 std::filesystem::path temp_path(std::string_view label) {
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -90,6 +94,14 @@ std::uint64_t read_u64_at(const std::vector<unsigned char>& data, std::size_t of
     return value;
 }
 
+std::uint16_t read_u16_at(const std::vector<unsigned char>& data, std::size_t offset) {
+    std::uint16_t value = 0;
+    for (std::size_t byte = 0; byte < sizeof(value); ++byte) {
+        value |= static_cast<std::uint16_t>(data.at(offset + byte)) << (byte * 8U);
+    }
+    return value;
+}
+
 void write_u16_at(std::vector<unsigned char>& data, std::size_t offset, std::uint16_t value) {
     for (std::size_t byte = 0; byte < sizeof(value); ++byte) {
         data.at(offset + byte) = static_cast<unsigned char>((value >> (byte * 8U)) & 0xFFU);
@@ -117,9 +129,22 @@ std::uint64_t read_first_chunk_offset(const std::vector<unsigned char>& data) {
                        static_cast<std::size_t>(read_index_offset(data)) + kIndexChunkOffsetOffset);
 }
 
+std::uint64_t read_first_chunk_length(const std::vector<unsigned char>& data) {
+    return read_u64_at(data,
+                       static_cast<std::size_t>(read_index_offset(data)) + kIndexChunkLengthOffset);
+}
+
 std::size_t column_entry_offset(const std::vector<unsigned char>& data, std::size_t column_index) {
     return static_cast<std::size_t>(read_first_chunk_offset(data)) + kChunkHeaderSize +
            column_index * kColumnEntrySize;
+}
+
+std::size_t column_payload_offset(const std::vector<unsigned char>& data,
+                                  std::size_t column_index) {
+    const auto entry_offset = column_entry_offset(data, column_index);
+    return static_cast<std::size_t>(read_first_chunk_offset(data)) + kChunkHeaderSize +
+           11 * kColumnEntrySize +
+           static_cast<std::size_t>(read_u64_at(data, entry_offset + kColumnPayloadOffsetOffset));
 }
 
 template <typename Mutator>
@@ -181,6 +206,54 @@ TEST(Axf1File, WriteReadRoundTrip) {
     EXPECT_EQ(read->chunks[0].records[1].mapq, 50);
     EXPECT_EQ(read->chunks[0].records[1].cigar, "5M1I4M");
     EXPECT_EQ(read->chunks[0].records[1].tags, "NM:i:1");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, WritesMonotonicPosAsDeltaVarint) {
+    const auto path = temp_path("alignx_axf1_pos_delta_varint");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kPosColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::pos_delta_varint));
+    EXPECT_EQ(read_u64_at(data, column_entry_offset(data, kPosColumnIndex) + kColumnLengthOffset),
+              2);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].pos, 100);
+    EXPECT_EQ(read->chunks[0].records[1].pos, 150);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, FallsBackToRawPosForNonMonotonicChunk) {
+    const auto path = temp_path("alignx_axf1_pos_delta_raw_fallback");
+    auto file = make_file();
+    file.chunks[0].records[0].pos = 150;
+    file.chunks[0].records[1].pos = 100;
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kPosColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::raw));
+    EXPECT_EQ(read_u64_at(data, column_entry_offset(data, kPosColumnIndex) + kColumnLengthOffset),
+              8);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].pos, 150);
+    EXPECT_EQ(read->chunks[0].records[1].pos, 100);
 
     std::filesystem::remove(path);
 }
@@ -452,6 +525,24 @@ TEST(Axf1File, RejectsUnknownColumn) {
     std::filesystem::remove(path);
 }
 
+TEST(Axf1File, RejectsUnsupportedColumnCodec) {
+    const auto path = temp_path("alignx_axf1_unsupported_column_codec");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u16_at(data, column_entry_offset(data, 0) + kColumnCodecOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::pos_delta_varint));
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("unsupported AXF1 column codec"), std::string::npos);
+
+    std::filesystem::remove(path);
+}
+
 TEST(Axf1File, RejectsColumnPayloadOutsideChunk) {
     const auto path = temp_path("alignx_axf1_bad_column_range");
     const auto file = make_file();
@@ -465,6 +556,67 @@ TEST(Axf1File, RejectsColumnPayloadOutsideChunk) {
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
     EXPECT_NE(read.error().find("column payload points outside chunk"), std::string::npos);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedPosDeltaVarint) {
+    const auto path = temp_path("alignx_axf1_truncated_pos_delta_varint");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u64_at(data, column_entry_offset(data, kPosColumnIndex) + kColumnLengthOffset, 1);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("truncated AXF1 POS delta varint"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsOverflowingPosDeltaVarint) {
+    const auto path = temp_path("alignx_axf1_overflowing_pos_delta_varint");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto old_index_offset = read_index_offset(data);
+    const auto first_chunk_offset = read_first_chunk_offset(data);
+    const auto old_chunk_length = read_first_chunk_length(data);
+    const std::size_t pos_entry_offset =
+        first_chunk_offset + kChunkHeaderSize + kPosColumnIndex * kColumnEntrySize;
+    const std::size_t pos_payload_offset = column_payload_offset(data, kPosColumnIndex);
+    constexpr std::size_t kExtraBytes = 9;
+
+    data.insert(data.begin() + static_cast<std::ptrdiff_t>(pos_payload_offset + 2), kExtraBytes, 0);
+    const unsigned char overflow_varint[11] = {0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+                                               0x80, 0x80, 0x80, 0x80, 0x02};
+    for (std::size_t index = 0; index < sizeof(overflow_varint); ++index) {
+        data.at(pos_payload_offset + index) = overflow_varint[index];
+    }
+
+    write_u64_at(data, pos_entry_offset + kColumnLengthOffset, sizeof(overflow_varint));
+    for (std::size_t column_index = kPosColumnIndex + 1; column_index < 11; ++column_index) {
+        const std::size_t entry_offset =
+            first_chunk_offset + kChunkHeaderSize + column_index * kColumnEntrySize;
+        const auto old_offset = read_u64_at(data, entry_offset + kColumnPayloadOffsetOffset);
+        write_u64_at(data, entry_offset + kColumnPayloadOffsetOffset, old_offset + kExtraBytes);
+    }
+    write_u64_at(data, kIndexOffsetFieldOffset, old_index_offset + kExtraBytes);
+    write_u64_at(data,
+                 static_cast<std::size_t>(old_index_offset + kExtraBytes) + kIndexChunkLengthOffset,
+                 old_chunk_length + kExtraBytes);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("AXF1 POS delta varint overflow"), std::string::npos)
+        << read.error();
 
     std::filesystem::remove(path);
 }

@@ -132,7 +132,7 @@ The minimum practical column set is:
 | `QNAME` | raw string table or length-prefixed strings | Dictionary can come later. |
 | `FLAG` | raw `u16` array | Bit-pack later. |
 | `RNAME` | implicit chunk `ref_id` for mapped records | Cross-reference records can be handled later. |
-| `POS` | raw `i32` array or varint delta | Keep 0-based internally; print 1-based SAM POS. |
+| `POS` | delta varint for monotonic chunks; raw `i32` fallback | Keep 0-based internally; print 1-based SAM POS. |
 | `MAPQ` | raw `u8` array | RLE later. |
 | `CIGAR` | length-prefixed strings | Op/length streams later. |
 | `RNEXT` | length-prefixed strings or sentinel encoding | Preserve stdout first. |
@@ -178,7 +178,7 @@ AXF1 should inherit the AXF0 query behavior:
 
 Status as of 2026-05-14: this slice is implemented through opt-in CLI routing.
 `alignx convert` still defaults to AXF0, while `alignx convert --format AXF1`
-writes raw-column MVP files. `alignx view` detects AXF0 vs AXF1 from file
+writes columnar AXF1 MVP files. `alignx view` detects AXF0 vs AXF1 from file
 magic, so `.axf1` is no longer required for the view path, although tests may
 continue to use it as a readability cue while the format is unstable.
 
@@ -189,8 +189,11 @@ malformed non-overlapping chunk payloads from affecting unrelated region
 queries and preserves atomic stdout behavior for overlapping malformed chunks.
 Within each selected chunk, `alignx view` first decodes only `POS` and `CIGAR`
 to identify records that overlap the requested region. Full output columns are
-decoded only if the chunk contains at least one matching record. This is still a
-raw-codec correctness scaffold, not a benchmark claim.
+decoded only if the chunk contains at least one matching record. The POS column
+uses a chunk-local unsigned varint stream for monotonic non-negative positions:
+the first value is the absolute 0-based POS and following values are deltas.
+Chunks with non-monotonic record order fall back to raw `i32` POS storage.
+This is a correctness scaffold, not a benchmark claim.
 
 The AXF1 converter now emits deterministic chunks using the first
 production-oriented hybrid policy documented in
@@ -461,7 +464,7 @@ Suggested implementation boundary:
   references and chunk index metadata first, then reads and decodes selected
   chunk byte ranges on demand. `read_axf1_file()` remains the full-file
   round-trip helper.
-- `Axf1FileReader::read_chunk_columns()` supports selective raw-column decode
+- `Axf1FileReader::read_chunk_columns()` supports selective column decode
   for query filtering. Current `alignx view` uses it for `POS` and `CIGAR`,
   then falls back to full chunk decode for chunks with matching output records.
 - `docs/research/axf1-chunk-sizing-policy.md` defines the recommended first

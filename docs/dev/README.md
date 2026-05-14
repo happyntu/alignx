@@ -128,9 +128,10 @@ AXF0 is the row-preserving MVP path. It stores SAM-line payloads in indexed AXF
 blocks so conversion, view routing, region filtering, and stdout parity can be
 validated before the columnar codec stack is complete.
 
-AXF1 is the raw-column correctness scaffold. It writes independently encoded
-raw columns, supports metadata-first lazy region view, and selectively decodes
-`POS` plus `CIGAR` before full output columns. The current converter is
+AXF1 is the columnar correctness scaffold. It writes independently encoded
+columns, supports metadata-first lazy region view, and selectively decodes
+`POS` plus `CIGAR` before full output columns. `POS` uses delta-varint encoding
+for monotonic chunks and raw fallback otherwise. The current converter is
 mapped-record only: unmapped records and invalid reference spans are skipped
 until unmapped AXF1 semantics are designed.
 

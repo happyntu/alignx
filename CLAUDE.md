@@ -47,6 +47,7 @@ Completed:
 - AXF1 v2 metadata corruption tests cover full-file reader, metadata-only reader, and Python inspector
 - AXF1 source identity design note: keep v2 as-is for now; future identity should prefer file size, mtime, and BAM header SHA-256 over default full-content hashing
 - AXF1 metadata extensibility design note: future v3 metadata should use typed key/value entries with required/optional flags; keep v2 as active writer version for now
+- AXF1 POS column delta-varint codec for monotonic chunks, with raw fallback for non-monotonic record order
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
@@ -188,7 +189,7 @@ alignx/
 
 ```bash
 alignx convert  <input.bam|cram>  -o <output.axf>      # BAM/CRAM → AXF0 by default
-alignx convert  <input.bam>       -o <output.axf1> --format AXF1 # opt-in raw-column AXF1 MVP
+alignx convert  <input.bam>       -o <output.axf1> --format AXF1 # opt-in columnar AXF1 MVP
 alignx view     <input.axf|axf1|bam> [region]           # region query → SAM stdout
 alignx export   <input.axf>       -o <output.bam|cram> # AXF → BAM/CRAM
 alignx pileup   <input.axf|bam>   <region>             # per-base coverage

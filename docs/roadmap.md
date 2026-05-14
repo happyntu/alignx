@@ -64,9 +64,10 @@ and region-query correctness.
 - [x] AXF1 v2 metadata corruption tests for full-file and metadata-only readers
 - [x] AXF1 source identity design note
 - [x] AXF1 metadata extensibility design note
+- [x] AXF1 POS delta-varint codec with raw fallback for non-monotonic chunks
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
-- [ ] Codec: POS varint delta, FLAG bit-pack, MAPQ byte/RLE, SEQ reference-delta 2-bit
+- [ ] Codec: FLAG bit-pack, MAPQ byte/RLE, SEQ reference-delta 2-bit
 - [x] Production AXF1 chunk sizing policy design: byte budget, genomic span, record count hybrid
 - [x] Implement production AXF1 hybrid chunk sizing in converter
 - [ ] Tune AXF1 chunk sizing thresholds on HG002-style data
