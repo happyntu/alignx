@@ -139,7 +139,7 @@ The minimum practical column set is:
 | `PNEXT` | raw `i32`/`u32` array | Preserve SAM semantics. |
 | `TLEN` | raw `i32` array | Preserve SAM semantics. |
 | `SEQ` | 2-bit literal for uppercase A/C/G/T; raw string fallback | Reference-delta requires separate metadata and semantics design. |
-| `QUAL` | length-prefixed strings | Lossless raw first. |
+| `QUAL` | length-prefixed strings | Planned next step is lossless byte RLE with raw fallback. |
 | `TAGS` | length-prefixed trailing SAM text | Per-tag streams later. |
 
 All record-aligned columns must have exactly `record_count` values. The reader
@@ -210,6 +210,10 @@ sequences when it is smaller than raw strings. It falls back to raw
 length-prefixed strings for ambiguity codes, lowercase bases, `*`, empty values,
 or non-beneficial payloads. Reference-delta is deferred until reference identity
 metadata and exact CIGAR/strand reconstruction semantics are designed.
+The QUAL column remains raw length-prefixed strings for now. The recommended
+next QUAL codec is lossless chunk-local byte RLE with raw fallback. Lossy
+quality-score binning remains out of scope unless a future explicit lossy
+profile is designed.
 This is a correctness scaffold, not a benchmark claim.
 
 The AXF1 converter now emits deterministic chunks using the first
@@ -643,6 +647,9 @@ Suggested implementation boundary:
 - `docs/research/axf1-cigar-codec-design.md` defines the recommended CIGAR
   codec path: implement self-contained token streams with raw fallback before
   dictionary, delta, or reference-aware CIGAR codecs.
+- `docs/research/axf1-qual-codec-design.md` defines the recommended QUAL codec
+  path: implement lossless byte RLE with raw fallback before context models,
+  zstd wrappers, or lossy binning.
 - `CMakeLists.txt` already globs `src/format/*.cpp`, `src/query/*.cpp`,
   `src/convert/*.cpp`, and `tests/unit/*.cpp`, so the proposed AXF1 source and
   test files are automatically added to `alignx_lib` and `unit_tests`.

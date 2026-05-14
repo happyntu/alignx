@@ -65,6 +65,7 @@ Completed:
 - AXF1 CIGAR token remote HG002 chr1 small-region correctness smoke
 - AXF1 expected-codec remote HG002 chr1 small-region correctness smoke asserts POS/FLAG/MAPQ/CIGAR/SEQ codec distribution
 - AXF1 column payload summary tool; HG002 small-region summary shows raw QUAL dominates remaining payload
+- AXF1 QUAL codec design note: prefer lossless chunk-local byte RLE with raw fallback before context models, zstd wrappers, or lossy binning
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
