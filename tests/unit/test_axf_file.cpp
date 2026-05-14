@@ -230,21 +230,32 @@ TEST(AxfFile, MetadataSortsBlocksAndQueriesOnlyMatchingReference) {
     EXPECT_EQ(metadata->references[2].name, "chrEmpty");
 
     ASSERT_EQ(metadata->blocks.size(), 5);
-    ASSERT_EQ(metadata->reference_block_ranges.size(), 3);
-    ASSERT_EQ(metadata->reference_end_sorted_block_ranges.size(), 3);
-    EXPECT_EQ(metadata->reference_block_ranges[0].begin, 0);
-    EXPECT_EQ(metadata->reference_block_ranges[0].end, 3);
-    EXPECT_EQ(metadata->reference_block_ranges[1].begin, 3);
-    EXPECT_EQ(metadata->reference_block_ranges[1].end, 5);
-    EXPECT_EQ(metadata->reference_block_ranges[2].begin, 5);
-    EXPECT_EQ(metadata->reference_block_ranges[2].end, 5);
-    EXPECT_EQ(metadata->reference_end_sorted_block_ranges[0].begin, 0);
-    EXPECT_EQ(metadata->reference_end_sorted_block_ranges[0].end, 3);
-    EXPECT_EQ(metadata->reference_end_sorted_block_ranges[1].begin, 3);
-    EXPECT_EQ(metadata->reference_end_sorted_block_ranges[1].end, 5);
-    EXPECT_EQ(metadata->reference_end_sorted_block_ranges[2].begin, 5);
-    EXPECT_EQ(metadata->reference_end_sorted_block_ranges[2].end, 5);
-    ASSERT_EQ(metadata->end_sorted_block_indices.size(), metadata->blocks.size());
+    auto alpha_range = metadata->reference_block_range(0);
+    ASSERT_TRUE(alpha_range) << alpha_range.error();
+    EXPECT_EQ(alpha_range->begin, 0);
+    EXPECT_EQ(alpha_range->end, 3);
+    auto beta_range = metadata->reference_block_range(1);
+    ASSERT_TRUE(beta_range) << beta_range.error();
+    EXPECT_EQ(beta_range->begin, 3);
+    EXPECT_EQ(beta_range->end, 5);
+    auto empty_range = metadata->reference_block_range(2);
+    ASSERT_TRUE(empty_range) << empty_range.error();
+    EXPECT_EQ(empty_range->begin, 5);
+    EXPECT_EQ(empty_range->end, 5);
+
+    auto alpha_end_range = metadata->reference_end_sorted_block_range(0);
+    ASSERT_TRUE(alpha_end_range) << alpha_end_range.error();
+    EXPECT_EQ(alpha_end_range->begin, 0);
+    EXPECT_EQ(alpha_end_range->end, 3);
+    auto beta_end_range = metadata->reference_end_sorted_block_range(1);
+    ASSERT_TRUE(beta_end_range) << beta_end_range.error();
+    EXPECT_EQ(beta_end_range->begin, 3);
+    EXPECT_EQ(beta_end_range->end, 5);
+    auto empty_end_range = metadata->reference_end_sorted_block_range(2);
+    ASSERT_TRUE(empty_end_range) << empty_end_range.error();
+    EXPECT_EQ(empty_end_range->begin, 5);
+    EXPECT_EQ(empty_end_range->end, 5);
+    ASSERT_EQ(metadata->end_sorted_block_indices().size(), metadata->blocks.size());
 
     EXPECT_EQ(metadata->blocks[0].ref_id, 0);
     EXPECT_EQ(metadata->blocks[0].start_pos, 100);
@@ -304,10 +315,10 @@ TEST(AxfFile, MetadataUsesEndSortedCandidatesWithoutChangingOutputOrder) {
     EXPECT_EQ(metadata->blocks[1].record_count, 2);
     EXPECT_EQ(metadata->blocks[2].record_count, 3);
 
-    ASSERT_EQ(metadata->end_sorted_block_indices.size(), 3);
-    EXPECT_EQ(metadata->end_sorted_block_indices[0], 1);
-    EXPECT_EQ(metadata->end_sorted_block_indices[1], 0);
-    EXPECT_EQ(metadata->end_sorted_block_indices[2], 2);
+    ASSERT_EQ(metadata->end_sorted_block_indices().size(), 3);
+    EXPECT_EQ(metadata->end_sorted_block_indices()[0], 1);
+    EXPECT_EQ(metadata->end_sorted_block_indices()[1], 0);
+    EXPECT_EQ(metadata->end_sorted_block_indices()[2], 2);
 
     auto hits = metadata->query_blocks(0, 550, 560);
     ASSERT_TRUE(hits) << hits.error();

@@ -48,15 +48,31 @@ struct AxfBlockRange {
     std::size_t end = 0;
 };
 
-struct AxfFileIndex {
+class AxfFileIndex {
+public:
     std::vector<AxfReference> references;
     std::vector<AxfBlockIndexEntry> blocks;
-    std::vector<AxfBlockRange> reference_block_ranges;
-    std::vector<std::size_t> end_sorted_block_indices;
-    std::vector<AxfBlockRange> reference_end_sorted_block_ranges;
 
     [[nodiscard]] std::expected<std::vector<const AxfBlockIndexEntry*>, std::string>
     query_blocks(std::uint32_t ref_id, std::int32_t start, std::int32_t end) const;
+
+    [[nodiscard]] std::expected<AxfBlockRange, std::string>
+    reference_block_range(std::uint32_t ref_id) const;
+
+    [[nodiscard]] std::expected<AxfBlockRange, std::string>
+    reference_end_sorted_block_range(std::uint32_t ref_id) const;
+
+    [[nodiscard]] const std::vector<std::size_t>& end_sorted_block_indices() const noexcept;
+
+private:
+    friend std::expected<AxfFileIndex, std::string>
+    read_axf_index_metadata(const std::filesystem::path& path);
+
+    void rebuild_query_indices();
+
+    std::vector<AxfBlockRange> reference_block_ranges_;
+    std::vector<std::size_t> end_sorted_block_indices_;
+    std::vector<AxfBlockRange> reference_end_sorted_block_ranges_;
 };
 
 class AxfFileReader {
