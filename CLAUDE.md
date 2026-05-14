@@ -41,9 +41,10 @@ Completed:
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
+- Remote HG002 chr1:1M-2M engineering benchmark completed for `alignx view` vs `samtools view`
 
 Remaining implementation targets:
-- Benchmark: `alignx view` vs `samtools view` on chr1:1M-2M
+- AXF1 production chunk sizing policy: byte budget, genomic span, record count, or hybrid
 
 ## Build & Test Commands
 
@@ -232,7 +233,8 @@ For v0.1:
 - AXF0 MVP staging is allowed per ADR-005: `alignx convert <bam> -o <axf>` may write
   row-preserving SAM-line payloads for toy correctness before the final columnar
   AXF codec path is implemented.
-- Benchmark target: `samtools view` on chr1:1M-2M latency comparison.
+- Benchmark target completed: `samtools view` on chr1:1M-2M latency comparison
+  has an engineering baseline in `docs/research/phase1-bam-view-findings.md`.
 
 Do not claim full samtools replacement. alignx v0.1 targets **region query acceleration** only.
 

@@ -108,7 +108,14 @@ the threads=2 `alignx` path was about 1.76x faster for this region.
 
 ## Decision
 
-The BAM-backed `alignx view` path now has a useful low-risk improvement through
-HTSlib threading, but the remaining dominant cost is still BAM/BGZF read and
-iteration. Reaching larger speedups is likely to require the AXF/columnar path
-instead of further optimizing SAM formatting.
+The Phase 1 BAM-backed `alignx view` path now has a reproducible engineering
+benchmark on a real HG002 chr1 interval, with byte-identical stdout against
+`samtools view`. HTSlib worker threads are the current low-risk setting:
+`--alignx-hts-threads 2` improved the HG002 chr1 median from 289.201 ms to
+192.040 ms and outperformed the same-run `samtools view` median.
+
+This closes the v0.1 engineering benchmark target. Further large speedups
+should not depend on SAM formatting micro-optimizations. The next engineering
+focus should move to AXF/columnar work, starting with a production AXF1 chunk
+sizing policy that balances byte budget, genomic span, record count, and
+independent column decode cost.

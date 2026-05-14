@@ -20,11 +20,12 @@ and produce correct output before the next version starts.
 - [x] `alignx stats <bam>` — flag/MAPQ/insert size distribution
 - [x] `alignx index <bam>` — writes projected `.axf.idx` from `.bai` / `.csi`
 - [x] Unit tests: BamReader round-trip on toy BAM
-- [ ] Benchmark: `alignx view` vs `samtools view` on chr1:1M-2M
+- [x] Engineering benchmark: `alignx view` vs `samtools view` on HG002 chr1:1M-2M
 
 **Tech notes:**
 - HTSlib via vcpkg. Windows: confirm `htslib::htslib` target resolves.
-- No AXF format in this version; index only.
+- HG002 chr1 benchmark results are recorded in
+  `docs/research/phase1-bam-view-findings.md`; they are not paper-grade claims.
 
 ---
 
