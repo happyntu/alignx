@@ -25,6 +25,7 @@ enum class Axf1ColumnId : std::uint16_t {
 enum class Axf1CodecId : std::uint16_t {
     raw = 0,
     pos_delta_varint = 1,
+    flag_bitpack = 2,
 };
 
 struct Axf1Reference {

@@ -541,6 +541,53 @@ EncodedColumn encode_pos_column(const std::vector<Axf1Record>& records) {
             .payload = encode_i32(records, &Axf1Record::pos)};
 }
 
+std::uint8_t bit_width_u16(std::uint16_t value) {
+    std::uint8_t width = 0;
+    while (value != 0) {
+        ++width;
+        value >>= 1U;
+    }
+    return width;
+}
+
+std::vector<unsigned char> encode_flag_bitpack_payload(const std::vector<Axf1Record>& records,
+                                                       std::uint8_t bit_width) {
+    const std::size_t bit_count = records.size() * static_cast<std::size_t>(bit_width);
+    std::vector<unsigned char> bytes(1 + ((bit_count + 7U) / 8U), 0);
+    bytes.at(0) = bit_width;
+    if (bit_width == 0) {
+        return bytes;
+    }
+
+    std::size_t bit_offset = 0;
+    for (const Axf1Record& record : records) {
+        for (std::uint8_t bit = 0; bit < bit_width; ++bit) {
+            if (((record.flag >> bit) & 1U) != 0) {
+                bytes.at(1 + bit_offset / 8U) |=
+                    static_cast<unsigned char>(1U << (bit_offset % 8U));
+            }
+            ++bit_offset;
+        }
+    }
+    return bytes;
+}
+
+EncodedColumn encode_flag_column(const std::vector<Axf1Record>& records) {
+    std::uint8_t bit_width = 0;
+    for (const Axf1Record& record : records) {
+        bit_width = std::max(bit_width, bit_width_u16(record.flag));
+    }
+
+    auto encoded = encode_flag_bitpack_payload(records, bit_width);
+    const auto raw = encode_u16(records, &Axf1Record::flag);
+    if (encoded.size() < raw.size()) {
+        return {.column_id = Axf1ColumnId::flag,
+                .codec_id = Axf1CodecId::flag_bitpack,
+                .payload = std::move(encoded)};
+    }
+    return {.column_id = Axf1ColumnId::flag, .codec_id = Axf1CodecId::raw, .payload = raw};
+}
+
 std::vector<unsigned char> encode_u8(const std::vector<Axf1Record>& records,
                                      std::uint8_t Axf1Record::* field) {
     std::vector<unsigned char> bytes;
@@ -551,12 +598,11 @@ std::vector<unsigned char> encode_u8(const std::vector<Axf1Record>& records,
 }
 
 std::vector<EncodedColumn> encode_columns(const Axf1Chunk& chunk) {
+    auto flag_column = encode_flag_column(chunk.records);
     return {{.column_id = Axf1ColumnId::qname,
              .codec_id = Axf1CodecId::raw,
              .payload = encode_strings(chunk.records, &Axf1Record::qname)},
-            {.column_id = Axf1ColumnId::flag,
-             .codec_id = Axf1CodecId::raw,
-             .payload = encode_u16(chunk.records, &Axf1Record::flag)},
+            std::move(flag_column),
             encode_pos_column(chunk.records),
             {.column_id = Axf1ColumnId::mapq,
              .codec_id = Axf1CodecId::raw,
@@ -658,6 +704,43 @@ decode_fixed_column(const std::vector<unsigned char>& bytes, std::uint32_t recor
     return values;
 }
 
+std::expected<std::vector<std::uint16_t>, std::string>
+decode_flag_bitpack_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
+    if (bytes.empty()) {
+        return std::unexpected("truncated AXF1 FLAG bitpack column");
+    }
+
+    const std::uint8_t bit_width = bytes.at(0);
+    if (bit_width > 16) {
+        return std::unexpected("invalid AXF1 FLAG bitpack width");
+    }
+
+    const std::size_t bit_count = static_cast<std::size_t>(record_count) * bit_width;
+    const std::size_t expected_size = 1 + ((bit_count + 7U) / 8U);
+    if (bytes.size() < expected_size) {
+        return std::unexpected("truncated AXF1 FLAG bitpack column");
+    }
+    if (bytes.size() > expected_size) {
+        return std::unexpected("AXF1 FLAG bitpack column has trailing bytes");
+    }
+
+    std::vector<std::uint16_t> values;
+    values.reserve(record_count);
+    std::size_t bit_offset = 0;
+    for (std::uint32_t index = 0; index < record_count; ++index) {
+        std::uint16_t value = 0;
+        for (std::uint8_t bit = 0; bit < bit_width; ++bit) {
+            const auto byte = bytes.at(1 + bit_offset / 8U);
+            if (((byte >> (bit_offset % 8U)) & 1U) != 0) {
+                value |= static_cast<std::uint16_t>(1U << bit);
+            }
+            ++bit_offset;
+        }
+        values.push_back(value);
+    }
+    return values;
+}
+
 std::expected<std::uint64_t, std::string> read_varint_u64(Reader& reader) {
     std::uint64_t value = 0;
     for (std::size_t byte_index = 0; byte_index < 10; ++byte_index) {
@@ -717,7 +800,8 @@ bool is_supported_column_codec(Axf1ColumnId column_id, Axf1CodecId codec_id) {
     if (codec_id == Axf1CodecId::raw) {
         return true;
     }
-    return column_id == Axf1ColumnId::pos && codec_id == Axf1CodecId::pos_delta_varint;
+    return (column_id == Axf1ColumnId::pos && codec_id == Axf1CodecId::pos_delta_varint) ||
+           (column_id == Axf1ColumnId::flag && codec_id == Axf1CodecId::flag_bitpack);
 }
 
 bool contains_column(const std::vector<Axf1ColumnId>& columns, Axf1ColumnId column_id) {
@@ -856,8 +940,10 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
             break;
         }
         case Axf1ColumnId::flag: {
-            auto values =
-                decode_fixed_column<std::uint16_t>(*payload, *record_count, &Reader::read_u16);
+            auto values = entry.codec_id == Axf1CodecId::flag_bitpack
+                              ? decode_flag_bitpack_column(*payload, *record_count)
+                              : decode_fixed_column<std::uint16_t>(*payload, *record_count,
+                                                                   &Reader::read_u16);
             if (!values) {
                 return std::unexpected(values.error());
             }

@@ -130,7 +130,7 @@ The minimum practical column set is:
 | Column | Initial encoding | Notes |
 |---|---|---|
 | `QNAME` | raw string table or length-prefixed strings | Dictionary can come later. |
-| `FLAG` | raw `u16` array | Bit-pack later. |
+| `FLAG` | bit-packed unsigned values; raw `u16` fallback | Keep the full SAM bitmask lossless. |
 | `RNAME` | implicit chunk `ref_id` for mapped records | Cross-reference records can be handled later. |
 | `POS` | delta varint for monotonic chunks; raw `i32` fallback | Keep 0-based internally; print 1-based SAM POS. |
 | `MAPQ` | raw `u8` array | RLE later. |
@@ -193,6 +193,9 @@ decoded only if the chunk contains at least one matching record. The POS column
 uses a chunk-local unsigned varint stream for monotonic non-negative positions:
 the first value is the absolute 0-based POS and following values are deltas.
 Chunks with non-monotonic record order fall back to raw `i32` POS storage.
+The FLAG column uses a one-byte bit width followed by LSB-first packed unsigned
+values when that payload is smaller than raw `u16`; otherwise the writer falls
+back to raw `u16` FLAG values.
 This is a correctness scaffold, not a benchmark claim.
 
 The AXF1 converter now emits deterministic chunks using the first

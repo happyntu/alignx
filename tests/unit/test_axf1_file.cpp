@@ -31,6 +31,7 @@ constexpr std::size_t kColumnCodecOffset = 2;
 constexpr std::size_t kColumnPayloadOffsetOffset = 4;
 constexpr std::size_t kColumnLengthOffset = 12;
 constexpr std::size_t kIndexChunkLengthOffset = 24;
+constexpr std::size_t kFlagColumnIndex = 1;
 constexpr std::size_t kPosColumnIndex = 2;
 
 std::filesystem::path temp_path(std::string_view label) {
@@ -106,6 +107,10 @@ void write_u16_at(std::vector<unsigned char>& data, std::size_t offset, std::uin
     for (std::size_t byte = 0; byte < sizeof(value); ++byte) {
         data.at(offset + byte) = static_cast<unsigned char>((value >> (byte * 8U)) & 0xFFU);
     }
+}
+
+void write_u8_at(std::vector<unsigned char>& data, std::size_t offset, std::uint8_t value) {
+    data.at(offset) = value;
 }
 
 void write_u32_at(std::vector<unsigned char>& data, std::size_t offset, std::uint32_t value) {
@@ -206,6 +211,54 @@ TEST(Axf1File, WriteReadRoundTrip) {
     EXPECT_EQ(read->chunks[0].records[1].mapq, 50);
     EXPECT_EQ(read->chunks[0].records[1].cigar, "5M1I4M");
     EXPECT_EQ(read->chunks[0].records[1].tags, "NM:i:1");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, WritesFlagsAsBitpackWhenSmallerThanRaw) {
+    const auto path = temp_path("alignx_axf1_flag_bitpack");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kFlagColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::flag_bitpack));
+    EXPECT_EQ(read_u64_at(data, column_entry_offset(data, kFlagColumnIndex) + kColumnLengthOffset),
+              3);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].flag, 0);
+    EXPECT_EQ(read->chunks[0].records[1].flag, 16);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, FallsBackToRawFlagsWhenBitpackIsNotSmaller) {
+    const auto path = temp_path("alignx_axf1_flag_bitpack_raw_fallback");
+    auto file = make_file();
+    file.chunks[0].records[0].flag = 0xFFFF;
+    file.chunks[0].records[1].flag = 0;
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kFlagColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::raw));
+    EXPECT_EQ(read_u64_at(data, column_entry_offset(data, kFlagColumnIndex) + kColumnLengthOffset),
+              4);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].flag, 0xFFFF);
+    EXPECT_EQ(read->chunks[0].records[1].flag, 0);
 
     std::filesystem::remove(path);
 }
@@ -556,6 +609,42 @@ TEST(Axf1File, RejectsColumnPayloadOutsideChunk) {
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
     EXPECT_NE(read.error().find("column payload points outside chunk"), std::string::npos);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedFlagBitpack) {
+    const auto path = temp_path("alignx_axf1_truncated_flag_bitpack");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u64_at(data, column_entry_offset(data, kFlagColumnIndex) + kColumnLengthOffset, 1);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("truncated AXF1 FLAG bitpack column"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsInvalidFlagBitpackWidth) {
+    const auto path = temp_path("alignx_axf1_invalid_flag_bitpack_width");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u8_at(data, column_payload_offset(data, kFlagColumnIndex), 17);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("invalid AXF1 FLAG bitpack width"), std::string::npos)
+        << read.error();
 
     std::filesystem::remove(path);
 }
