@@ -116,6 +116,15 @@ If HG002 small-region QUAL does not use RLE because it is not smaller, that is a
 valid result. The codec should still be useful for low-entropy toy data or
 datasets with long repeated quality runs.
 
+That fallback case was observed on the HG002 chr1 small-region correctness
+smoke on 2026-05-15:
+`/mypool/alignx/tmp/axf1_qual_rle_smoke_hg002_chr1_1000000_1010000_20260515`.
+The smoke preserved byte-identical SAM stdout for 64 records, kept
+POS/FLAG/MAPQ/CIGAR/SEQ on their expected codecs, and used raw QUAL on all 7
+chunks because `qual_rle` was not smaller. This is not a benchmark result, but
+it is evidence that simple byte RLE is only a scaffold for HG002-like quality
+streams.
+
 ## Acceptance Criteria for `qual_rle`
 
 - Unit tests cover repeated-quality round-trip and raw fallback for mixed/noisy

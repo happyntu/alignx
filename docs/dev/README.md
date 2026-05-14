@@ -179,6 +179,12 @@ For the HG002 chr1 small-region codec smoke, the current expected codecs are
 `pos_delta_varint`, `flag_bitpack`, `mapq_rle`, `cigar_token`, and
 `seq_2bit_literal`. QUAL may still fall back to raw on HG002 regions unless
 `qual_rle` is smaller for every chunk.
+Remote HG002 QUAL byte RLE smoke on 2026-05-15 used
+`/mypool/alignx/tmp/axf1_qual_rle_smoke_hg002_chr1_1000000_1010000_20260515`
+and confirmed byte-identical SAM stdout with the same stdout SHA-256
+(`6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`)
+for 64 records. `quality` fell back to raw on all 7 chunks, so `qual_rle` is
+not currently an expected HG002 codec for this region.
 Remote HG002 expected-codec smoke on 2026-05-15 used
 `/mypool/alignx/tmp/axf1_expect_codec_smoke_hg002_chr1_1000000_1010000_20260515`
 and asserted all five expected codecs with byte-identical SAM stdout
@@ -199,8 +205,9 @@ The output is TSV with total payload bytes, chunk count, codec distribution,
 average bytes per chunk, and percent of total column payload for each column.
 The 2026-05-15 HG002 chr1 small-region AXF1 summary showed `quality` as the
 dominant remaining payload column at 77.843% of column payload bytes, followed
-by `sequence` at 19.470% and `cigar` at 1.774%. This points to QUAL as the next
-codec design target.
+by `sequence` at 19.470% and `cigar` at 1.774%. After `qual_rle`, the same
+HG002 region still falls back to raw for QUAL, so this points to a future
+lossless QUAL codec beyond simple byte RLE.
 
 ## AXF0 and AXF1 development status
 

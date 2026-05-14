@@ -477,6 +477,17 @@ strings. A toy correctness smoke on 2026-05-15 used
 records, and reported `qual_rle` for the `quality` column. This remains a
 correctness smoke, not a benchmark or HG002 compression claim.
 
+Remote HG002 QUAL byte RLE correctness smoke on 2026-05-15 used
+`/mypool/alignx/tmp/axf1_qual_rle_smoke_hg002_chr1_1000000_1010000_20260515`
+and confirmed byte-identical SAM stdout
+(`6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`) for 64
+records. The existing POS/FLAG/MAPQ/CIGAR/SEQ codecs were present on all 7
+chunks, while `quality` fell back to raw on all 7 chunks. The metadata-only
+payload summary therefore stayed unchanged for this region: `quality` remains
+907,624 bytes, or 77.843% of column payload bytes. This is a valid raw fallback
+result and indicates that HG002-style QUAL needs a stronger future lossless
+codec than simple byte RLE.
+
 ## Region-Converted AXF1 Subset Semantics
 
 `alignx convert --region` writes a subset AXF1 file containing records selected
