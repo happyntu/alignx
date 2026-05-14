@@ -189,6 +189,11 @@ AXF1 v2 metadata corruption coverage rejects invalid subset flags, truncated
 source/conversion-region strings, and metadata/index overlap in both C++ reader
 paths. The Python metadata inspector was checked against the same corruptions.
 
+Source identity remains intentionally lightweight in AXF1 v2. `source_path` is
+only an audit hint. Future cache-validation metadata should prefer low-cost
+fields such as file size, mtime, and BAM header SHA-256 before considering any
+full-content hash.
+
 Before any performance claim, run a separate remote HG002 benchmark with user
 confirmation. Notify the user before benchmark or profiling workloads.
 

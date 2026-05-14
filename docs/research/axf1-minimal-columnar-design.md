@@ -311,6 +311,41 @@ AXF1 v2 records this in file metadata:
 - `is_subset=true` and the original region string for `convert --region`;
 - `source_path` records the input path used by the converter.
 
+## Source Identity Design
+
+AXF1 v2 `source_path` is an audit hint, not proof that the source BAM still has
+the same contents. For now, do not bump AXF1 to v3 only for stronger source
+identity. The format is still internal, and the immediate correctness problem
+was distinguishing full-input caches from region-converted subset caches.
+
+Candidate future identity fields:
+
+| Field | Cost | Strength | Notes |
+|---|---|---|---|
+| `source_file_size` | Very low | Weak | Catches many accidental file swaps, but not collisions. |
+| `source_mtime_ns` | Very low | Weak | Useful for local cache invalidation; unstable across copies. |
+| `source_header_sha256` | Low | Medium | Hashes BAM/SAM header text; catches reference/header changes without reading all records. |
+| `source_index_size` / `source_index_mtime_ns` | Very low | Weak | Useful when AXF depends on BAI/CSI state. |
+| `source_index_header_sha256` | Low | Medium | Future option if index metadata materially affects cache correctness. |
+| Full BAM content hash | Very high | Strong | Not suitable as a default for 100GB-scale BAMs. |
+| User-provided source label | Very low | Informational | Helpful in workflows, but not validation. |
+
+Recommended next implementation, when needed:
+
+- keep AXF1 v2 unchanged until source identity is required by a concrete
+  workflow;
+- add optional metadata fields in a later version for `source_file_size`,
+  `source_mtime_ns`, and `source_header_sha256`;
+- do not compute a full BAM content hash by default;
+- treat future identity fields as cache-validation hints, not as security
+  guarantees;
+- keep remote/large-data workflows able to skip expensive identity collection.
+
+Open design point: decide whether future identity fields belong in the fixed
+`FileMetadata` record or in a typed key/value metadata section. A typed metadata
+section is more flexible, but the current fixed v2 layout is simpler and easier
+to validate.
+
 Remote boundary smoke for the HG002 AXF1 subset above:
 
 | Label | Query region | AXF1 records | Full BAM records | AXF1 vs full BAM | Full BAM vs samtools |
@@ -381,8 +416,8 @@ Suggested implementation boundary:
   magic-based?
 - What final threshold values should the implemented hybrid chunk sizing policy
   use after empirical tuning?
-- Should AXF1 metadata later include source identity stronger than path text,
-  such as file size, mtime, content hash, or BAM header digest?
+- If source identity becomes necessary, should AXF1 add fixed v3 fields or a
+  typed key/value metadata section?
 - Should optional tags remain one raw `TAGS` column for v0, or should common tags
   such as `NM` and `MD` get early per-tag streams?
 - Should `RNAME` be implicit from chunk `ref_id` only for the first slice, or

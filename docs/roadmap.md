@@ -62,6 +62,7 @@ and region-query correctness.
 - [x] AXF1 v2 file metadata records source path and subset conversion region
 - [x] AXF1 v2 metadata smoke on HG002 chr1 small region
 - [x] AXF1 v2 metadata corruption tests for full-file and metadata-only readers
+- [x] AXF1 source identity design note
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec: POS varint delta, FLAG bit-pack, MAPQ byte/RLE, SEQ reference-delta 2-bit
