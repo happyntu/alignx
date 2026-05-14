@@ -65,6 +65,7 @@ and region-query correctness.
 - [x] AXF1 source identity design note
 - [x] AXF1 metadata extensibility design note
 - [x] AXF1 POS delta-varint codec with raw fallback for non-monotonic chunks
+- [x] AXF1 POS delta-varint smoke on HG002 chr1 small region
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec: FLAG bit-pack, MAPQ byte/RLE, SEQ reference-delta 2-bit
