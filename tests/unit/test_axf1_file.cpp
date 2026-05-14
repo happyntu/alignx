@@ -590,9 +590,15 @@ TEST(Axf1File, ReadsStoredCompressedQualPackEnvelope) {
     std::filesystem::remove(path);
 }
 
+TEST(Axf1File, RejectsZstdCompressedPayloadWhenZstdIsDisabled) {
+    expect_compressed_quality_payload_rejected("alignx_axf1_zstd_compressed_payload_disabled",
+                                               {7, 1, 0, 0},
+                                               "unsupported AXF1 compressed payload compression");
+}
+
 TEST(Axf1File, RejectsUnsupportedCompressedPayloadCompression) {
     expect_compressed_quality_payload_rejected("alignx_axf1_unsupported_compressed_payload",
-                                               {7, 1, 0, 0},
+                                               {7, 2, 0, 0},
                                                "unsupported AXF1 compressed payload compression");
 }
 

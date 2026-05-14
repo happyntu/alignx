@@ -76,6 +76,7 @@ Completed:
 - AXF1 compressed payload wrapper design note: prefer shared payload envelopes over one-off `*_zstd` codec ids before adding compression dependencies
 - AXF1 `qual_pack_compressed` stored-envelope reader path with raw/base writer fallback and WSL `ctest` coverage
 - AXF1 zstd payload wrapper feature-gate design: optional `ALIGNX_ENABLE_ZSTD`, no default writer behavior change, clear unsupported-compression errors without zstd
+- AXF1 zstd feature-gate skeleton: `ALIGNX_ENABLE_ZSTD=OFF` by default; disabled builds reject zstd payload envelopes without changing writer output
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV

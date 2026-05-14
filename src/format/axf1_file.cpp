@@ -41,6 +41,8 @@ struct EncodedColumn {
 
 enum class Axf1CompressionId : std::uint64_t {
     stored = 0,
+    zstd = 1,
+    lz4 = 2,
 };
 
 struct DecodedPayloadEnvelope {
@@ -1110,6 +1112,13 @@ decode_compressed_payload_envelope(const std::vector<unsigned char>& bytes) {
     if (*uncompressed_size > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) ||
         *compressed_size > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
         return std::unexpected("AXF1 compressed payload size is too large");
+    }
+    if (*compression_id == static_cast<std::uint64_t>(Axf1CompressionId::zstd)) {
+#ifdef ALIGNX_HAVE_ZSTD
+        return std::unexpected("AXF1 zstd compressed payload decompression is not implemented");
+#else
+        return std::unexpected("unsupported AXF1 compressed payload compression");
+#endif
     }
     if (*compression_id != static_cast<std::uint64_t>(Axf1CompressionId::stored)) {
         return std::unexpected("unsupported AXF1 compressed payload compression");

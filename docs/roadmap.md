@@ -89,6 +89,7 @@ and region-query correctness.
 - [x] AXF1 compressed payload wrapper design note
 - [x] AXF1 `qual_pack_compressed` stored-envelope reader path with raw/base writer fallback
 - [x] AXF1 zstd payload wrapper feature-gate design
+- [x] AXF1 zstd feature-gate skeleton with disabled-build rejection path
 - [ ] Optional zstd/LZ4 compressed payload writer path with raw/base fallback
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read

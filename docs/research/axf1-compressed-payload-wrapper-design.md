@@ -2,7 +2,8 @@
 
 Status: partially implemented, 2026-05-15. AXF1 currently has a
 dependency-free `qual_pack_compressed` reader path for a stored payload envelope;
-writers still emit the smaller base codec directly and do not apply zstd/LZ4.
+writers still emit the smaller base codec directly. A zstd feature gate exists,
+but zstd decompression and writer emission are not implemented yet.
 
 ## Motivation
 
@@ -161,6 +162,7 @@ gate. It must not make zstd a required dependency for normal AXF1 builds.
 ### CMake Policy
 
 - Add an `ALIGNX_ENABLE_ZSTD` option, default `OFF`.
+  Implemented as a build option.
 - When the option is `OFF`, do not search for zstd and do not link zstd.
 - When the option is `ON`, detect zstd with CMake config first and pkg-config
   second, mirroring the HTSlib pattern where practical.
@@ -168,6 +170,7 @@ gate. It must not make zstd a required dependency for normal AXF1 builds.
   clear message.
 - If detected, link `alignx_lib` to the selected zstd target and define
   `ALIGNX_HAVE_ZSTD`.
+  Implemented as feature-gate scaffolding; no zstd API is called yet.
 
 This is stricter than HTSlib's current optional behavior because enabling zstd
 is an explicit request to produce or consume zstd-compressed AXF1 payloads.
@@ -178,9 +181,10 @@ is an explicit request to produce or consume zstd-compressed AXF1 payloads.
   envelope.
 - Builds with `ALIGNX_HAVE_ZSTD` decompress the payload, require output size to
   exactly match `uncompressed_size`, then pass the bytes to the base codec
-  decoder.
+  decoder. Not implemented yet.
 - Builds without `ALIGNX_HAVE_ZSTD` must reject `compression_id = 1` with a
   clear "unsupported AXF1 compressed payload compression" style error.
+  Implemented.
 - Existing uncompressed AXF1 files and `stored` envelopes remain readable
   without zstd.
 - Reader errors must preserve atomic stdout behavior; no partial view output.
