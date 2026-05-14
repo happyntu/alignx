@@ -214,6 +214,34 @@ TEST(Axf1FileReader, OpensAndReadsQueryChunk) {
     std::filesystem::remove(path);
 }
 
+TEST(Axf1FileReader, ReadsSelectedChunkColumns) {
+    const auto path = temp_path("alignx_axf1_file_reader_columns");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto reader = alignx::format::Axf1FileReader::open(path);
+    ASSERT_TRUE(reader) << reader.error();
+
+    auto hits = reader->query_chunks(0, 150, 151);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 1);
+
+    auto chunk = reader->read_chunk_columns(
+        *hits->at(0), {alignx::format::Axf1ColumnId::pos, alignx::format::Axf1ColumnId::cigar});
+    ASSERT_TRUE(chunk) << chunk.error();
+    ASSERT_EQ(chunk->records.size(), 2);
+    EXPECT_EQ(chunk->records[0].pos, 100);
+    EXPECT_EQ(chunk->records[0].cigar, "10M");
+    EXPECT_EQ(chunk->records[0].qname, "");
+    EXPECT_EQ(chunk->records[1].pos, 150);
+    EXPECT_EQ(chunk->records[1].cigar, "5M1I4M");
+    EXPECT_EQ(chunk->records[1].quality, "");
+
+    std::filesystem::remove(path);
+}
+
 TEST(Axf1File, RejectsInvalidMagic) {
     const auto path = temp_path("alignx_axf1_bad_magic");
     {

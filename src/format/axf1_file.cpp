@@ -506,6 +506,10 @@ bool is_known_column(Axf1ColumnId column_id) {
            kRequiredColumns.end();
 }
 
+bool contains_column(const std::vector<Axf1ColumnId>& columns, Axf1ColumnId column_id) {
+    return std::find(columns.begin(), columns.end(), column_id) != columns.end();
+}
+
 std::expected<void, std::string> validate_column_entries(const std::vector<ColumnEntry>& entries) {
     for (const ColumnEntry& entry : entries) {
         if (!is_known_column(entry.column_id)) {
@@ -528,6 +532,30 @@ std::expected<void, std::string> validate_column_entries(const std::vector<Colum
     return {};
 }
 
+std::expected<void, std::string>
+validate_selected_column_entries(const std::vector<ColumnEntry>& entries,
+                                 const std::vector<Axf1ColumnId>& requested_columns) {
+    for (const ColumnEntry& entry : entries) {
+        if (!is_known_column(entry.column_id)) {
+            return std::unexpected("unknown AXF1 column id");
+        }
+    }
+
+    for (Axf1ColumnId requested : requested_columns) {
+        const auto count =
+            std::count_if(entries.begin(), entries.end(), [requested](const ColumnEntry& entry) {
+                return entry.column_id == requested;
+            });
+        if (count == 0) {
+            return std::unexpected("AXF1 chunk is missing requested column");
+        }
+        if (count > 1) {
+            return std::unexpected("duplicate AXF1 requested column");
+        }
+    }
+    return {};
+}
+
 std::expected<std::vector<unsigned char>, std::string>
 slice_column_payload(const std::vector<unsigned char>& chunk_payload, const ColumnEntry& entry) {
     if (entry.offset > chunk_payload.size() ||
@@ -541,7 +569,8 @@ slice_column_payload(const std::vector<unsigned char>& chunk_payload, const Colu
 
 std::expected<Axf1Chunk, std::string>
 decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
-                   const Axf1ChunkIndexEntry& index_entry) {
+                   const Axf1ChunkIndexEntry& index_entry,
+                   const std::vector<Axf1ColumnId>& requested_columns) {
     Reader reader(chunk_bytes);
 
     auto ref_id = reader.read_u32();
@@ -576,7 +605,9 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
                            .length = *length});
     }
 
-    auto column_validation = validate_column_entries(entries);
+    auto column_validation = requested_columns.size() == kRequiredColumns.size()
+                                 ? validate_column_entries(entries)
+                                 : validate_selected_column_entries(entries, requested_columns);
     if (!column_validation) {
         return std::unexpected(column_validation.error());
     }
@@ -589,6 +620,9 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
     chunk.records.resize(*record_count);
 
     for (const ColumnEntry& entry : entries) {
+        if (!contains_column(requested_columns, entry.column_id)) {
+            continue;
+        }
         auto payload = slice_column_payload(chunk_payload, entry);
         if (!payload) {
             return std::unexpected(payload.error());
@@ -733,6 +767,12 @@ Axf1FileReader::read_chunk(const Axf1ChunkIndexEntry& chunk) const {
     return read_axf1_chunk(path_, chunk);
 }
 
+std::expected<Axf1Chunk, std::string>
+Axf1FileReader::read_chunk_columns(const Axf1ChunkIndexEntry& chunk,
+                                   const std::vector<Axf1ColumnId>& columns) const {
+    return read_axf1_chunk_columns(path_, chunk, columns);
+}
+
 std::expected<void, std::string> write_axf1_file(const Axf1File& file,
                                                  const std::filesystem::path& path) {
     auto validation = validate_file(file);
@@ -869,7 +909,9 @@ std::expected<Axf1File, std::string> read_axf1_file(const std::filesystem::path&
         const auto chunk_begin = bytes->begin() + static_cast<std::ptrdiff_t>(entry.chunk_offset);
         const auto chunk_end = chunk_begin + static_cast<std::ptrdiff_t>(entry.chunk_length);
         const std::vector<unsigned char> chunk_bytes(chunk_begin, chunk_end);
-        auto chunk = decode_chunk_bytes(chunk_bytes, entry);
+        auto chunk = decode_chunk_bytes(
+            chunk_bytes, entry,
+            std::vector<Axf1ColumnId>(kRequiredColumns.begin(), kRequiredColumns.end()));
         if (!chunk) {
             return std::unexpected(chunk.error());
         }
@@ -971,11 +1013,18 @@ read_axf1_index_metadata(const std::filesystem::path& path) {
 
 std::expected<Axf1Chunk, std::string> read_axf1_chunk(const std::filesystem::path& path,
                                                       const Axf1ChunkIndexEntry& chunk) {
+    return read_axf1_chunk_columns(
+        path, chunk, std::vector<Axf1ColumnId>(kRequiredColumns.begin(), kRequiredColumns.end()));
+}
+
+std::expected<Axf1Chunk, std::string>
+read_axf1_chunk_columns(const std::filesystem::path& path, const Axf1ChunkIndexEntry& chunk,
+                        const std::vector<Axf1ColumnId>& columns) {
     auto bytes = read_file_range(path, chunk.chunk_offset, chunk.chunk_length);
     if (!bytes) {
         return std::unexpected(bytes.error());
     }
-    return decode_chunk_bytes(*bytes, chunk);
+    return decode_chunk_bytes(*bytes, chunk, columns);
 }
 
 } // namespace alignx::format

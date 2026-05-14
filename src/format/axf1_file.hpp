@@ -89,6 +89,10 @@ public:
     [[nodiscard]] std::expected<Axf1Chunk, std::string>
     read_chunk(const Axf1ChunkIndexEntry& chunk) const;
 
+    [[nodiscard]] std::expected<Axf1Chunk, std::string>
+    read_chunk_columns(const Axf1ChunkIndexEntry& chunk,
+                       const std::vector<Axf1ColumnId>& columns) const;
+
 private:
     Axf1FileReader(std::filesystem::path path, Axf1FileIndex index);
 
@@ -107,5 +111,9 @@ read_axf1_index_metadata(const std::filesystem::path& path);
 
 [[nodiscard]] std::expected<Axf1Chunk, std::string>
 read_axf1_chunk(const std::filesystem::path& path, const Axf1ChunkIndexEntry& chunk);
+
+[[nodiscard]] std::expected<Axf1Chunk, std::string>
+read_axf1_chunk_columns(const std::filesystem::path& path, const Axf1ChunkIndexEntry& chunk,
+                        const std::vector<Axf1ColumnId>& columns);
 
 } // namespace alignx::format

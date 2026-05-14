@@ -170,6 +170,10 @@ header/reference/index metadata, selects overlapping chunks by 0-based
 half-open interval overlap, and decodes only those chunk payloads. This keeps
 malformed non-overlapping chunk payloads from affecting unrelated region
 queries and preserves atomic stdout behavior for overlapping malformed chunks.
+Within each selected chunk, `alignx view` first decodes only `POS` and `CIGAR`
+to identify records that overlap the requested region. Full output columns are
+decoded only if the chunk contains at least one matching record. This is still a
+raw-codec correctness scaffold, not a benchmark claim.
 
 1. Add AXF1 data structs and format read/write tests in files that do not
    disturb AXF0.
@@ -209,6 +213,9 @@ Suggested implementation boundary:
   references and chunk index metadata first, then reads and decodes selected
   chunk byte ranges on demand. `read_axf1_file()` remains the full-file
   round-trip helper.
+- `Axf1FileReader::read_chunk_columns()` supports selective raw-column decode
+  for query filtering. Current `alignx view` uses it for `POS` and `CIGAR`,
+  then falls back to full chunk decode for chunks with matching output records.
 - `CMakeLists.txt` already globs `src/format/*.cpp`, `src/query/*.cpp`,
   `src/convert/*.cpp`, and `tests/unit/*.cpp`, so the proposed AXF1 source and
   test files are automatically added to `alignx_lib` and `unit_tests`.

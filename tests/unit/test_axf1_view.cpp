@@ -251,6 +251,20 @@ TEST(Axf1View, DoesNotDecodeNonOverlappingMalformedChunk) {
     std::filesystem::remove(path);
 }
 
+TEST(Axf1View, DoesNotDecodeOutputColumnsWhenOverlappingChunkHasNoMatchingRecords) {
+    const auto path = temp_path("alignx_axf1_view_selective_no_record_hit");
+    write_axf1_or_fail(make_file(), path);
+    corrupt_first_column_length(path, 0);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf1_region_sam(path, "chrToy:151-299", out);
+
+    EXPECT_TRUE(result) << result.error();
+    EXPECT_EQ(out.str(), "");
+
+    std::filesystem::remove(path);
+}
+
 TEST(Axf1View, ReportsOverlappingMalformedChunkAtomically) {
     const auto path = temp_path("alignx_axf1_view_lazy_overlap_error");
     alignx::format::Axf1File file{

@@ -33,6 +33,7 @@ Completed:
 - `convert::convert_bam_to_axf1_mvp()` for toy BAM -> AXF1 correctness work
 - `alignx convert --format AXF1` opt-in path and `.axf1` view routing
 - AXF1 metadata-first reader for `.axf1` region view; query decodes only overlapping chunks
+- AXF1 view uses selective `POS` + `CIGAR` column decode before full output decode
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV

@@ -98,20 +98,35 @@ std::expected<void, std::string> write_axf1_region_sam(const std::filesystem::pa
 
     std::string output;
     for (const format::Axf1ChunkIndexEntry* chunk_entry : *hits) {
-        auto chunk = reader->read_chunk(*chunk_entry);
-        if (!chunk) {
-            return std::unexpected(chunk.error());
+        auto filter_chunk = reader->read_chunk_columns(
+            *chunk_entry, {format::Axf1ColumnId::pos, format::Axf1ColumnId::cigar});
+        if (!filter_chunk) {
+            return std::unexpected(filter_chunk.error());
         }
 
-        for (const format::Axf1Record& record : chunk->records) {
-            auto overlaps = record_overlaps_region(record, *parsed_region);
+        std::vector<std::size_t> matching_records;
+        for (std::size_t record_index = 0; record_index < filter_chunk->records.size();
+             ++record_index) {
+            auto overlaps =
+                record_overlaps_region(filter_chunk->records.at(record_index), *parsed_region);
             if (!overlaps) {
                 return std::unexpected(overlaps.error());
             }
             if (*overlaps) {
-                output.append(
-                    format_sam_record(record, reader->index().references.at(*ref_id).name));
+                matching_records.push_back(record_index);
             }
+        }
+        if (matching_records.empty()) {
+            continue;
+        }
+
+        auto output_chunk = reader->read_chunk(*chunk_entry);
+        if (!output_chunk) {
+            return std::unexpected(output_chunk.error());
+        }
+        for (std::size_t record_index : matching_records) {
+            output.append(format_sam_record(output_chunk->records.at(record_index),
+                                            reader->index().references.at(*ref_id).name));
         }
     }
 
