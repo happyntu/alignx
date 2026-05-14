@@ -57,10 +57,55 @@ struct Axf1File {
     std::vector<Axf1Chunk> chunks;
 };
 
+struct Axf1ChunkIndexEntry {
+    std::uint32_t ref_id = 0;
+    std::int32_t start_pos = -1;
+    std::int32_t end_pos = -1;
+    std::uint32_t record_count = 0;
+    std::uint64_t chunk_offset = 0;
+    std::uint64_t chunk_length = 0;
+
+    [[nodiscard]] bool overlaps(std::int32_t query_start, std::int32_t query_end) const noexcept;
+};
+
+struct Axf1FileIndex {
+    std::vector<Axf1Reference> references;
+    std::vector<Axf1ChunkIndexEntry> chunks;
+
+    [[nodiscard]] std::expected<std::vector<const Axf1ChunkIndexEntry*>, std::string>
+    query_chunks(std::uint32_t ref_id, std::int32_t start, std::int32_t end) const;
+};
+
+class Axf1FileReader {
+public:
+    [[nodiscard]] static std::expected<Axf1FileReader, std::string>
+    open(std::filesystem::path path);
+
+    [[nodiscard]] const Axf1FileIndex& index() const noexcept;
+
+    [[nodiscard]] std::expected<std::vector<const Axf1ChunkIndexEntry*>, std::string>
+    query_chunks(std::uint32_t ref_id, std::int32_t start, std::int32_t end) const;
+
+    [[nodiscard]] std::expected<Axf1Chunk, std::string>
+    read_chunk(const Axf1ChunkIndexEntry& chunk) const;
+
+private:
+    Axf1FileReader(std::filesystem::path path, Axf1FileIndex index);
+
+    std::filesystem::path path_;
+    Axf1FileIndex index_;
+};
+
 [[nodiscard]] std::expected<void, std::string> write_axf1_file(const Axf1File& file,
                                                                const std::filesystem::path& path);
 
 [[nodiscard]] std::expected<Axf1File, std::string>
 read_axf1_file(const std::filesystem::path& path);
+
+[[nodiscard]] std::expected<Axf1FileIndex, std::string>
+read_axf1_index_metadata(const std::filesystem::path& path);
+
+[[nodiscard]] std::expected<Axf1Chunk, std::string>
+read_axf1_chunk(const std::filesystem::path& path, const Axf1ChunkIndexEntry& chunk);
 
 } // namespace alignx::format

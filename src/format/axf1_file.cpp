@@ -32,15 +32,6 @@ struct ColumnEntry {
     std::uint64_t length = 0;
 };
 
-struct ChunkIndexEntry {
-    std::uint32_t ref_id = 0;
-    std::int32_t start_pos = -1;
-    std::int32_t end_pos = -1;
-    std::uint32_t record_count = 0;
-    std::uint64_t chunk_offset = 0;
-    std::uint64_t chunk_length = 0;
-};
-
 void append_u8(std::vector<unsigned char>& bytes, std::uint8_t value) {
     bytes.push_back(value);
 }
@@ -158,6 +149,109 @@ private:
     std::size_t offset_ = 0;
 };
 
+class StreamReader {
+public:
+    StreamReader(std::ifstream& input, std::uint64_t file_size)
+        : input_(input), file_size_(file_size) {}
+
+    [[nodiscard]] std::expected<void, std::string> expect_magic() {
+        unsigned char bytes[kMagic.size()]{};
+        auto read = read_exact(bytes, sizeof(bytes));
+        if (!read) {
+            return std::unexpected(read.error());
+        }
+        for (std::size_t index = 0; index < kMagic.size(); ++index) {
+            if (bytes[index] != kMagic.at(index)) {
+                return std::unexpected("invalid AXF1 magic");
+            }
+        }
+        return {};
+    }
+
+    [[nodiscard]] std::expected<std::uint16_t, std::string> read_u16() {
+        return read_little_endian<std::uint16_t>();
+    }
+
+    [[nodiscard]] std::expected<std::uint32_t, std::string> read_u32() {
+        return read_little_endian<std::uint32_t>();
+    }
+
+    [[nodiscard]] std::expected<std::int32_t, std::string> read_i32() {
+        auto value = read_u32();
+        if (!value) {
+            return std::unexpected(value.error());
+        }
+        return static_cast<std::int32_t>(*value);
+    }
+
+    [[nodiscard]] std::expected<std::uint64_t, std::string> read_u64() {
+        return read_little_endian<std::uint64_t>();
+    }
+
+    [[nodiscard]] std::expected<std::string, std::string> read_string(std::size_t size) {
+        if (size > remaining()) {
+            return std::unexpected("truncated AXF1 file");
+        }
+        std::string value(size, '\0');
+        auto read = read_exact(reinterpret_cast<unsigned char*>(value.data()), size);
+        if (!read) {
+            return std::unexpected(read.error());
+        }
+        return value;
+    }
+
+    [[nodiscard]] std::expected<void, std::string> seek(std::uint64_t offset) {
+        if (offset > file_size_) {
+            return std::unexpected("AXF1 offset points outside file");
+        }
+        input_.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+        if (!input_) {
+            return std::unexpected("failed to seek AXF1 file");
+        }
+        offset_ = offset;
+        return {};
+    }
+
+    [[nodiscard]] std::uint64_t offset() const noexcept { return offset_; }
+    [[nodiscard]] std::uint64_t size() const noexcept { return file_size_; }
+
+private:
+    [[nodiscard]] std::uint64_t remaining() const noexcept {
+        return offset_ > file_size_ ? 0 : file_size_ - offset_;
+    }
+
+    [[nodiscard]] std::expected<void, std::string> read_exact(unsigned char* output,
+                                                              std::size_t size) {
+        if (size > remaining()) {
+            return std::unexpected("truncated AXF1 file");
+        }
+        input_.read(reinterpret_cast<char*>(output), static_cast<std::streamsize>(size));
+        if (!input_) {
+            return std::unexpected("failed to read AXF1 file");
+        }
+        offset_ += size;
+        return {};
+    }
+
+    template <typename UInt>
+    [[nodiscard]] std::expected<UInt, std::string> read_little_endian() {
+        unsigned char bytes[sizeof(UInt)]{};
+        auto read = read_exact(bytes, sizeof(bytes));
+        if (!read) {
+            return std::unexpected(read.error());
+        }
+        UInt value = 0;
+        for (std::size_t byte = 0; byte < sizeof(UInt); ++byte) {
+            value |= static_cast<UInt>(bytes[byte]) << (byte * 8U);
+        }
+        return value;
+    }
+
+    std::ifstream& input_;
+    std::uint64_t file_size_ = 0;
+    std::uint64_t offset_ = 0;
+};
+
 std::expected<std::vector<unsigned char>, std::string>
 read_file(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
@@ -174,6 +268,52 @@ read_file(const std::filesystem::path& path) {
     std::vector<unsigned char> bytes(static_cast<std::size_t>(size));
     if (!bytes.empty()) {
         input.read(reinterpret_cast<char*>(bytes.data()), size);
+        if (!input) {
+            return std::unexpected("failed to read AXF1 file: " + path.string());
+        }
+    }
+    return bytes;
+}
+
+std::expected<std::uint64_t, std::string> axf1_file_size(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        return std::unexpected("failed to open AXF1 file: " + path.string());
+    }
+    input.seekg(0, std::ios::end);
+    const std::streamoff size = input.tellg();
+    if (size < 0) {
+        return std::unexpected("failed to determine AXF1 file size: " + path.string());
+    }
+    return static_cast<std::uint64_t>(size);
+}
+
+std::expected<std::vector<unsigned char>, std::string>
+read_file_range(const std::filesystem::path& path, std::uint64_t offset, std::uint64_t length) {
+    auto size = axf1_file_size(path);
+    if (!size) {
+        return std::unexpected(size.error());
+    }
+    if (offset > *size || length > *size - offset) {
+        return std::unexpected("AXF1 chunk points outside file");
+    }
+    if (length > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+        return std::unexpected("AXF1 chunk is too large");
+    }
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        return std::unexpected("failed to open AXF1 file: " + path.string());
+    }
+    input.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+    if (!input) {
+        return std::unexpected("failed to seek AXF1 file");
+    }
+
+    std::vector<unsigned char> bytes(static_cast<std::size_t>(length));
+    if (!bytes.empty()) {
+        input.read(reinterpret_cast<char*>(bytes.data()),
+                   static_cast<std::streamsize>(bytes.size()));
         if (!input) {
             return std::unexpected("failed to read AXF1 file: " + path.string());
         }
@@ -399,18 +539,9 @@ slice_column_payload(const std::vector<unsigned char>& chunk_payload, const Colu
     return std::vector<unsigned char>(begin, end);
 }
 
-std::expected<Axf1Chunk, std::string> read_chunk(const std::vector<unsigned char>& file_bytes,
-                                                 const ChunkIndexEntry& index_entry) {
-    if (index_entry.chunk_offset > file_bytes.size() ||
-        index_entry.chunk_length >
-            file_bytes.size() - static_cast<std::size_t>(index_entry.chunk_offset)) {
-        return std::unexpected("AXF1 chunk points outside file");
-    }
-
-    const auto chunk_begin =
-        file_bytes.begin() + static_cast<std::ptrdiff_t>(index_entry.chunk_offset);
-    const auto chunk_end = chunk_begin + static_cast<std::ptrdiff_t>(index_entry.chunk_length);
-    const std::vector<unsigned char> chunk_bytes(chunk_begin, chunk_end);
+std::expected<Axf1Chunk, std::string>
+decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
+                   const Axf1ChunkIndexEntry& index_entry) {
     Reader reader(chunk_bytes);
 
     auto ref_id = reader.read_u32();
@@ -554,6 +685,54 @@ std::expected<Axf1Chunk, std::string> read_chunk(const std::vector<unsigned char
 
 } // namespace
 
+bool Axf1ChunkIndexEntry::overlaps(std::int32_t query_start,
+                                   std::int32_t query_end) const noexcept {
+    return start_pos < query_end && query_start < end_pos;
+}
+
+std::expected<std::vector<const Axf1ChunkIndexEntry*>, std::string>
+Axf1FileIndex::query_chunks(std::uint32_t ref_id, std::int32_t start, std::int32_t end) const {
+    if (start >= end) {
+        return std::unexpected("AXF1 query requires start < end");
+    }
+    if (ref_id >= references.size()) {
+        return std::unexpected("AXF1 query reference id out of range");
+    }
+
+    std::vector<const Axf1ChunkIndexEntry*> hits;
+    for (const Axf1ChunkIndexEntry& chunk : chunks) {
+        if (chunk.ref_id == ref_id && chunk.overlaps(start, end)) {
+            hits.push_back(&chunk);
+        }
+    }
+    return hits;
+}
+
+Axf1FileReader::Axf1FileReader(std::filesystem::path path, Axf1FileIndex index)
+    : path_(std::move(path)), index_(std::move(index)) {}
+
+std::expected<Axf1FileReader, std::string> Axf1FileReader::open(std::filesystem::path path) {
+    auto index = read_axf1_index_metadata(path);
+    if (!index) {
+        return std::unexpected(index.error());
+    }
+    return Axf1FileReader(std::move(path), std::move(*index));
+}
+
+const Axf1FileIndex& Axf1FileReader::index() const noexcept {
+    return index_;
+}
+
+std::expected<std::vector<const Axf1ChunkIndexEntry*>, std::string>
+Axf1FileReader::query_chunks(std::uint32_t ref_id, std::int32_t start, std::int32_t end) const {
+    return index_.query_chunks(ref_id, start, end);
+}
+
+std::expected<Axf1Chunk, std::string>
+Axf1FileReader::read_chunk(const Axf1ChunkIndexEntry& chunk) const {
+    return read_axf1_chunk(path_, chunk);
+}
+
 std::expected<void, std::string> write_axf1_file(const Axf1File& file,
                                                  const std::filesystem::path& path) {
     auto validation = validate_file(file);
@@ -569,7 +748,7 @@ std::expected<void, std::string> write_axf1_file(const Axf1File& file,
     }
 
     std::vector<unsigned char> chunk_bytes;
-    std::vector<ChunkIndexEntry> index_entries;
+    std::vector<Axf1ChunkIndexEntry> index_entries;
     std::uint64_t chunk_offset = kHeaderSize + reference_bytes.size();
     for (const Axf1Chunk& chunk : file.chunks) {
         std::vector<unsigned char> bytes = write_chunk(chunk);
@@ -592,7 +771,7 @@ std::expected<void, std::string> write_axf1_file(const Axf1File& file,
     append_u64(output, index_offset);
     output.insert(output.end(), reference_bytes.begin(), reference_bytes.end());
     output.insert(output.end(), chunk_bytes.begin(), chunk_bytes.end());
-    for (const ChunkIndexEntry& entry : index_entries) {
+    for (const Axf1ChunkIndexEntry& entry : index_entries) {
         append_u32(output, entry.ref_id);
         append_i32(output, entry.start_pos);
         append_i32(output, entry.end_pos);
@@ -650,7 +829,7 @@ std::expected<Axf1File, std::string> read_axf1_file(const std::filesystem::path&
     if (!seek) {
         return std::unexpected(seek.error());
     }
-    std::vector<ChunkIndexEntry> index_entries;
+    std::vector<Axf1ChunkIndexEntry> index_entries;
     index_entries.reserve(static_cast<std::size_t>(*chunk_count));
     for (std::uint64_t index = 0; index < *chunk_count; ++index) {
         auto ref_id = reader.read_u32();
@@ -686,14 +865,117 @@ std::expected<Axf1File, std::string> read_axf1_file(const std::filesystem::path&
     }
 
     file.chunks.reserve(index_entries.size());
-    for (const ChunkIndexEntry& entry : index_entries) {
-        auto chunk = read_chunk(*bytes, entry);
+    for (const Axf1ChunkIndexEntry& entry : index_entries) {
+        const auto chunk_begin = bytes->begin() + static_cast<std::ptrdiff_t>(entry.chunk_offset);
+        const auto chunk_end = chunk_begin + static_cast<std::ptrdiff_t>(entry.chunk_length);
+        const std::vector<unsigned char> chunk_bytes(chunk_begin, chunk_end);
+        auto chunk = decode_chunk_bytes(chunk_bytes, entry);
         if (!chunk) {
             return std::unexpected(chunk.error());
         }
         file.chunks.push_back(std::move(*chunk));
     }
     return file;
+}
+
+std::expected<Axf1FileIndex, std::string>
+read_axf1_index_metadata(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        return std::unexpected("failed to open AXF1 file: " + path.string());
+    }
+    input.seekg(0, std::ios::end);
+    const std::streamoff size = input.tellg();
+    if (size < 0) {
+        return std::unexpected("failed to determine AXF1 file size: " + path.string());
+    }
+    input.seekg(0, std::ios::beg);
+
+    StreamReader reader(input, static_cast<std::uint64_t>(size));
+    auto magic = reader.expect_magic();
+    if (!magic) {
+        return std::unexpected(magic.error());
+    }
+    auto version = reader.read_u32();
+    auto ref_count = reader.read_u32();
+    auto chunk_count = reader.read_u64();
+    auto index_offset = reader.read_u64();
+    if (!version || !ref_count || !chunk_count || !index_offset) {
+        return std::unexpected("truncated AXF1 file");
+    }
+    if (*version != kVersion) {
+        return std::unexpected("unsupported AXF1 version");
+    }
+    if (*index_offset > reader.size()) {
+        return std::unexpected("AXF1 index offset points outside file");
+    }
+
+    Axf1FileIndex index;
+    index.references.reserve(*ref_count);
+    for (std::uint32_t ref_id = 0; ref_id < *ref_count; ++ref_id) {
+        auto name_length = reader.read_u16();
+        if (!name_length) {
+            return std::unexpected(name_length.error());
+        }
+        auto name = reader.read_string(*name_length);
+        auto length = reader.read_u32();
+        if (!name || !length) {
+            return std::unexpected("truncated AXF1 file");
+        }
+        index.references.push_back({.name = *name, .length = *length});
+    }
+    if (reader.offset() > *index_offset) {
+        return std::unexpected("AXF1 references overlap index");
+    }
+
+    auto seek = reader.seek(*index_offset);
+    if (!seek) {
+        return std::unexpected(seek.error());
+    }
+    index.chunks.reserve(static_cast<std::size_t>(*chunk_count));
+    for (std::uint64_t entry_index = 0; entry_index < *chunk_count; ++entry_index) {
+        auto ref_id = reader.read_u32();
+        auto start_pos = reader.read_i32();
+        auto end_pos = reader.read_i32();
+        auto record_count = reader.read_u32();
+        auto chunk_offset = reader.read_u64();
+        auto chunk_length = reader.read_u64();
+        if (!ref_id || !start_pos || !end_pos || !record_count || !chunk_offset || !chunk_length) {
+            return std::unexpected("truncated AXF1 file");
+        }
+        if (*ref_id >= index.references.size()) {
+            return std::unexpected("AXF1 chunk reference id out of range");
+        }
+        if (*start_pos >= *end_pos) {
+            return std::unexpected("AXF1 chunk requires start_pos < end_pos");
+        }
+        if (*chunk_offset > reader.size() || *chunk_length > reader.size() - *chunk_offset) {
+            return std::unexpected("AXF1 chunk points outside file");
+        }
+        if (*chunk_offset + *chunk_length > *index_offset) {
+            return std::unexpected("AXF1 chunk overlaps index");
+        }
+        index.chunks.push_back({.ref_id = *ref_id,
+                                .start_pos = *start_pos,
+                                .end_pos = *end_pos,
+                                .record_count = *record_count,
+                                .chunk_offset = *chunk_offset,
+                                .chunk_length = *chunk_length});
+    }
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("unexpected trailing bytes in AXF1 file");
+    }
+
+    return index;
+}
+
+std::expected<Axf1Chunk, std::string> read_axf1_chunk(const std::filesystem::path& path,
+                                                      const Axf1ChunkIndexEntry& chunk) {
+    auto bytes = read_file_range(path, chunk.chunk_offset, chunk.chunk_length);
+    if (!bytes) {
+        return std::unexpected(bytes.error());
+    }
+    return decode_chunk_bytes(*bytes, chunk);
 }
 
 } // namespace alignx::format

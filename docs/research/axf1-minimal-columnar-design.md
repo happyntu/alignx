@@ -165,6 +165,12 @@ Status as of 2026-05-14: this slice is implemented through opt-in CLI routing.
 writes `.axf1` raw-column MVP files and `alignx view <input.axf1> <region>`
 routes to the AXF1 view helper.
 
+The AXF1 query path now uses a metadata-first reader: it streams the file
+header/reference/index metadata, selects overlapping chunks by 0-based
+half-open interval overlap, and decodes only those chunk payloads. This keeps
+malformed non-overlapping chunk payloads from affecting unrelated region
+queries and preserves atomic stdout behavior for overlapping malformed chunks.
+
 1. Add AXF1 data structs and format read/write tests in files that do not
    disturb AXF0.
 2. Add writer/reader round-trip tests using synthetic toy records.
@@ -199,6 +205,10 @@ Suggested implementation boundary:
   separate `convert_bam_to_axf1_mvp()` function.
 - `src/cli/cli.cpp` detects `.axf` as AXF0 and `.axf1` as AXF1. Magic-based
   AXF0/AXF1 routing remains a separate compatibility change.
+- `format::Axf1FileReader` is the preferred AXF1 query API. It loads
+  references and chunk index metadata first, then reads and decodes selected
+  chunk byte ranges on demand. `read_axf1_file()` remains the full-file
+  round-trip helper.
 - `CMakeLists.txt` already globs `src/format/*.cpp`, `src/query/*.cpp`,
   `src/convert/*.cpp`, and `tests/unit/*.cpp`, so the proposed AXF1 source and
   test files are automatically added to `alignx_lib` and `unit_tests`.

@@ -2,14 +2,23 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "format/axf1_file.hpp"
 #include "query/axf1_view.hpp"
 
 namespace {
+
+constexpr std::size_t kIndexOffsetFieldOffset = 20;
+constexpr std::size_t kIndexEntrySize = 32;
+constexpr std::size_t kIndexChunkOffsetOffset = 16;
+constexpr std::size_t kChunkHeaderSize = 18;
+constexpr std::size_t kColumnEntrySize = 20;
+constexpr std::size_t kColumnLengthOffset = 12;
 
 std::filesystem::path temp_path(std::string_view label) {
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -45,6 +54,59 @@ alignx::format::Axf1File make_file() {
 void write_axf1_or_fail(const alignx::format::Axf1File& file, const std::filesystem::path& path) {
     auto write = alignx::format::write_axf1_file(file, path);
     ASSERT_TRUE(write) << write.error();
+}
+
+std::vector<unsigned char> read_bytes(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    input.seekg(0, std::ios::end);
+    const auto size = input.tellg();
+    input.seekg(0, std::ios::beg);
+    std::vector<unsigned char> data(static_cast<std::size_t>(size));
+    input.read(reinterpret_cast<char*>(data.data()), size);
+    return data;
+}
+
+void write_bytes(const std::filesystem::path& path, const std::vector<unsigned char>& data) {
+    std::ofstream output(path, std::ios::binary);
+    output.write(reinterpret_cast<const char*>(data.data()),
+                 static_cast<std::streamsize>(data.size()));
+}
+
+std::uint64_t read_u64_at(const std::vector<unsigned char>& data, std::size_t offset) {
+    std::uint64_t value = 0;
+    for (std::size_t byte = 0; byte < sizeof(value); ++byte) {
+        value |= static_cast<std::uint64_t>(data.at(offset + byte)) << (byte * 8U);
+    }
+    return value;
+}
+
+void write_u64_at(std::vector<unsigned char>& data, std::size_t offset, std::uint64_t value) {
+    for (std::size_t byte = 0; byte < sizeof(value); ++byte) {
+        data.at(offset + byte) = static_cast<unsigned char>((value >> (byte * 8U)) & 0xFFU);
+    }
+}
+
+std::uint64_t read_index_offset(const std::vector<unsigned char>& data) {
+    return read_u64_at(data, kIndexOffsetFieldOffset);
+}
+
+std::uint64_t read_chunk_offset(const std::vector<unsigned char>& data, std::size_t chunk_index) {
+    return read_u64_at(data, static_cast<std::size_t>(read_index_offset(data)) +
+                                 chunk_index * kIndexEntrySize + kIndexChunkOffsetOffset);
+}
+
+std::size_t column_entry_offset(const std::vector<unsigned char>& data, std::size_t chunk_index,
+                                std::size_t column_index) {
+    return static_cast<std::size_t>(read_chunk_offset(data, chunk_index)) + kChunkHeaderSize +
+           column_index * kColumnEntrySize;
+}
+
+void corrupt_first_column_length(const std::filesystem::path& path, std::size_t chunk_index) {
+    auto data = read_bytes(path);
+    const std::size_t qname_length_offset =
+        column_entry_offset(data, chunk_index, 0) + kColumnLengthOffset;
+    write_u64_at(data, qname_length_offset, read_u64_at(data, qname_length_offset) + 1);
+    write_bytes(path, data);
 }
 
 } // namespace
@@ -159,6 +221,56 @@ TEST(Axf1View, DoesNotWritePartialOutputWhenLaterRecordIsInvalid) {
 
     ASSERT_FALSE(result);
     EXPECT_NE(result.error().find("invalid CIGAR operation"), std::string::npos);
+    EXPECT_EQ(out.str(), "");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1View, DoesNotDecodeNonOverlappingMalformedChunk) {
+    const auto path = temp_path("alignx_axf1_view_lazy_non_overlap");
+    alignx::format::Axf1File file{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .chunks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 110,
+                    .records = {make_record("read001", 100, "10M", "NM:i:0")}},
+                   {.ref_id = 0,
+                    .start_pos = 500,
+                    .end_pos = 510,
+                    .records = {make_record("badChunk", 500, "10M", "NM:i:1")}}}};
+    write_axf1_or_fail(file, path);
+    corrupt_first_column_length(path, 1);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf1_region_sam(path, "chrToy:101-110", out);
+
+    EXPECT_TRUE(result) << result.error();
+    EXPECT_EQ(out.str(),
+              "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1View, ReportsOverlappingMalformedChunkAtomically) {
+    const auto path = temp_path("alignx_axf1_view_lazy_overlap_error");
+    alignx::format::Axf1File file{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .chunks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 110,
+                    .records = {make_record("read001", 100, "10M", "NM:i:0")}},
+                   {.ref_id = 0,
+                    .start_pos = 500,
+                    .end_pos = 510,
+                    .records = {make_record("badChunk", 500, "10M", "NM:i:1")}}}};
+    write_axf1_or_fail(file, path);
+    corrupt_first_column_length(path, 1);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf1_region_sam(path, "chrToy:101-510", out);
+
+    ASSERT_FALSE(result);
+    EXPECT_NE(result.error().find("string column has trailing bytes"), std::string::npos);
     EXPECT_EQ(out.str(), "");
 
     std::filesystem::remove(path);

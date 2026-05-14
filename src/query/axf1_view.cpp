@@ -81,31 +81,36 @@ std::expected<void, std::string> write_axf1_region_sam(const std::filesystem::pa
         return std::unexpected(parsed_region.error());
     }
 
-    auto file = format::read_axf1_file(input);
-    if (!file) {
-        return std::unexpected(file.error());
+    auto reader = format::Axf1FileReader::open(input);
+    if (!reader) {
+        return std::unexpected(reader.error());
     }
 
-    auto ref_id = find_reference_id(file->references, parsed_region->reference);
+    auto ref_id = find_reference_id(reader->index().references, parsed_region->reference);
     if (!ref_id) {
         return std::unexpected(ref_id.error());
     }
 
+    auto hits = reader->query_chunks(*ref_id, parsed_region->start, parsed_region->end);
+    if (!hits) {
+        return std::unexpected(hits.error());
+    }
+
     std::string output;
-    for (const format::Axf1Chunk& chunk : file->chunks) {
-        if (chunk.ref_id != *ref_id ||
-            !half_open_intervals_overlap(chunk.start_pos, chunk.end_pos, parsed_region->start,
-                                         parsed_region->end)) {
-            continue;
+    for (const format::Axf1ChunkIndexEntry* chunk_entry : *hits) {
+        auto chunk = reader->read_chunk(*chunk_entry);
+        if (!chunk) {
+            return std::unexpected(chunk.error());
         }
 
-        for (const format::Axf1Record& record : chunk.records) {
+        for (const format::Axf1Record& record : chunk->records) {
             auto overlaps = record_overlaps_region(record, *parsed_region);
             if (!overlaps) {
                 return std::unexpected(overlaps.error());
             }
             if (*overlaps) {
-                output.append(format_sam_record(record, file->references.at(*ref_id).name));
+                output.append(
+                    format_sam_record(record, reader->index().references.at(*ref_id).name));
             }
         }
     }

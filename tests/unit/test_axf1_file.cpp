@@ -154,6 +154,66 @@ TEST(Axf1File, WriteReadRoundTrip) {
     std::filesystem::remove(path);
 }
 
+TEST(Axf1File, ReadsIndexMetadataWithoutDecodingChunks) {
+    const auto path = temp_path("alignx_axf1_metadata");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto metadata = alignx::format::read_axf1_index_metadata(path);
+    ASSERT_TRUE(metadata) << metadata.error();
+
+    ASSERT_EQ(metadata->references.size(), 1);
+    EXPECT_EQ(metadata->references[0].name, "chrToy");
+    EXPECT_EQ(metadata->references[0].length, 1000);
+
+    ASSERT_EQ(metadata->chunks.size(), 1);
+    EXPECT_EQ(metadata->chunks[0].ref_id, 0);
+    EXPECT_EQ(metadata->chunks[0].start_pos, 100);
+    EXPECT_EQ(metadata->chunks[0].end_pos, 160);
+    EXPECT_EQ(metadata->chunks[0].record_count, 2);
+    EXPECT_GT(metadata->chunks[0].chunk_offset, 0);
+    EXPECT_GT(metadata->chunks[0].chunk_length, 0);
+
+    auto hits = metadata->query_chunks(0, 150, 151);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 1);
+    EXPECT_EQ(hits->at(0)->record_count, 2);
+
+    hits = metadata->query_chunks(0, 160, 170);
+    ASSERT_TRUE(hits) << hits.error();
+    EXPECT_TRUE(hits->empty());
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1FileReader, OpensAndReadsQueryChunk) {
+    const auto path = temp_path("alignx_axf1_file_reader");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto reader = alignx::format::Axf1FileReader::open(path);
+    ASSERT_TRUE(reader) << reader.error();
+
+    ASSERT_EQ(reader->index().references.size(), 1);
+    ASSERT_EQ(reader->index().chunks.size(), 1);
+
+    auto hits = reader->query_chunks(0, 150, 151);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 1);
+
+    auto chunk = reader->read_chunk(*hits->at(0));
+    ASSERT_TRUE(chunk) << chunk.error();
+    ASSERT_EQ(chunk->records.size(), 2);
+    EXPECT_EQ(chunk->records[0].qname, "read001");
+    EXPECT_EQ(chunk->records[1].qname, "read002");
+
+    std::filesystem::remove(path);
+}
+
 TEST(Axf1File, RejectsInvalidMagic) {
     const auto path = temp_path("alignx_axf1_bad_magic");
     {
