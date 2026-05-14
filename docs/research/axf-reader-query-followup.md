@@ -159,7 +159,7 @@ Only the columnar path should be used for selective-column I/O claims.
 Before changing format layout or adding codecs:
 
 - keep existing AXF0 toy and HG002 correctness smoke checks passing;
-- add unit tests that prove non-overlapping payload ranges are not read;
+- keep unit tests that prove non-overlapping payload ranges are not parsed;
 - keep malformed payload behavior atomic: error returns must not write partial
   stdout;
 - keep `convert --region` using the same 1-based closed input and 0-based

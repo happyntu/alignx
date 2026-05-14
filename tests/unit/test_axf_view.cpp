@@ -85,6 +85,33 @@ TEST(AxfView, ReturnsNoRecordsWhenBlockOverlapsButRecordDoesNot) {
     std::filesystem::remove(path);
 }
 
+TEST(AxfView, DoesNotParseNonOverlappingBlockPayload) {
+    const auto path = temp_path("alignx_axf_view_skips_non_overlapping_payload");
+    const std::string hit_payload =
+        "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\n";
+    const std::string skipped_payload = "bad\tline\n";
+    alignx::format::AxfFile file{.references = {{.name = "chrToy", .length = 1000}},
+                                 .blocks = {{.ref_id = 0,
+                                             .start_pos = 100,
+                                             .end_pos = 110,
+                                             .record_count = 1,
+                                             .payload = bytes(hit_payload)},
+                                            {.ref_id = 0,
+                                             .start_pos = 300,
+                                             .end_pos = 310,
+                                             .record_count = 1,
+                                             .payload = bytes(skipped_payload)}}};
+    write_axf_or_fail(file, path);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf_region_sam(path, "chrToy:101-110", out);
+
+    EXPECT_TRUE(result) << result.error();
+    EXPECT_EQ(out.str(), hit_payload);
+
+    std::filesystem::remove(path);
+}
+
 TEST(AxfView, ReportsMissingReference) {
     const auto path = temp_path("alignx_axf_view_missing_ref");
     write_axf_or_fail(
