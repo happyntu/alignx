@@ -174,6 +174,10 @@ the same region. On 2026-05-15,
 preserved the same byte-identical SAM stdout for 64 records and used
 `qual_pack_compressed` on all 7 quality chunks. The zstd-wrapped quality payload
 was 533,367 bytes, or 67.369% of column payload bytes.
+After adding size-policy fallback, the same region was rechecked under
+`/mypool/alignx/tmp/axf1_zstd_quality_size_policy_smoke_hg002_chr1_1000000_1010000_20260515`
+with the same stdout SHA-256, `qual_pack_compressed` on all 7 quality chunks,
+and the same 533,367-byte quality payload.
 
 ## Deferred Work
 

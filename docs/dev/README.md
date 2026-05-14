@@ -205,6 +205,12 @@ It confirmed byte-identical SAM stdout with the same stdout SHA-256
 for 64 records. `quality` used `qual_pack_compressed` on all 7 chunks because
 the zstd envelope was smaller than the regular best quality payload, and the AXF1
 output was 798,039 bytes.
+After adding size-policy fallback, the same correctness smoke was rerun with
+`/mypool/alignx/bin/alignx_zstd_quality_size_policy_3e7f980` under
+`/mypool/alignx/tmp/axf1_zstd_quality_size_policy_smoke_hg002_chr1_1000000_1010000_20260515`.
+The result remained byte-identical with the same stdout SHA-256, `quality` still
+used `qual_pack_compressed` on all 7 chunks, and the AXF1 output remained
+798,039 bytes.
 
 ## AXF1 column payload summary
 

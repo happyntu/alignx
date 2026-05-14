@@ -271,6 +271,16 @@ cigar:    cigar_token:7, 20,689 bytes, 2.613% of column payload bytes
 The AXF1 output was 798,039 bytes. This is a correctness smoke, not a benchmark
 or a general compression-ratio claim.
 
+After adding the writer size policy, the same remote correctness smoke was rerun
+on 2026-05-15 with binary
+`/mypool/alignx/bin/alignx_zstd_quality_size_policy_3e7f980` and work directory
+`/mypool/alignx/tmp/axf1_zstd_quality_size_policy_smoke_hg002_chr1_1000000_1010000_20260515`.
+The result remained byte-identical with the same stdout SHA-256, `quality` still
+used `qual_pack_compressed` on all 7 chunks, and the AXF1 output remained
+798,039 bytes. This confirms that the size-policy fallback keeps the zstd
+wrapper for this region because it is smaller than the regular best quality
+payload.
+
 ## Acceptance Criteria for a Future Implementation
 
 - Unit tests cover a compressed payload round-trip for at least one column.
