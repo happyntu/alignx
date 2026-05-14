@@ -129,6 +129,35 @@ AXF0 query output is atomic at the command level: malformed payloads must not
 write partial stdout before returning an error. Row-preserving payload records
 that lack a final newline are normalized to newline-terminated SAM stdout.
 
+## AXF0 MVP Contract
+
+AXF0 is a staging format with a small compatibility contract. Future columnar
+work may replace the payload layout, but current AXF0 readers and tests rely on
+these semantics:
+
+- Block intervals and parsed SAM record intervals use 0-based half-open
+  coordinates. Two intervals overlap when `block.start < query.end` and
+  `query.start < block.end`.
+- `alignx convert --region` accepts 1-based closed SAM-style regions, converts
+  them to 0-based half-open intervals, filters fetched BAM records with the same
+  overlap rule as `alignx view`, and writes only mapped records with valid
+  positive-length reference spans.
+- AXF0 block index entries are sorted by `ref_id`, then `start_pos`, then
+  `end_pos` after full-file or metadata reads. Query results preserve this
+  start-sorted block order even when the reader uses an end-sorted candidate
+  index internally.
+- `AxfFileReader` is the preferred query API. It loads header/reference/index
+  metadata first, queries overlapping blocks, and reads payload byte ranges only
+  for query hits.
+- `read_axf_file()` is a compatibility/full-file helper for tests or callers
+  that explicitly need materialized payloads. `read_axf_index_metadata()` and
+  `read_axf_block_payload()` are lower-level parser and payload helpers.
+- Row-preserving payloads are SAM text bytes grouped by AXF0 block. Payloads are
+  allowed to omit the final newline; AXF view normalizes matching output records
+  to newline-terminated SAM stdout.
+- Non-overlapping block payloads must not be parsed during region queries.
+  Malformed payloads in queried blocks return an error with empty stdout.
+
 ---
 
 ## Implementation Order
@@ -150,9 +179,15 @@ As of 2026-05-14, the AXF0 closed loop is implemented:
   row-preserving AXF0 blocks.
 - `src/query/axf_view.hpp/.cpp` handles AXF0 region query and SAM payload
   filtering.
+- `format::AxfFileReader` is the preferred seekable AXF0 query reader. It loads
+  header/reference/index metadata up front and lazily reads only overlapping
+  payload byte ranges.
 - `alignx convert <bam> -o <axf>` and `alignx view <axf> <region>` are wired
   through the CLI.
 - Tests cover toy conversion, AXF view, and BAM -> AXF -> view stdout parity.
+- Tests also cover stable block query order, long-overlap query candidates,
+  non-overlapping payloads not being parsed, malformed payload atomicity, and
+  final-newline normalization.
 
 This status does not change the long-term ADR-002 columnar target. AXF0 remains
 a correctness staging format and should not be used for final compression-ratio
@@ -161,11 +196,10 @@ or performance claims.
 Next implementation direction:
 
 - Do not benchmark AXF0 as the final AXF performance model.
-- Split the current full-file `read_axf_file()` query path into a seekable AXF0
-  reader that loads header/reference/index metadata up front and reads only
-  overlapping payload byte ranges for region queries.
-- Keep row-preserving payloads until the seekable reader shape is tested, then
-  move toward the ADR-002 columnar codec path.
+- Keep the AXF0 contract above stable while moving toward the ADR-002 columnar
+  codec path.
+- Replace row-preserving payloads only when the next format step has equivalent
+  correctness tests for query output, error atomicity, and coordinate semantics.
 
 ---
 
