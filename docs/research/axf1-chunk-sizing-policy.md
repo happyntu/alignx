@@ -167,6 +167,10 @@ Remote HG002 correctness smoke coverage now includes a small chr1 region:
 BAM-backed `alignx view` and `samtools view`. The stdout SHA256 matched across
 all three outputs. This is not a benchmark result.
 
+Metadata inspection for that file reported 7 chunks, 64 total records, max 11
+records per chunk, max 27,665 bp span, and max 294,520-byte chunk length. These
+values are below the implemented hard caps.
+
 Before any performance claim, run a separate remote HG002 benchmark with user
 confirmation. Notify the user before benchmark or profiling workloads.
 

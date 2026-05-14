@@ -235,6 +235,27 @@ Remote HG002 hybrid chunk smoke, run on `missmi-server00` on 2026-05-14:
 
 This was a correctness smoke only, not a benchmark or profiling run.
 
+Chunk metadata inspection for the same AXF1 file used
+`scripts/inspect_axf1_metadata.py`, which reads only the AXF1 header and chunk
+index:
+
+| Metric | Value |
+|---|---:|
+| Chunk count | 7 |
+| Total records | 64 |
+| Min records per chunk | 5 |
+| Max records per chunk | 11 |
+| Average records per chunk | 9.143 |
+| Min span | 16,567 bp |
+| Max span | 27,665 bp |
+| Average span | 21,187 bp |
+| Min chunk length | 161,244 bytes |
+| Max chunk length | 294,520 bytes |
+| Average chunk length | 264,790.857 bytes |
+
+Sanity result: the HG002 small-region AXF1 output stayed below the current
+hybrid hard caps of 4,096 records, 512 KiB chunk length, and 1,000,000 bp span.
+
 Suggested implementation boundary:
 
 - new format code: `src/format/axf1_file.hpp/.cpp`;
@@ -259,6 +280,8 @@ Suggested implementation boundary:
   separate `convert_bam_to_axf1_mvp()` function.
 - `src/convert/axf1_chunk_policy.hpp/.cpp` owns the first AXF1 hybrid chunk
   sizing policy and its testable flush predicates.
+- `scripts/inspect_axf1_metadata.py` inspects AXF1 header and chunk-index
+  metadata without decoding chunk payloads.
 - `src/cli/cli.cpp` detects AXF0/AXF1 by file magic before falling back to the
   BAM/HTSlib view path. `.axf`/`.axf1` files with unknown magic are rejected
   instead of being treated as BAM.
