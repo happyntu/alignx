@@ -20,6 +20,11 @@
 
 ## Running benchmarks
 
+Do not start benchmark timing, repeated runs, or profiling until the user has
+explicitly confirmed that the machine is available. `check_benchmark_input.sh`
+is a preflight correctness and environment check; `bench_region_query.sh` is a
+benchmark because it runs timed repeats.
+
 ```bash
 # Build first
 mamba run -n alignx-dev cmake --preset wsl-release
@@ -71,6 +76,69 @@ export ALIGNX_HTS_THREADS=2
   --warmup 1 \
   --repeats 5 \
   --output benchmarks/results/phase1_view_chr1_samtools.tsv
+```
+
+## Preflight Workflow
+
+Use this checklist before requesting or starting a benchmark run:
+
+- Build a release binary first: `build/wsl-release/alignx` for local WSL, or
+  `/mypool/alignx/bin/alignx` for `missmi-server00`.
+- Confirm the input BAM is indexed with a nearby `.bai` or `.csi`.
+- Run `scripts/check_benchmark_input.sh` for the exact BAM and region. This
+  checks `samtools quickcheck`, header readability, region record count, region
+  view success, and `alignx index` preflight.
+- Confirm stdout parity is enforced by `scripts/bench_region_query.sh`; the
+  script fails if `alignx view` differs from `samtools view`.
+- Choose output paths before timing. Raw TSV and summary TSV should go under
+  `benchmarks/results/` for local toy/smoke runs or `/mypool/alignx/results/`
+  for remote large-data runs.
+- Ask the user before running timed repeats, profiling, or real-data benchmark
+  commands.
+
+## Remote Large-Data Workflow
+
+For HG002 or other large BAM/CRAM datasets, prefer `missmi-server00` and the
+large `/mypool` filesystem instead of local WSL storage. The local Codex session
+should orchestrate over SSH.
+
+Recommended remote paths:
+
+| Purpose | Path |
+|---|---|
+| alignx binary | `/mypool/alignx/bin/alignx` |
+| scripts snapshot | `/mypool/alignx/bin/` or `/mypool/alignx/tmp/<run>/` |
+| large input data | `/mypool/alignx/data/` or existing `/mypool/biotools-benchmark-data/` |
+| references | `/mypool/alignx/refs/` |
+| raw and summary TSV | `/mypool/alignx/results/` |
+| logs | `/mypool/alignx/logs/` |
+| scratch work | `/mypool/alignx/tmp/` |
+
+Known HG002 data used by previous correctness smokes:
+
+```text
+/mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam
+```
+
+Remote preflight example, still not a benchmark:
+
+```bash
+scripts/check_benchmark_input.sh \
+  --alignx /mypool/alignx/bin/alignx \
+  --input /mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam \
+  --region chr1:1000000-2000000
+```
+
+Remote benchmark command shape, run only after explicit confirmation:
+
+```bash
+scripts/bench_region_query.sh \
+  --alignx /mypool/alignx/bin/alignx \
+  --input /mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam \
+  --region chr1:1000000-2000000 \
+  --warmup 1 \
+  --repeats 5 \
+  --output /mypool/alignx/results/phase1_view_chr1_samtools.tsv
 ```
 
 ## Reporting conventions
