@@ -57,6 +57,7 @@ and region-query correctness.
 - [x] `alignx convert <bam> -o <axf>` MVP
 - [x] `alignx view <axf> <region>` MVP with toy stdout parity
 - [x] AXF1 raw-column toy correctness path with magic-based view routing
+- [x] AXF1 hybrid chunk sizing correctness smoke on HG002 chr1 small region
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec: POS varint delta, FLAG bit-pack, MAPQ byte/RLE, SEQ reference-delta 2-bit

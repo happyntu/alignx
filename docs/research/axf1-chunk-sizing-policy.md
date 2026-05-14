@@ -162,8 +162,13 @@ Focused tests with small thresholds cover:
 - single oversized record emits as one chunk
 - decoded SAM parity for toy inputs remains unchanged
 
-Before any performance claim, run a remote HG002 correctness smoke/preflight.
-Notify the user before benchmark or profiling workloads.
+Remote HG002 correctness smoke coverage now includes a small chr1 region:
+`chr1:1000000-1010000` converted to AXF1 and compared against both
+BAM-backed `alignx view` and `samtools view`. The stdout SHA256 matched across
+all three outputs. This is not a benchmark result.
+
+Before any performance claim, run a separate remote HG002 benchmark with user
+confirmation. Notify the user before benchmark or profiling workloads.
 
 ## Open Questions
 

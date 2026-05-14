@@ -196,6 +196,8 @@ Current converter chunk policy:
 Current correctness coverage:
 
 - toy BAM -> AXF1 -> view stdout parity for mapped toy records;
+- remote HG002 chr1 small-region AXF1 convert -> view stdout parity against
+  both `alignx view` on BAM and `samtools view`;
 - explicit mapped-only converter behavior: the toy unmapped `read003` is not
   written to AXF1;
 - multi-chunk query of converted AXF1 output;
@@ -216,6 +218,22 @@ Completed implementation checklist:
 - CLI view routing detects AXF0/AXF1 by magic after the internal AXF1 helper is
   covered.
 - AXF0 tests continue to run unchanged alongside AXF1 tests.
+
+Remote HG002 hybrid chunk smoke, run on `missmi-server00` on 2026-05-14:
+
+- BAM:
+  `/mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam`
+- Region: `chr1:1000000-1010000`
+- Output directory:
+  `/mypool/alignx/tmp/axf1_hybrid_smoke_hg002_chr1_1000000_1010000_20260514`
+- AXF1 output: `hg002_chr1_small.axf1`
+- AXF1 file size: 1,858,056 bytes
+- Records: 64
+- `axf1 view`, `alignx view` on BAM, and `samtools view` stdout SHA256:
+  `6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`
+- Result: AXF1 stdout matched both BAM-backed alignx output and samtools output.
+
+This was a correctness smoke only, not a benchmark or profiling run.
 
 Suggested implementation boundary:
 
