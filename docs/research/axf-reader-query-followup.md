@@ -24,7 +24,7 @@ Current implementation characteristics:
 - `format::read_axf_block_payload()` reads payload bytes lazily by offset and
   length for query hits.
 - `AxfFileIndex::query_blocks()` scans the sorted block range for the requested
-  reference.
+  reference and stops once block starts pass the query end.
 - `query::write_axf_region_sam()` filters records inside the already-loaded
   row-preserving SAM payloads and writes atomic stdout after successful
   validation.

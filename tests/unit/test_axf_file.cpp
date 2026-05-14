@@ -57,6 +57,11 @@ alignx::format::AxfFile make_multi_reference_file() {
                            .end_pos = 220,
                            .record_count = 4,
                            .payload = bytes("alpha-second\n")});
+    file.blocks.push_back({.ref_id = 0,
+                           .start_pos = 500,
+                           .end_pos = 600,
+                           .record_count = 5,
+                           .payload = bytes("alpha-late\n")});
     return file;
 }
 
@@ -203,14 +208,14 @@ TEST(AxfFile, MetadataSortsBlocksAndQueriesOnlyMatchingReference) {
     EXPECT_EQ(metadata->references[1].name, "chrBeta");
     EXPECT_EQ(metadata->references[2].name, "chrEmpty");
 
-    ASSERT_EQ(metadata->blocks.size(), 4);
+    ASSERT_EQ(metadata->blocks.size(), 5);
     ASSERT_EQ(metadata->reference_block_ranges.size(), 3);
     EXPECT_EQ(metadata->reference_block_ranges[0].begin, 0);
-    EXPECT_EQ(metadata->reference_block_ranges[0].end, 2);
-    EXPECT_EQ(metadata->reference_block_ranges[1].begin, 2);
-    EXPECT_EQ(metadata->reference_block_ranges[1].end, 4);
-    EXPECT_EQ(metadata->reference_block_ranges[2].begin, 4);
-    EXPECT_EQ(metadata->reference_block_ranges[2].end, 4);
+    EXPECT_EQ(metadata->reference_block_ranges[0].end, 3);
+    EXPECT_EQ(metadata->reference_block_ranges[1].begin, 3);
+    EXPECT_EQ(metadata->reference_block_ranges[1].end, 5);
+    EXPECT_EQ(metadata->reference_block_ranges[2].begin, 5);
+    EXPECT_EQ(metadata->reference_block_ranges[2].end, 5);
 
     EXPECT_EQ(metadata->blocks[0].ref_id, 0);
     EXPECT_EQ(metadata->blocks[0].start_pos, 100);
@@ -218,18 +223,26 @@ TEST(AxfFile, MetadataSortsBlocksAndQueriesOnlyMatchingReference) {
     EXPECT_EQ(metadata->blocks[1].ref_id, 0);
     EXPECT_EQ(metadata->blocks[1].start_pos, 140);
     EXPECT_EQ(metadata->blocks[1].record_count, 4);
-    EXPECT_EQ(metadata->blocks[2].ref_id, 1);
-    EXPECT_EQ(metadata->blocks[2].start_pos, 100);
-    EXPECT_EQ(metadata->blocks[2].record_count, 3);
+    EXPECT_EQ(metadata->blocks[2].ref_id, 0);
+    EXPECT_EQ(metadata->blocks[2].start_pos, 500);
+    EXPECT_EQ(metadata->blocks[2].record_count, 5);
     EXPECT_EQ(metadata->blocks[3].ref_id, 1);
-    EXPECT_EQ(metadata->blocks[3].start_pos, 300);
-    EXPECT_EQ(metadata->blocks[3].record_count, 1);
+    EXPECT_EQ(metadata->blocks[3].start_pos, 100);
+    EXPECT_EQ(metadata->blocks[3].record_count, 3);
+    EXPECT_EQ(metadata->blocks[4].ref_id, 1);
+    EXPECT_EQ(metadata->blocks[4].start_pos, 300);
+    EXPECT_EQ(metadata->blocks[4].record_count, 1);
 
     auto alpha_hits = metadata->query_blocks(0, 145, 160);
     ASSERT_TRUE(alpha_hits) << alpha_hits.error();
     ASSERT_EQ(alpha_hits->size(), 2);
     EXPECT_EQ(alpha_hits->at(0)->record_count, 2);
     EXPECT_EQ(alpha_hits->at(1)->record_count, 4);
+
+    alpha_hits = metadata->query_blocks(0, 500, 550);
+    ASSERT_TRUE(alpha_hits) << alpha_hits.error();
+    ASSERT_EQ(alpha_hits->size(), 1);
+    EXPECT_EQ(alpha_hits->at(0)->record_count, 5);
 
     auto beta_hits = metadata->query_blocks(1, 145, 160);
     ASSERT_TRUE(beta_hits) << beta_hits.error();

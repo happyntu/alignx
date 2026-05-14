@@ -355,6 +355,9 @@ AxfFileIndex::query_blocks(std::uint32_t ref_id, std::int32_t start, std::int32_
                                     : AxfBlockRange{.begin = 0, .end = blocks.size()};
     for (std::size_t index = range.begin; index < range.end; ++index) {
         const AxfBlockIndexEntry& block = blocks.at(index);
+        if (block.ref_id == ref_id && block.start_pos >= end) {
+            break;
+        }
         if (block.ref_id == ref_id && block.overlaps(start, end)) {
             hits.push_back(&block);
         }
