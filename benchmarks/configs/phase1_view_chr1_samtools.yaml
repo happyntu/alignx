@@ -21,11 +21,14 @@ query:
 tools:
   alignx:
     binary: build/wsl-release/alignx
+    remote_binary: /mypool/alignx/bin/alignx
+    remote_ld_library_path: /home/happyntu/miniconda3/envs/hg002sv/lib
     commands:
       - index
       - view
   samtools:
     binary: samtools
+    remote_binary: /home/happyntu/miniconda3/envs/hg002sv/bin/samtools
     command: view
 
 metrics:
@@ -54,7 +57,8 @@ notes:
   - check_benchmark_input.sh is preflight only; bench_region_query.sh performs timed repeats.
   - The benchmark script runs alignx index before timed view commands; this is preflight only, not part of the measured view latency.
   - The benchmark script fails if alignx stdout differs from samtools stdout.
-  - On missmi-server00, use /mypool/alignx/bin/alignx and write raw/summary TSVs under /mypool/alignx/results/.
+  - On missmi-server00, use /mypool/alignx/bin/alignx, /home/happyntu/miniconda3/envs/hg002sv/bin/samtools, and LD_LIBRARY_PATH=/home/happyntu/miniconda3/envs/hg002sv/lib.
+  - On missmi-server00, write raw/summary TSVs under /mypool/alignx/results/.
   - |
     Example:
       scripts/check_benchmark_input.sh --alignx build/wsl-release/alignx --input "$ALIGNX_BENCH_BAM" --region chr1:1000000-2000000

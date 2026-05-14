@@ -107,7 +107,9 @@ Recommended remote paths:
 | Purpose | Path |
 |---|---|
 | alignx binary | `/mypool/alignx/bin/alignx` |
-| scripts snapshot | `/mypool/alignx/bin/` or `/mypool/alignx/tmp/<run>/` |
+| benchmark scripts snapshot | `/mypool/alignx/bin/check_benchmark_input.sh`, `/mypool/alignx/bin/bench_region_query.sh` |
+| samtools binary | `/home/happyntu/miniconda3/envs/hg002sv/bin/samtools` |
+| HTSlib runtime libs | `/home/happyntu/miniconda3/envs/hg002sv/lib` |
 | large input data | `/mypool/alignx/data/` or existing `/mypool/biotools-benchmark-data/` |
 | references | `/mypool/alignx/refs/` |
 | raw and summary TSV | `/mypool/alignx/results/` |
@@ -123,8 +125,10 @@ Known HG002 data used by previous correctness smokes:
 Remote preflight example, still not a benchmark:
 
 ```bash
-scripts/check_benchmark_input.sh \
+LD_LIBRARY_PATH=/home/happyntu/miniconda3/envs/hg002sv/lib \
+/mypool/alignx/bin/check_benchmark_input.sh \
   --alignx /mypool/alignx/bin/alignx \
+  --samtools /home/happyntu/miniconda3/envs/hg002sv/bin/samtools \
   --input /mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam \
   --region chr1:1000000-2000000
 ```
@@ -132,8 +136,10 @@ scripts/check_benchmark_input.sh \
 Remote benchmark command shape, run only after explicit confirmation:
 
 ```bash
-scripts/bench_region_query.sh \
+LD_LIBRARY_PATH=/home/happyntu/miniconda3/envs/hg002sv/lib \
+/mypool/alignx/bin/bench_region_query.sh \
   --alignx /mypool/alignx/bin/alignx \
+  --samtools /home/happyntu/miniconda3/envs/hg002sv/bin/samtools \
   --input /mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam \
   --region chr1:1000000-2000000 \
   --warmup 1 \
