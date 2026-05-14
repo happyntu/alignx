@@ -256,6 +256,35 @@ index:
 Sanity result: the HG002 small-region AXF1 output stayed below the current
 hybrid hard caps of 4,096 records, 512 KiB chunk length, and 1,000,000 bp span.
 
+## Region-Converted AXF1 Subset Semantics
+
+`alignx convert --region` writes a subset AXF1 file containing records selected
+from the source BAM for that conversion region. It is not a complete chromosome
+or whole-BAM cache. Queries inside the conversion region should match the source
+BAM for that region. Queries outside the conversion region are answered only
+from records that were written into the AXF1 file, so they can differ from full
+BAM queries.
+
+Remote boundary smoke for the HG002 AXF1 subset above:
+
+| Label | Query region | AXF1 records | Full BAM records | AXF1 vs full BAM | Full BAM vs samtools |
+|---|---|---:|---:|---|---|
+| left_edge | `chr1:1000000-1000010` | 37 | 37 | match | match |
+| middle | `chr1:1005000-1005010` | 38 | 38 | match | match |
+| right_edge | `chr1:1009990-1010000` | 33 | 33 | match | match |
+| full_convert_region | `chr1:1000000-1010000` | 64 | 64 | match | match |
+| right_outside | `chr1:1010001-1011000` | 33 | 35 | subset differs | match |
+| left_outside | `chr1:980000-990000` | 8 | 76 | subset differs | match |
+| left_nohit_outside | `chr1:970000-980000` | 0 | 71 | subset differs | match |
+| right_nohit_outside | `chr1:1030000-1031000` | 0 | 31 | subset differs | match |
+
+For the outside regions with AXF1 records, the AXF1 output was verified to be a
+subset of the full-BAM output. This is expected because long reads selected by
+the conversion region can extend beyond the requested conversion interval.
+
+Boundary smoke output directory:
+`/mypool/alignx/tmp/axf1_hybrid_smoke_hg002_chr1_1000000_1010000_20260514/boundary_smoke`.
+
 Suggested implementation boundary:
 
 - new format code: `src/format/axf1_file.hpp/.cpp`;
@@ -305,6 +334,8 @@ Suggested implementation boundary:
   magic-based?
 - What final threshold values should the implemented hybrid chunk sizing policy
   use after empirical tuning?
+- Should subset AXF1 files carry source/conversion-region metadata so callers
+  can distinguish partial caches from complete reference caches?
 - Should optional tags remain one raw `TAGS` column for v0, or should common tags
   such as `NM` and `MD` get early per-tag streams?
 - Should `RNAME` be implicit from chunk `ref_id` only for the first slice, or

@@ -41,6 +41,7 @@ Completed:
 - AXF1 production chunk sizing policy design note
 - AXF1 converter implements hybrid chunk sizing policy
 - AXF1 hybrid chunk sizing remote HG002 chr1 small-region correctness smoke
+- AXF1 region-converted subset boundary smoke on HG002 chr1 small region
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
@@ -83,6 +84,11 @@ mamba run -n alignx-dev ctest --preset wsl-debug --output-on-failure
 ```
 
 For commands that write binary genomics files to stdout (BAM/CRAM/BCF or compressed BGZF output), do not use `conda run ... > output.bam`; activate the environment in a shell first, then run the tool and redirect output. This avoids any risk of environment-wrapper text contaminating binary files.
+
+`alignx convert --region` writes a subset AXF/AXF1 file for the selected source
+records. It is not a complete chromosome or whole-BAM cache. Queries outside the
+conversion region are answered only from records stored in the subset file and
+can differ from full BAM queries.
 
 **Remote large-data execution:**
 - For large BAM/CRAM/genome assets and benchmark/profiling workloads, prefer `missmi-server00` storage and execution over this Windows machine or WSL disk.

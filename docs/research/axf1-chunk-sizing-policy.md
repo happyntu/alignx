@@ -171,6 +171,11 @@ Metadata inspection for that file reported 7 chunks, 64 total records, max 11
 records per chunk, max 27,665 bp span, and max 294,520-byte chunk length. These
 values are below the implemented hard caps.
 
+Boundary smoke for the same region-converted AXF1 file confirmed the intended
+subset-cache semantics: queries inside `chr1:1000000-1010000` matched the full
+BAM and `samtools view`, while queries outside that conversion region returned
+only records present in the AXF1 subset.
+
 Before any performance claim, run a separate remote HG002 benchmark with user
 confirmation. Notify the user before benchmark or profiling workloads.
 
