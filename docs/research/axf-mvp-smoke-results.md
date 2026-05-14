@@ -87,3 +87,35 @@ Notes:
   converting the full 112 GiB file.
 - This is still a correctness smoke only: no timing repeats, no profiling, and
   no benchmark claims.
+
+## 2026-05-14 remote HG002 smoke after explicit region filtering
+
+Environment:
+
+- Host: `missmi-server00`
+- Work directory:
+  `/mypool/alignx/tmp/axf_smoke_hg002_chr20_10000000_10010000_filter`
+- Binary: `/mypool/alignx/bin/alignx`
+- HTSlib runtime: `LD_LIBRARY_PATH=/home/happyntu/miniconda3/envs/hg002sv/lib`
+
+Input:
+
+- BAM:
+  `/mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam`
+- Region: `chr20:10000000-10010000`
+
+Result:
+
+- Status: `OK axf_roundtrip`
+- Records: 107
+- BAM SAM stdout bytes: 3,133,962
+- AXF SAM stdout bytes: 3,133,962
+- `diff.txt`: empty
+- Generated AXF size: about 3.0 MiB
+
+Notes:
+
+- This run used the `alignx convert --region` path after adding an explicit
+  converter-side overlap filter.
+- Results match the earlier region-limited HG002 smoke, confirming that the
+  explicit filter did not change expected output for this region.
