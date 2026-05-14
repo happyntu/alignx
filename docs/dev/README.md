@@ -151,6 +151,8 @@ and confirmed byte-identical SAM stdout plus POS/FLAG/MAPQ codec distribution
 of `pos_delta_varint`, `flag_bitpack`, and `mapq_rle` on all 7 chunks.
 The toy smoke path has also verified SEQ `seq_2bit_literal` distribution after
 the SEQ 2-bit literal codec was added.
+It has also verified CIGAR `cigar_token` distribution after the CIGAR token
+codec was added.
 
 Remote HG002 SEQ 2-bit literal smoke on 2026-05-14 used
 `/mypool/alignx/tmp/axf1_seq_codec_smoke_hg002_chr1_1000000_1010000_20260514`

@@ -134,7 +134,7 @@ The minimum practical column set is:
 | `RNAME` | implicit chunk `ref_id` for mapped records | Cross-reference records can be handled later. |
 | `POS` | delta varint for monotonic chunks; raw `i32` fallback | Keep 0-based internally; print 1-based SAM POS. |
 | `MAPQ` | run-length encoded `u8`; raw `u8` fallback | Chunk-local runs only. |
-| `CIGAR` | length-prefixed strings | Planned next step is token stream with raw fallback. |
+| `CIGAR` | token stream for valid concrete CIGAR; raw string fallback | Preserve byte-identical SAM CIGAR output. |
 | `RNEXT` | length-prefixed strings or sentinel encoding | Preserve stdout first. |
 | `PNEXT` | raw `i32`/`u32` array | Preserve SAM semantics. |
 | `TLEN` | raw `i32` array | Preserve SAM semantics. |
@@ -198,12 +198,13 @@ values when that payload is smaller than raw `u16`; otherwise the writer falls
 back to raw `u16` FLAG values.
 The MAPQ column uses repeated `(run_length varint, MAPQ byte)` pairs when RLE is
 smaller than raw `u8`; otherwise the writer falls back to raw MAPQ bytes.
-The CIGAR column remains raw length-prefixed strings for now. The recommended
-next CIGAR codec is a self-contained token stream with per-record operation
+The CIGAR column uses a self-contained token stream with per-record operation
 counts, varint operation lengths, one-byte operation codes, and broad raw
-fallback. It must preserve byte-identical SAM CIGAR output because `alignx view`
+fallback. It preserves byte-identical SAM CIGAR output because `alignx view`
 uses selected `POS + CIGAR` decode for filtering and later prints the stored
-CIGAR string.
+CIGAR string. The writer falls back to raw strings for `*`, empty CIGAR,
+unsupported operations, missing lengths, trailing numeric text, zero lengths,
+leading-zero lengths, overflow, or non-beneficial payloads.
 The SEQ column uses a chunk-local 2-bit literal codec for uppercase A/C/G/T
 sequences when it is smaller than raw strings. It falls back to raw
 length-prefixed strings for ambiguity codes, lowercase bases, `*`, empty values,

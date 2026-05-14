@@ -631,6 +631,108 @@ EncodedColumn encode_mapq_column(const std::vector<Axf1Record>& records) {
     return {.column_id = Axf1ColumnId::mapq, .codec_id = Axf1CodecId::raw, .payload = raw};
 }
 
+std::expected<std::uint8_t, std::string> encode_cigar_op(char op) {
+    switch (op) {
+    case 'M':
+        return 0;
+    case 'I':
+        return 1;
+    case 'D':
+        return 2;
+    case 'N':
+        return 3;
+    case 'S':
+        return 4;
+    case 'H':
+        return 5;
+    case 'P':
+        return 6;
+    case '=':
+        return 7;
+    case 'X':
+        return 8;
+    default:
+        return std::unexpected("unsupported AXF1 CIGAR operation");
+    }
+}
+
+std::expected<std::vector<std::pair<std::uint64_t, std::uint8_t>>, std::string>
+parse_cigar_tokens(std::string_view cigar) {
+    if (cigar.empty() || cigar == "*") {
+        return std::unexpected("AXF1 CIGAR token codec requires concrete CIGAR");
+    }
+
+    std::vector<std::pair<std::uint64_t, std::uint8_t>> tokens;
+    std::uint64_t length = 0;
+    bool reading_length = false;
+    bool leading_zero = false;
+    for (char ch : cigar) {
+        if (ch >= '0' && ch <= '9') {
+            if (!reading_length) {
+                reading_length = true;
+                leading_zero = ch == '0';
+            } else if (leading_zero) {
+                return std::unexpected("AXF1 CIGAR token codec rejects leading zero lengths");
+            }
+            if (length >
+                (std::numeric_limits<std::uint64_t>::max() - static_cast<std::uint64_t>(ch - '0')) /
+                    10U) {
+                return std::unexpected("AXF1 CIGAR token length overflow");
+            }
+            length = length * 10U + static_cast<std::uint64_t>(ch - '0');
+            continue;
+        }
+
+        if (!reading_length || length == 0) {
+            return std::unexpected("invalid AXF1 CIGAR token length");
+        }
+        auto op = encode_cigar_op(ch);
+        if (!op) {
+            return std::unexpected(op.error());
+        }
+        tokens.emplace_back(length, *op);
+        length = 0;
+        reading_length = false;
+        leading_zero = false;
+    }
+
+    if (reading_length) {
+        return std::unexpected("AXF1 CIGAR token codec rejects trailing length");
+    }
+    if (tokens.empty()) {
+        return std::unexpected("AXF1 CIGAR token codec requires operations");
+    }
+    return tokens;
+}
+
+std::expected<std::vector<unsigned char>, std::string>
+encode_cigar_token_payload(const std::vector<Axf1Record>& records) {
+    std::vector<unsigned char> bytes;
+    for (const Axf1Record& record : records) {
+        auto tokens = parse_cigar_tokens(record.cigar);
+        if (!tokens) {
+            return std::unexpected(tokens.error());
+        }
+        append_varint_u64(bytes, tokens->size());
+        for (const auto& [length, op] : *tokens) {
+            append_varint_u64(bytes, length);
+            append_u8(bytes, op);
+        }
+    }
+    return bytes;
+}
+
+EncodedColumn encode_cigar_column(const std::vector<Axf1Record>& records) {
+    const auto raw = encode_strings(records, &Axf1Record::cigar);
+    auto encoded = encode_cigar_token_payload(records);
+    if (encoded && encoded->size() < raw.size()) {
+        return {.column_id = Axf1ColumnId::cigar,
+                .codec_id = Axf1CodecId::cigar_token,
+                .payload = std::move(*encoded)};
+    }
+    return {.column_id = Axf1ColumnId::cigar, .codec_id = Axf1CodecId::raw, .payload = raw};
+}
+
 std::expected<std::uint8_t, std::string> encode_acgt_base_2bit(char base) {
     switch (base) {
     case 'A':
@@ -691,6 +793,7 @@ EncodedColumn encode_sequence_column(const std::vector<Axf1Record>& records) {
 std::vector<EncodedColumn> encode_columns(const Axf1Chunk& chunk) {
     auto flag_column = encode_flag_column(chunk.records);
     auto mapq_column = encode_mapq_column(chunk.records);
+    auto cigar_column = encode_cigar_column(chunk.records);
     auto sequence_column = encode_sequence_column(chunk.records);
     return {{.column_id = Axf1ColumnId::qname,
              .codec_id = Axf1CodecId::raw,
@@ -698,9 +801,7 @@ std::vector<EncodedColumn> encode_columns(const Axf1Chunk& chunk) {
             std::move(flag_column),
             encode_pos_column(chunk.records),
             std::move(mapq_column),
-            {.column_id = Axf1ColumnId::cigar,
-             .codec_id = Axf1CodecId::raw,
-             .payload = encode_strings(chunk.records, &Axf1Record::cigar)},
+            std::move(cigar_column),
             {.column_id = Axf1ColumnId::mate_reference,
              .codec_id = Axf1CodecId::raw,
              .payload = encode_strings(chunk.records, &Axf1Record::mate_reference)},
@@ -913,6 +1014,80 @@ decode_mapq_rle_column(const std::vector<unsigned char>& bytes, std::uint32_t re
     return values;
 }
 
+std::expected<char, std::string> decode_cigar_op(std::uint8_t op) {
+    switch (op) {
+    case 0:
+        return 'M';
+    case 1:
+        return 'I';
+    case 2:
+        return 'D';
+    case 3:
+        return 'N';
+    case 4:
+        return 'S';
+    case 5:
+        return 'H';
+    case 6:
+        return 'P';
+    case 7:
+        return '=';
+    case 8:
+        return 'X';
+    default:
+        return std::unexpected("unknown AXF1 CIGAR token operation");
+    }
+}
+
+std::expected<std::vector<std::string>, std::string>
+decode_cigar_token_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
+    Reader reader(bytes);
+    std::vector<std::string> values;
+    values.reserve(record_count);
+
+    for (std::uint32_t record_index = 0; record_index < record_count; ++record_index) {
+        auto op_count = read_varint_u64(reader, "truncated AXF1 CIGAR token op count",
+                                        "AXF1 CIGAR token op count overflow");
+        if (!op_count) {
+            return std::unexpected(op_count.error());
+        }
+        if (*op_count == 0) {
+            return std::unexpected("AXF1 CIGAR token op count is zero");
+        }
+        if (*op_count > static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())) {
+            return std::unexpected("AXF1 CIGAR token op count is too large");
+        }
+
+        std::string cigar;
+        for (std::uint64_t op_index = 0; op_index < *op_count; ++op_index) {
+            auto length = read_varint_u64(reader, "truncated AXF1 CIGAR token length",
+                                          "AXF1 CIGAR token length overflow");
+            if (!length) {
+                return std::unexpected(length.error());
+            }
+            if (*length == 0) {
+                return std::unexpected("AXF1 CIGAR token length is zero");
+            }
+            auto op = reader.read_u8();
+            if (!op) {
+                return std::unexpected("truncated AXF1 CIGAR token operation");
+            }
+            auto decoded_op = decode_cigar_op(*op);
+            if (!decoded_op) {
+                return std::unexpected(decoded_op.error());
+            }
+            cigar.append(std::to_string(*length));
+            cigar.push_back(*decoded_op);
+        }
+        values.push_back(std::move(cigar));
+    }
+
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 CIGAR token column has trailing bytes");
+    }
+    return values;
+}
+
 std::expected<char, std::string> decode_acgt_base_2bit(std::uint8_t value) {
     switch (value) {
     case 0:
@@ -987,6 +1162,7 @@ bool is_supported_column_codec(Axf1ColumnId column_id, Axf1CodecId codec_id) {
     return (column_id == Axf1ColumnId::pos && codec_id == Axf1CodecId::pos_delta_varint) ||
            (column_id == Axf1ColumnId::flag && codec_id == Axf1CodecId::flag_bitpack) ||
            (column_id == Axf1ColumnId::mapq && codec_id == Axf1CodecId::mapq_rle) ||
+           (column_id == Axf1ColumnId::cigar && codec_id == Axf1CodecId::cigar_token) ||
            (column_id == Axf1ColumnId::sequence && codec_id == Axf1CodecId::seq_2bit_literal);
 }
 
@@ -1164,7 +1340,6 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
             }
             break;
         }
-        case Axf1ColumnId::cigar:
         case Axf1ColumnId::mate_reference:
         case Axf1ColumnId::quality:
         case Axf1ColumnId::tags: {
@@ -1184,6 +1359,18 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
                 } else {
                     chunk.records[index].tags = std::move(values->at(index));
                 }
+            }
+            break;
+        }
+        case Axf1ColumnId::cigar: {
+            auto values = entry.codec_id == Axf1CodecId::cigar_token
+                              ? decode_cigar_token_column(*payload, *record_count)
+                              : decode_string_column(*payload, *record_count);
+            if (!values) {
+                return std::unexpected(values.error());
+            }
+            for (std::uint32_t index = 0; index < *record_count; ++index) {
+                chunk.records[index].cigar = std::move(values->at(index));
             }
             break;
         }

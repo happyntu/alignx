@@ -28,6 +28,7 @@ enum class Axf1CodecId : std::uint16_t {
     flag_bitpack = 2,
     mapq_rle = 3,
     seq_2bit_literal = 4,
+    cigar_token = 5,
 };
 
 struct Axf1Reference {

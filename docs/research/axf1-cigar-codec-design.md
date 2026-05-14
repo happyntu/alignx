@@ -1,6 +1,7 @@
 # AXF1 CIGAR Codec Design
 
-Status: design note, 2026-05-14. No format change is implemented by this note.
+Status: implemented for `cigar_token`, 2026-05-14. Dictionary, delta, and
+reference-aware CIGAR codecs remain design-only.
 
 ## Goals
 
@@ -36,6 +37,28 @@ already depends on CIGAR selectively:
 This means a CIGAR codec must support fast selected-column decode and exact
 string reconstruction. It must not weaken the current malformed-CIGAR error
 behavior or atomic stdout contract.
+
+Implementation status: AXF1 now writes `cigar_token` for chunks whose stored
+CIGAR strings are valid, concrete, non-empty, non-`*`, have supported SAM
+operations, and produce a smaller payload than raw length-prefixed strings. It
+falls back to raw strings for `*`, empty CIGAR, unsupported operations, missing
+lengths, trailing numeric text, zero lengths, leading-zero lengths, overflow,
+or non-beneficial payloads. WSL `ctest` and toy
+`scripts/smoke_axf1_codecs.sh` coverage were checked on 2026-05-14.
+
+Toy CIGAR token smoke, run locally in WSL on 2026-05-14:
+
+- BAM: `tests/toy_data/toy_alignment.sorted.bam`
+- Region: `chrToy:1-250`
+- Output directory: `/tmp/alignx_axf1_cigar_codec_smoke`
+- Records: 2
+- `axf1 view`, `alignx view` on BAM, and `samtools view` stdout SHA256:
+  `e62402c0450decf357ef797750af1dfb0be065eeeb3b87f157953a7f7ae1feb9`
+- Codec distribution: `cigar_token`, `seq_2bit_literal`, `pos_delta_varint`,
+  and `flag_bitpack` on the toy chunk. Toy MAPQ remained raw because RLE was
+  not smaller for this input.
+
+This was a correctness smoke only, not a benchmark or profiling run.
 
 ## First Implementation Candidate: `cigar_token`
 

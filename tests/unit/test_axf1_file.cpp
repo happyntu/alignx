@@ -34,6 +34,7 @@ constexpr std::size_t kIndexChunkLengthOffset = 24;
 constexpr std::size_t kFlagColumnIndex = 1;
 constexpr std::size_t kPosColumnIndex = 2;
 constexpr std::size_t kMapqColumnIndex = 3;
+constexpr std::size_t kCigarColumnIndex = 4;
 constexpr std::size_t kSeqColumnIndex = 8;
 
 std::filesystem::path temp_path(std::string_view label) {
@@ -315,6 +316,65 @@ TEST(Axf1File, FallsBackToRawMapqWhenRleIsNotSmaller) {
     EXPECT_EQ(read->chunks[0].records[1].mapq, 50);
 
     std::filesystem::remove(path);
+}
+
+TEST(Axf1File, WritesCigarAsTokenStream) {
+    const auto path = temp_path("alignx_axf1_cigar_token");
+    auto file = make_file();
+    auto third_record = file.chunks[0].records[1];
+    third_record.qname = "read003";
+    third_record.pos = 155;
+    third_record.cigar = "2S5M1I3D4N2=1X1H1P";
+    file.chunks[0].records.push_back(third_record);
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::cigar_token));
+    EXPECT_EQ(read_u64_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnLengthOffset),
+              29);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 3);
+    EXPECT_EQ(read->chunks[0].records[0].cigar, "10M");
+    EXPECT_EQ(read->chunks[0].records[1].cigar, "5M1I4M");
+    EXPECT_EQ(read->chunks[0].records[2].cigar, "2S5M1I3D4N2=1X1H1P");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, FallsBackToRawCigarForUnsupportedStrings) {
+    const std::vector<std::string> fallback_cigars{"*", "", "10Z", "M", "10M5", "0M", "01M"};
+
+    for (const std::string& fallback_cigar : fallback_cigars) {
+        const auto path = temp_path("alignx_axf1_cigar_token_raw_fallback");
+        auto file = make_file();
+        file.chunks[0].records[1].cigar = fallback_cigar;
+
+        auto write = alignx::format::write_axf1_file(file, path);
+        ASSERT_TRUE(write) << write.error();
+
+        auto data = read_bytes(path);
+        EXPECT_EQ(
+            read_u16_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnCodecOffset),
+            static_cast<std::uint16_t>(alignx::format::Axf1CodecId::raw));
+        EXPECT_EQ(
+            read_u64_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnLengthOffset),
+            4 + file.chunks[0].records[0].cigar.size() + 4 + fallback_cigar.size());
+
+        auto read = alignx::format::read_axf1_file(path);
+        ASSERT_TRUE(read) << read.error();
+        ASSERT_EQ(read->chunks.size(), 1);
+        ASSERT_EQ(read->chunks[0].records.size(), 2);
+        EXPECT_EQ(read->chunks[0].records[0].cigar, "10M");
+        EXPECT_EQ(read->chunks[0].records[1].cigar, fallback_cigar);
+
+        std::filesystem::remove(path);
+    }
 }
 
 TEST(Axf1File, WritesAcgtSequenceAsTwoBitLiteral) {
@@ -607,6 +667,31 @@ TEST(Axf1FileReader, ReadsSelectedChunkColumns) {
     std::filesystem::remove(path);
 }
 
+TEST(Axf1FileReader, ReadsSelectedTokenizedCigarColumn) {
+    const auto path = temp_path("alignx_axf1_file_reader_cigar_column");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto reader = alignx::format::Axf1FileReader::open(path);
+    ASSERT_TRUE(reader) << reader.error();
+
+    auto hits = reader->query_chunks(0, 150, 151);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 1);
+
+    auto chunk = reader->read_chunk_columns(*hits->at(0), {alignx::format::Axf1ColumnId::cigar});
+    ASSERT_TRUE(chunk) << chunk.error();
+    ASSERT_EQ(chunk->records.size(), 2);
+    EXPECT_EQ(chunk->records[0].cigar, "10M");
+    EXPECT_EQ(chunk->records[1].cigar, "5M1I4M");
+    EXPECT_EQ(chunk->records[0].qname, "");
+    EXPECT_EQ(chunk->records[1].quality, "");
+
+    std::filesystem::remove(path);
+}
+
 TEST(Axf1FileReader, ReadsSelectedTwoBitSequenceColumn) {
     const auto path = temp_path("alignx_axf1_file_reader_sequence_column");
     const auto file = make_file();
@@ -847,6 +932,118 @@ TEST(Axf1File, RejectsMapqRleValueCountMismatch) {
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
     EXPECT_NE(read.error().find("AXF1 MAPQ RLE value count mismatch"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedCigarTokenOpCount) {
+    const auto path = temp_path("alignx_axf1_truncated_cigar_token_op_count");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u8_at(data, column_payload_offset(data, kCigarColumnIndex), 0x80);
+    write_u64_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnLengthOffset, 1);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("truncated AXF1 CIGAR token op count"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedCigarTokenLength) {
+    const auto path = temp_path("alignx_axf1_truncated_cigar_token_length");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto payload_offset = column_payload_offset(data, kCigarColumnIndex);
+    write_u8_at(data, payload_offset, 1);
+    write_u8_at(data, payload_offset + 1, 0x80);
+    write_u64_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnLengthOffset, 2);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("truncated AXF1 CIGAR token length"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedCigarTokenOperation) {
+    const auto path = temp_path("alignx_axf1_truncated_cigar_token_operation");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u64_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnLengthOffset, 2);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("truncated AXF1 CIGAR token operation"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsUnknownCigarTokenOperation) {
+    const auto path = temp_path("alignx_axf1_unknown_cigar_token_operation");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u8_at(data, column_payload_offset(data, kCigarColumnIndex) + 2, 9);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("unknown AXF1 CIGAR token operation"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsZeroCigarTokenLength) {
+    const auto path = temp_path("alignx_axf1_zero_cigar_token_length");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u8_at(data, column_payload_offset(data, kCigarColumnIndex) + 1, 0);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("AXF1 CIGAR token length is zero"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsCigarTokenTrailingBytes) {
+    const auto path = temp_path("alignx_axf1_cigar_token_trailing_bytes");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u64_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnLengthOffset, 11);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("AXF1 CIGAR token column has trailing bytes"), std::string::npos)
         << read.error();
 
     std::filesystem::remove(path);

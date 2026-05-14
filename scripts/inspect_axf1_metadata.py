@@ -38,6 +38,7 @@ CODEC_NAMES = {
     2: "flag_bitpack",
     3: "mapq_rle",
     4: "seq_2bit_literal",
+    5: "cigar_token",
 }
 
 

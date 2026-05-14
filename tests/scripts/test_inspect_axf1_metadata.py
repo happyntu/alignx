@@ -40,13 +40,14 @@ def write_fixture(path: Path) -> None:
         (2, 2, 0, 1),  # FLAG bit-pack
         (3, 1, 1, 1),  # POS delta-varint
         (4, 3, 2, 1),  # MAPQ RLE
-        (9, 4, 3, 1),  # SEQ 2-bit literal
-        (99, 77, 4, 1),  # unknown numeric fallback
+        (5, 5, 3, 1),  # CIGAR token
+        (9, 4, 4, 1),  # SEQ 2-bit literal
+        (99, 77, 5, 1),  # unknown numeric fallback
     ]
     data.extend(CHUNK_HEADER.pack(0, 100, 160, records, len(columns)))
     for column in columns:
         data.extend(COLUMN_ENTRY.pack(*column))
-    data.extend(b"abcde")
+    data.extend(b"abcdef")
     chunk_length = len(data) - chunk_offset
 
     index_offset = len(data)
@@ -77,14 +78,16 @@ class InspectAxf1MetadataTest(unittest.TestCase):
             self.assertIn("0\t2\tflag\t2\tflag_bitpack\t0\t1", columns)
             self.assertIn("0\t3\tpos\t1\tpos_delta_varint\t1\t1", columns)
             self.assertIn("0\t4\tmapq\t3\tmapq_rle\t2\t1", columns)
-            self.assertIn("0\t9\tsequence\t4\tseq_2bit_literal\t3\t1", columns)
-            self.assertIn("0\t99\tunknown_99\t77\tunknown_77\t4\t1", columns)
+            self.assertIn("0\t5\tcigar\t5\tcigar_token\t3\t1", columns)
+            self.assertIn("0\t9\tsequence\t4\tseq_2bit_literal\t4\t1", columns)
+            self.assertIn("0\t99\tunknown_99\t77\tunknown_77\t5\t1", columns)
 
             codecs = self.run_inspector(fixture, "--column-codecs")
             self.assertIn("column_id\tcolumn_name\tcodec_id\tcodec_name\tchunk_count", codecs)
             self.assertIn("2\tflag\t2\tflag_bitpack\t1", codecs)
             self.assertIn("3\tpos\t1\tpos_delta_varint\t1", codecs)
             self.assertIn("4\tmapq\t3\tmapq_rle\t1", codecs)
+            self.assertIn("5\tcigar\t5\tcigar_token\t1", codecs)
             self.assertIn("9\tsequence\t4\tseq_2bit_literal\t1", codecs)
             self.assertIn("99\tunknown_99\t77\tunknown_77\t1", codecs)
 
