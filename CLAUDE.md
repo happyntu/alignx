@@ -29,6 +29,9 @@ Completed:
 - `AXFIndex` v1 sorted interval list with binary read/write and CRC footer
 - BAI/CSI bin projection into `AXFIndex` v1 intervals
 - `alignx index <bam>` builds projected `.axf.idx` files from `.bai` / `.csi`
+- AXF1 raw-column file reader/writer and internal region view helper
+- `convert::convert_bam_to_axf1_mvp()` for toy BAM -> AXF1 correctness work
+- `alignx convert --format AXF1` opt-in path and `.axf1` view routing
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
@@ -160,8 +163,9 @@ alignx/
 ## CLI Design
 
 ```bash
-alignx convert  <input.bam|cram>  -o <output.axf>     # BAM/CRAM → AXF
-alignx view     <input.axf|bam>   [region]             # region query → SAM stdout
+alignx convert  <input.bam|cram>  -o <output.axf>      # BAM/CRAM → AXF0 by default
+alignx convert  <input.bam>       -o <output.axf1> --format AXF1 # opt-in raw-column AXF1 MVP
+alignx view     <input.axf|axf1|bam> [region]           # region query → SAM stdout
 alignx export   <input.axf>       -o <output.bam|cram> # AXF → BAM/CRAM
 alignx pileup   <input.axf|bam>   <region>             # per-base coverage
 alignx stats    <input.axf|bam>                        # flag/MAPQ/insert stats

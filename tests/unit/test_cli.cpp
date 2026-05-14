@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "cli/runner.hpp"
+#include "format/axf1_file.hpp"
 #include "format/axf_file.hpp"
 #include "index/axf_index.hpp"
 
@@ -292,6 +293,24 @@ TEST(Cli, ConvertRegionReportsMalformedRegion) {
     std::filesystem::remove_all(temp_dir);
 }
 
+TEST(Cli, ConvertRejectsUnsupportedFormat) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_bad_format");
+    const auto output = temp_dir / "toy.axf1";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli(
+        {"alignx", "convert", toy_bam_path().string(), "-o", output.string(), "--format", "AXF2"},
+        out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("--format must be AXF0 or AXF1"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(output));
+
+    std::filesystem::remove_all(temp_dir);
+}
+
 #ifdef ALIGNX_HAVE_HTSLIB
 
 TEST(Cli, ConvertWritesToyAxfMvp) {
@@ -316,6 +335,62 @@ TEST(Cli, ConvertWritesToyAxfMvp) {
     EXPECT_EQ(axf->references[0].name, "chrToy");
     ASSERT_EQ(axf->blocks.size(), 1);
     EXPECT_EQ(axf->blocks[0].record_count, 2);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ConvertWritesToyAxf1Mvp) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_axf1");
+    const auto output = temp_dir / "toy.axf1";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli(
+        {"alignx", "convert", toy_bam_path().string(), "-o", output.string(), "--format", "AXF1"},
+        out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(err.str(), "");
+    EXPECT_NE(out.str().find("input\t"), std::string::npos);
+    EXPECT_NE(out.str().find("output\t"), std::string::npos);
+    EXPECT_NE(out.str().find("format\tAXF1"), std::string::npos);
+    ASSERT_TRUE(std::filesystem::is_regular_file(output));
+
+    auto axf = alignx::format::read_axf1_file(output);
+    ASSERT_TRUE(axf) << axf.error();
+    ASSERT_EQ(axf->references.size(), 1);
+    EXPECT_EQ(axf->references[0].name, "chrToy");
+    ASSERT_EQ(axf->chunks.size(), 1);
+    EXPECT_EQ(axf->chunks[0].records.size(), 2);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ConvertThenViewToyAxf1MatchesBamView) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_view_axf1");
+    const auto output = temp_dir / "toy.axf1";
+
+    std::ostringstream convert_out;
+    std::ostringstream convert_err;
+    const int convert_code = run_cli(
+        {"alignx", "convert", toy_bam_path().string(), "-o", output.string(), "--format", "axf1"},
+        convert_out, convert_err);
+    ASSERT_EQ(convert_code, 0) << convert_err.str();
+
+    std::ostringstream bam_out;
+    std::ostringstream bam_err;
+    const int bam_code =
+        run_cli({"alignx", "view", toy_bam_path().string(), "chrToy:1-250"}, bam_out, bam_err);
+    ASSERT_EQ(bam_code, 0) << bam_err.str();
+
+    std::ostringstream axf_out;
+    std::ostringstream axf_err;
+    const int axf_code =
+        run_cli({"alignx", "view", output.string(), "chrToy:1-250"}, axf_out, axf_err);
+
+    EXPECT_EQ(axf_code, 0) << axf_err.str();
+    EXPECT_EQ(axf_err.str(), "");
+    EXPECT_EQ(axf_out.str(), bam_out.str());
 
     std::filesystem::remove_all(temp_dir);
 }

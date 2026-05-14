@@ -1,10 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <sstream>
 #include <string>
 
 #include "convert/bam_to_axf.hpp"
+#include "format/axf1_file.hpp"
 #include "format/axf_file.hpp"
+#include "query/axf1_view.hpp"
 
 namespace {
 
@@ -133,6 +136,118 @@ TEST(BamToAxf, RejectsMalformedRegionBeforeWritingAxf) {
     std::filesystem::remove(path);
 
     auto convert = alignx::convert::convert_bam_to_axf_mvp(toy_bam_path(), path, "chrToy");
+
+    ASSERT_FALSE(convert);
+    EXPECT_NE(convert.error().find("region must use ref:start-end"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+TEST(BamToAxf, ConvertsToyBamToAxf1Mvp) {
+    const auto path = std::filesystem::temp_directory_path() / "alignx_toy_convert.axf1";
+
+    auto convert = alignx::convert::convert_bam_to_axf1_mvp(toy_bam_path(), path);
+    ASSERT_TRUE(convert) << convert.error();
+
+    auto axf = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(axf) << axf.error();
+
+    ASSERT_EQ(axf->references.size(), 1);
+    EXPECT_EQ(axf->references[0].name, "chrToy");
+    EXPECT_EQ(axf->references[0].length, 1000);
+
+    ASSERT_EQ(axf->chunks.size(), 1);
+    EXPECT_EQ(axf->chunks[0].ref_id, 0);
+    EXPECT_EQ(axf->chunks[0].start_pos, 100);
+    EXPECT_EQ(axf->chunks[0].end_pos, 159);
+
+    ASSERT_EQ(axf->chunks[0].records.size(), 2);
+    EXPECT_EQ(axf->chunks[0].records[0].qname, "read001");
+    EXPECT_EQ(axf->chunks[0].records[0].flag, 0);
+    EXPECT_EQ(axf->chunks[0].records[0].pos, 100);
+    EXPECT_EQ(axf->chunks[0].records[0].mapq, 60);
+    EXPECT_EQ(axf->chunks[0].records[0].cigar, "10M");
+    EXPECT_EQ(axf->chunks[0].records[0].mate_reference, "*");
+    EXPECT_EQ(axf->chunks[0].records[0].mate_pos, 0);
+    EXPECT_EQ(axf->chunks[0].records[0].template_length, 0);
+    EXPECT_EQ(axf->chunks[0].records[0].sequence, "ACGTACGTAA");
+    EXPECT_EQ(axf->chunks[0].records[0].quality, "FFFFFFFFFF");
+    EXPECT_EQ(axf->chunks[0].records[0].tags, "NM:i:0");
+
+    EXPECT_EQ(axf->chunks[0].records[1].qname, "read002");
+    EXPECT_EQ(axf->chunks[0].records[1].flag, 16);
+    EXPECT_EQ(axf->chunks[0].records[1].pos, 150);
+    EXPECT_EQ(axf->chunks[0].records[1].mapq, 50);
+    EXPECT_EQ(axf->chunks[0].records[1].cigar, "5M1I4M");
+    EXPECT_EQ(axf->chunks[0].records[1].sequence, "TTTTACGGGA");
+    EXPECT_EQ(axf->chunks[0].records[1].quality, "FFFFFFFFFF");
+    EXPECT_EQ(axf->chunks[0].records[1].tags, "NM:i:1");
+
+    std::filesystem::remove(path);
+}
+
+TEST(BamToAxf, Axf1ViewMatchesToyBamViewOutput) {
+    const auto path = std::filesystem::temp_directory_path() / "alignx_toy_convert_view.axf1";
+
+    auto convert = alignx::convert::convert_bam_to_axf1_mvp(toy_bam_path(), path);
+    ASSERT_TRUE(convert) << convert.error();
+
+    std::ostringstream out;
+    auto view = alignx::query::write_axf1_region_sam(path, "chrToy:1-250", out);
+
+    EXPECT_TRUE(view) << view.error();
+    EXPECT_EQ(out.str(),
+              "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n"
+              "read002\t16\tchrToy\t151\t50\t5M1I4M\t*\t0\t0\tTTTTACGGGA\tFFFFFFFFFF\tNM:i:1\n");
+
+    std::filesystem::remove(path);
+}
+
+TEST(BamToAxf, ConvertsOnlyRequestedRegionToAxf1) {
+    const auto path = std::filesystem::temp_directory_path() / "alignx_toy_convert_region.axf1";
+
+    auto convert = alignx::convert::convert_bam_to_axf1_mvp(toy_bam_path(), path, "chrToy:151-160");
+    ASSERT_TRUE(convert) << convert.error();
+
+    auto axf = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(axf) << axf.error();
+    ASSERT_EQ(axf->references.size(), 1);
+    ASSERT_EQ(axf->chunks.size(), 1);
+    EXPECT_EQ(axf->chunks[0].start_pos, 150);
+    EXPECT_EQ(axf->chunks[0].end_pos, 159);
+    ASSERT_EQ(axf->chunks[0].records.size(), 1);
+    EXPECT_EQ(axf->chunks[0].records[0].qname, "read002");
+
+    std::ostringstream out;
+    auto view = alignx::query::write_axf1_region_sam(path, "chrToy:1-250", out);
+    ASSERT_TRUE(view) << view.error();
+    EXPECT_EQ(out.str(),
+              "read002\t16\tchrToy\t151\t50\t5M1I4M\t*\t0\t0\tTTTTACGGGA\tFFFFFFFFFF\tNM:i:1\n");
+
+    std::filesystem::remove(path);
+}
+
+TEST(BamToAxf, ConvertsEmptyRegionToAxf1WithReferencesAndNoChunks) {
+    const auto path =
+        std::filesystem::temp_directory_path() / "alignx_toy_convert_empty_region.axf1";
+
+    auto convert = alignx::convert::convert_bam_to_axf1_mvp(toy_bam_path(), path, "chrToy:251-260");
+    ASSERT_TRUE(convert) << convert.error();
+
+    auto axf = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(axf) << axf.error();
+
+    ASSERT_EQ(axf->references.size(), 1);
+    EXPECT_EQ(axf->references[0].name, "chrToy");
+    EXPECT_TRUE(axf->chunks.empty());
+
+    std::filesystem::remove(path);
+}
+
+TEST(BamToAxf, RejectsMalformedRegionBeforeWritingAxf1) {
+    const auto path = std::filesystem::temp_directory_path() / "alignx_toy_convert_bad_region.axf1";
+    std::filesystem::remove(path);
+
+    auto convert = alignx::convert::convert_bam_to_axf1_mvp(toy_bam_path(), path, "chrToy");
 
     ASSERT_FALSE(convert);
     EXPECT_NE(convert.error().find("region must use ref:start-end"), std::string::npos);

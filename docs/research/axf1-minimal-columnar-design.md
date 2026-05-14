@@ -160,6 +160,11 @@ AXF1 should inherit the AXF0 query behavior:
 
 ## First Implementation Slice
 
+Status as of 2026-05-14: this slice is implemented through opt-in CLI routing.
+`alignx convert` still defaults to AXF0, while `alignx convert --format AXF1`
+writes `.axf1` raw-column MVP files and `alignx view <input.axf1> <region>`
+routes to the AXF1 view helper.
+
 1. Add AXF1 data structs and format read/write tests in files that do not
    disturb AXF0.
 2. Add writer/reader round-trip tests using synthetic toy records.
@@ -177,11 +182,10 @@ Suggested implementation boundary:
 - new query code: `src/query/axf1_view.hpp/.cpp`, because AXF1 decodes columns
   while AXF0 parses row-preserving SAM payloads;
 - new query tests: `tests/unit/test_axf1_view.cpp`;
-- optional converter entry point: `convert::convert_bam_to_axf1_mvp()` only
-  after format/query tests pass;
-- CLI routing should be a later slice. The current CLI dispatch treats `.axf`
-  as AXF0 and `convert` always reports `format AXF0`, so AXF1 should first stay
-  behind tests or an explicit option before magic-based routing is introduced.
+- converter entry point: `convert::convert_bam_to_axf1_mvp()` is available for
+  toy BAM -> AXF1 correctness work;
+- CLI routing is opt-in: `.axf` remains AXF0, `.axf1` routes to AXF1 view, and
+  conversion requires `--format AXF1`.
 
 ## Current Codebase Entry Points
 
@@ -191,13 +195,10 @@ Suggested implementation boundary:
 - `src/query/axf_view.hpp/.cpp` owns AXF0 region query and SAM payload filtering.
   AXF1 should use a separate view helper because it filters from row-aligned
   columns instead of parsing SAM payload text.
-- `src/convert/bam_to_axf.hpp/.cpp` currently emits AXF0 only. AXF1 conversion
-  should use a separate function or option so existing `alignx convert` behavior
-  stays stable.
-- `src/cli/cli.cpp` currently detects AXF by `.axf` extension and dispatches all
-  such files to the AXF0 view path. Magic-based AXF0/AXF1 routing is a separate
-  compatibility change and should not be part of the first AXF1 format
-  round-trip patch.
+- `src/convert/bam_to_axf.hpp/.cpp` emits AXF0 by default and AXF1 through the
+  separate `convert_bam_to_axf1_mvp()` function.
+- `src/cli/cli.cpp` detects `.axf` as AXF0 and `.axf1` as AXF1. Magic-based
+  AXF0/AXF1 routing remains a separate compatibility change.
 - `CMakeLists.txt` already globs `src/format/*.cpp`, `src/query/*.cpp`,
   `src/convert/*.cpp`, and `tests/unit/*.cpp`, so the proposed AXF1 source and
   test files are automatically added to `alignx_lib` and `unit_tests`.

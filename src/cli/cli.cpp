@@ -21,6 +21,7 @@
 #include "index/bam_index_projection.hpp"
 #include "index/csi_reader.hpp"
 #include "io/bam_reader.hpp"
+#include "query/axf1_view.hpp"
 #include "query/axf_view.hpp"
 
 namespace alignx::cli {
@@ -80,9 +81,23 @@ bool is_axf_path(const std::filesystem::path& path) {
     return lower_extension(path) == ".axf";
 }
 
+bool is_axf1_path(const std::filesystem::path& path) {
+    return lower_extension(path) == ".axf1";
+}
+
 int run_axf_view(const std::filesystem::path& input, const std::string& region, std::ostream& out,
                  std::ostream& err) {
     auto result = query::write_axf_region_sam(input, region, out);
+    if (!result) {
+        err << "alignx view: " << result.error() << '\n';
+        return 1;
+    }
+    return 0;
+}
+
+int run_axf1_view(const std::filesystem::path& input, const std::string& region, std::ostream& out,
+                  std::ostream& err) {
+    auto result = query::write_axf1_region_sam(input, region, out);
     if (!result) {
         err << "alignx view: " << result.error() << '\n';
         return 1;
@@ -94,6 +109,9 @@ int run_view(const std::filesystem::path& input, const std::string& region,
              std::optional<int> hts_threads, std::ostream& out, std::ostream& err) {
     if (is_axf_path(input)) {
         return run_axf_view(input, region, out, err);
+    }
+    if (is_axf1_path(input)) {
+        return run_axf1_view(input, region, out, err);
     }
 
     const bool profile_enabled = view_profile_enabled();
@@ -197,8 +215,19 @@ int run_stats(const std::filesystem::path& input, std::ostream& out, std::ostrea
 }
 
 int run_convert(const std::filesystem::path& input, const std::filesystem::path& output,
-                const std::optional<std::string>& region, std::ostream& out, std::ostream& err) {
-    auto conversion = convert::convert_bam_to_axf_mvp(input, output, region);
+                const std::optional<std::string>& region, std::string_view format,
+                std::ostream& out, std::ostream& err) {
+    std::string normalized_format(format);
+    std::transform(normalized_format.begin(), normalized_format.end(), normalized_format.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+    if (normalized_format != "AXF0" && normalized_format != "AXF1") {
+        err << "alignx convert: --format must be AXF0 or AXF1\n";
+        return 1;
+    }
+
+    auto conversion = normalized_format == "AXF1"
+                          ? convert::convert_bam_to_axf1_mvp(input, output, region)
+                          : convert::convert_bam_to_axf_mvp(input, output, region);
     if (!conversion) {
         err << "alignx convert: " << conversion.error() << '\n';
         return 1;
@@ -209,7 +238,7 @@ int run_convert(const std::filesystem::path& input, const std::filesystem::path&
     if (region.has_value()) {
         out << "region\t" << *region << '\n';
     }
-    out << "format\tAXF0\n";
+    out << "format\t" << normalized_format << '\n';
     return 0;
 }
 
@@ -348,6 +377,7 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     std::filesystem::path convert_input;
     std::filesystem::path convert_output;
     std::optional<std::string> convert_region;
+    std::string convert_format = "AXF0";
     auto* convert_cmd = app.add_subcommand("convert", "Convert BAM to AXF MVP format");
     convert_cmd->add_option("input", convert_input, "Input BAM file")
         ->required()
@@ -355,6 +385,7 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     convert_cmd->add_option("-o,--output", convert_output, "Output AXF file")->required();
     convert_cmd->add_option("--region", convert_region,
                             "Optional BAM region to convert, for example chr1:1-1000");
+    convert_cmd->add_option("--format", convert_format, "Output AXF format: AXF0 or AXF1");
 
     std::filesystem::path index_input;
     std::filesystem::path index_output;
@@ -383,7 +414,7 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
         return run_stats(stats_input, out, err);
     }
     if (*convert_cmd) {
-        return run_convert(convert_input, convert_output, convert_region, out, err);
+        return run_convert(convert_input, convert_output, convert_region, convert_format, out, err);
     }
     if (*index_cmd) {
         return run_index(index_input, index_output, out, err);
