@@ -139,7 +139,7 @@ The minimum practical column set is:
 | `PNEXT` | raw `i32`/`u32` array | Preserve SAM semantics. |
 | `TLEN` | raw `i32` array | Preserve SAM semantics. |
 | `SEQ` | 2-bit literal for uppercase A/C/G/T; raw string fallback | Reference-delta requires separate metadata and semantics design. |
-| `QUAL` | length-prefixed strings | Planned next step is lossless byte RLE with raw fallback. |
+| `QUAL` | byte RLE with raw fallback | Lossless, exact SAM `QUAL` reconstruction. |
 | `TAGS` | length-prefixed trailing SAM text | Per-tag streams later. |
 
 All record-aligned columns must have exactly `record_count` values. The reader
@@ -210,10 +210,9 @@ sequences when it is smaller than raw strings. It falls back to raw
 length-prefixed strings for ambiguity codes, lowercase bases, `*`, empty values,
 or non-beneficial payloads. Reference-delta is deferred until reference identity
 metadata and exact CIGAR/strand reconstruction semantics are designed.
-The QUAL column remains raw length-prefixed strings for now. The recommended
-next QUAL codec is lossless chunk-local byte RLE with raw fallback. Lossy
-quality-score binning remains out of scope unless a future explicit lossy
-profile is designed.
+The QUAL column uses a lossless chunk-local byte RLE codec with raw fallback for
+`*`, empty, and non-beneficial quality strings. Lossy quality-score binning
+remains out of scope unless a future explicit lossy profile is designed.
 This is a correctness scaffold, not a benchmark claim.
 
 The AXF1 converter now emits deterministic chunks using the first
@@ -469,6 +468,14 @@ computed metadata-only with `scripts/summarize_axf1_columns.py` on 2026-05-15:
 Interpretation: after POS/FLAG/MAPQ/CIGAR/SEQ codecs, raw `quality` dominates
 the remaining AXF1 payload for this HG002 small region. The next codec design
 target should be QUAL before QNAME or TAGS.
+
+The first QUAL codec is now implemented as `qual_rle`, a lossless chunk-local
+byte RLE stream with raw fallback for `*`, empty, and non-beneficial quality
+strings. A toy correctness smoke on 2026-05-15 used
+`/tmp/alignx_axf1_qual_codec_smoke`, confirmed byte-identical SAM stdout
+(`e62402c0450decf357ef797750af1dfb0be065eeeb3b87f157953a7f7ae1feb9`) for 2
+records, and reported `qual_rle` for the `quality` column. This remains a
+correctness smoke, not a benchmark or HG002 compression claim.
 
 ## Region-Converted AXF1 Subset Semantics
 

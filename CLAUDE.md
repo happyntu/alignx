@@ -66,6 +66,8 @@ Completed:
 - AXF1 expected-codec remote HG002 chr1 small-region correctness smoke asserts POS/FLAG/MAPQ/CIGAR/SEQ codec distribution
 - AXF1 column payload summary tool; HG002 small-region summary shows raw QUAL dominates remaining payload
 - AXF1 QUAL codec design note: prefer lossless chunk-local byte RLE with raw fallback before context models, zstd wrappers, or lossy binning
+- AXF1 QUAL byte RLE codec with raw fallback for `*`, empty, and non-beneficial quality strings
+- AXF1 QUAL byte RLE toy smoke verified byte-identical SAM stdout and `qual_rle` codec distribution
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV

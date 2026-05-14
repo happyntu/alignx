@@ -1,6 +1,6 @@
 # AXF1 QUAL Codec Design
 
-Status: design note, 2026-05-15. No format change is implemented by this note.
+Status: implemented, 2026-05-15. `qual_rle` is codec id 6.
 
 ## Motivation
 
@@ -43,10 +43,11 @@ This makes QUAL the next codec target before QNAME or TAGS.
 
 ## Current State
 
-AXF1 currently stores `QUAL` as raw length-prefixed strings. The converter
-copies SAM field 10 into `Axf1Record::quality`, and `alignx view` writes that
-stored value directly back to SAM output. This means the first QUAL codec must
-preserve the exact string, including `*` if it appears.
+AXF1 stores `QUAL` with `qual_rle` when byte RLE is smaller than raw strings,
+and otherwise falls back to raw length-prefixed strings. The converter copies
+SAM field 10 into `Axf1Record::quality`, and `alignx view` writes the decoded
+value directly back to SAM output. The codec preserves the exact string,
+including `*` when raw fallback is used.
 
 Unlike POS, MAPQ, or CIGAR, QUAL is often the largest column and may have weak
 local repetition. A simple codec may not help every dataset, so broad raw
@@ -57,7 +58,7 @@ fallback is required.
 | Candidate | Strength | Risk / Cost | Phase 1 decision |
 |---|---|---|---|
 | Raw strings | Simple and exact | Very large payload | Current fallback |
-| Byte RLE | Simple, self-contained, fast | Helps only repeated quality bytes | Good first codec |
+| Byte RLE | Simple, self-contained, fast | Helps only repeated quality bytes | Implemented |
 | Delta + zigzag varint | Captures smooth changes | Can expand noisy qualities | Defer until RLE evidence is known |
 | Per-record fixed-width pack | Works if alphabet is small | Needs per-chunk alphabet or bit width metadata | Possible later |
 | Per-cycle/read-group context model | Better ratio | Much more complex and dataset-specific | v1.0+ |
@@ -65,10 +66,9 @@ fallback is required.
 | zstd payload wrapper | Broad compression | Needs generic compressed column wrapper and dependency policy | Later design |
 | Lossy binning | Large size reduction | Not lossless; changes output | Not default; future opt-in only |
 
-## First Implementation Candidate: `qual_rle`
+## First Implementation: `qual_rle`
 
-The recommended first QUAL codec is a chunk-local byte RLE stream with raw
-fallback.
+The first QUAL codec is a chunk-local byte RLE stream with raw fallback.
 
 Payload shape:
 
@@ -134,7 +134,7 @@ datasets with long repeated quality runs.
 
 ## Recommendation
 
-Implement `qual_rle` as the first QUAL codec with broad raw fallback. Defer
-lossy binning, context modeling, FQZComp-like compression, and zstd-wrapped
-column payloads until the format has explicit profile and metadata support for
-those choices.
+Keep `qual_rle` as the first QUAL codec with broad raw fallback. Defer lossy
+binning, context modeling, FQZComp-like compression, and zstd-wrapped column
+payloads until the format has explicit profile and metadata support for those
+choices.

@@ -79,9 +79,10 @@ and region-query correctness.
 - [x] AXF1 CIGAR token stream toy smoke
 - [x] AXF1 CIGAR token stream smoke on HG002 chr1 small region
 - [x] AXF1 QUAL codec design note
+- [x] AXF1 QUAL byte RLE codec with raw fallback
+- [x] AXF1 QUAL byte RLE toy smoke
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
-- [ ] Codec: QUAL byte RLE with raw fallback
 - [ ] Codec design: SEQ reference-delta with reference identity metadata
 - [x] Production AXF1 chunk sizing policy design: byte budget, genomic span, record count hybrid
 - [x] Implement production AXF1 hybrid chunk sizing in converter

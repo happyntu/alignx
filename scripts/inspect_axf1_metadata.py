@@ -39,6 +39,7 @@ CODEC_NAMES = {
     3: "mapq_rle",
     4: "seq_2bit_literal",
     5: "cigar_token",
+    6: "qual_rle",
 }
 
 

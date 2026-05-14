@@ -790,11 +790,50 @@ EncodedColumn encode_sequence_column(const std::vector<Axf1Record>& records) {
     return {.column_id = Axf1ColumnId::sequence, .codec_id = Axf1CodecId::raw, .payload = raw};
 }
 
+std::expected<std::vector<unsigned char>, std::string>
+encode_qual_rle_payload(const std::vector<Axf1Record>& records) {
+    std::vector<unsigned char> bytes;
+    for (const Axf1Record& record : records) {
+        if (record.quality.empty() || record.quality == "*") {
+            return std::unexpected("AXF1 QUAL RLE requires concrete quality");
+        }
+
+        append_varint_u64(bytes, record.quality.size());
+        char current = record.quality.front();
+        std::uint64_t run_length = 1;
+        for (std::size_t index = 1; index < record.quality.size(); ++index) {
+            if (record.quality.at(index) == current) {
+                ++run_length;
+                continue;
+            }
+            append_varint_u64(bytes, run_length);
+            append_u8(bytes, static_cast<std::uint8_t>(current));
+            current = record.quality.at(index);
+            run_length = 1;
+        }
+        append_varint_u64(bytes, run_length);
+        append_u8(bytes, static_cast<std::uint8_t>(current));
+    }
+    return bytes;
+}
+
+EncodedColumn encode_quality_column(const std::vector<Axf1Record>& records) {
+    const auto raw = encode_strings(records, &Axf1Record::quality);
+    auto encoded = encode_qual_rle_payload(records);
+    if (encoded && encoded->size() < raw.size()) {
+        return {.column_id = Axf1ColumnId::quality,
+                .codec_id = Axf1CodecId::qual_rle,
+                .payload = std::move(*encoded)};
+    }
+    return {.column_id = Axf1ColumnId::quality, .codec_id = Axf1CodecId::raw, .payload = raw};
+}
+
 std::vector<EncodedColumn> encode_columns(const Axf1Chunk& chunk) {
     auto flag_column = encode_flag_column(chunk.records);
     auto mapq_column = encode_mapq_column(chunk.records);
     auto cigar_column = encode_cigar_column(chunk.records);
     auto sequence_column = encode_sequence_column(chunk.records);
+    auto quality_column = encode_quality_column(chunk.records);
     return {{.column_id = Axf1ColumnId::qname,
              .codec_id = Axf1CodecId::raw,
              .payload = encode_strings(chunk.records, &Axf1Record::qname)},
@@ -812,9 +851,7 @@ std::vector<EncodedColumn> encode_columns(const Axf1Chunk& chunk) {
              .codec_id = Axf1CodecId::raw,
              .payload = encode_i32(chunk.records, &Axf1Record::template_length)},
             std::move(sequence_column),
-            {.column_id = Axf1ColumnId::quality,
-             .codec_id = Axf1CodecId::raw,
-             .payload = encode_strings(chunk.records, &Axf1Record::quality)},
+            std::move(quality_column),
             {.column_id = Axf1ColumnId::tags,
              .codec_id = Axf1CodecId::raw,
              .payload = encode_strings(chunk.records, &Axf1Record::tags)}};
@@ -1150,6 +1187,51 @@ decode_seq_2bit_literal_column(const std::vector<unsigned char>& bytes,
     return values;
 }
 
+std::expected<std::vector<std::string>, std::string>
+decode_qual_rle_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
+    Reader reader(bytes);
+    std::vector<std::string> values;
+    values.reserve(record_count);
+
+    for (std::uint32_t record_index = 0; record_index < record_count; ++record_index) {
+        auto length = read_varint_u64(reader, "truncated AXF1 QUAL RLE length",
+                                      "AXF1 QUAL RLE length overflow");
+        if (!length) {
+            return std::unexpected(length.error());
+        }
+        if (*length > static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())) {
+            return std::unexpected("AXF1 QUAL RLE length is too large");
+        }
+
+        std::string quality;
+        quality.reserve(static_cast<std::size_t>(*length));
+        while (quality.size() < *length) {
+            auto run_length = read_varint_u64(reader, "truncated AXF1 QUAL RLE run length",
+                                              "AXF1 QUAL RLE run length overflow");
+            if (!run_length) {
+                return std::unexpected(run_length.error());
+            }
+            if (*run_length == 0) {
+                return std::unexpected("AXF1 QUAL RLE run length is zero");
+            }
+            if (*run_length > *length - quality.size()) {
+                return std::unexpected("AXF1 QUAL RLE decoded length mismatch");
+            }
+            auto value = reader.read_u8();
+            if (!value) {
+                return std::unexpected("truncated AXF1 QUAL RLE value");
+            }
+            quality.append(static_cast<std::size_t>(*run_length), static_cast<char>(*value));
+        }
+        values.push_back(std::move(quality));
+    }
+
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 QUAL RLE column has trailing bytes");
+    }
+    return values;
+}
+
 bool is_known_column(Axf1ColumnId column_id) {
     return std::find(kRequiredColumns.begin(), kRequiredColumns.end(), column_id) !=
            kRequiredColumns.end();
@@ -1163,7 +1245,8 @@ bool is_supported_column_codec(Axf1ColumnId column_id, Axf1CodecId codec_id) {
            (column_id == Axf1ColumnId::flag && codec_id == Axf1CodecId::flag_bitpack) ||
            (column_id == Axf1ColumnId::mapq && codec_id == Axf1CodecId::mapq_rle) ||
            (column_id == Axf1ColumnId::cigar && codec_id == Axf1CodecId::cigar_token) ||
-           (column_id == Axf1ColumnId::sequence && codec_id == Axf1CodecId::seq_2bit_literal);
+           (column_id == Axf1ColumnId::sequence && codec_id == Axf1CodecId::seq_2bit_literal) ||
+           (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_rle);
 }
 
 bool contains_column(const std::vector<Axf1ColumnId>& columns, Axf1ColumnId column_id) {
@@ -1341,21 +1424,14 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
             break;
         }
         case Axf1ColumnId::mate_reference:
-        case Axf1ColumnId::quality:
         case Axf1ColumnId::tags: {
             auto values = decode_string_column(*payload, *record_count);
             if (!values) {
                 return std::unexpected(values.error());
             }
             for (std::uint32_t index = 0; index < *record_count; ++index) {
-                if (entry.column_id == Axf1ColumnId::cigar) {
-                    chunk.records[index].cigar = std::move(values->at(index));
-                } else if (entry.column_id == Axf1ColumnId::mate_reference) {
+                if (entry.column_id == Axf1ColumnId::mate_reference) {
                     chunk.records[index].mate_reference = std::move(values->at(index));
-                } else if (entry.column_id == Axf1ColumnId::sequence) {
-                    chunk.records[index].sequence = std::move(values->at(index));
-                } else if (entry.column_id == Axf1ColumnId::quality) {
-                    chunk.records[index].quality = std::move(values->at(index));
                 } else {
                     chunk.records[index].tags = std::move(values->at(index));
                 }
@@ -1383,6 +1459,18 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
             }
             for (std::uint32_t index = 0; index < *record_count; ++index) {
                 chunk.records[index].sequence = std::move(values->at(index));
+            }
+            break;
+        }
+        case Axf1ColumnId::quality: {
+            auto values = entry.codec_id == Axf1CodecId::qual_rle
+                              ? decode_qual_rle_column(*payload, *record_count)
+                              : decode_string_column(*payload, *record_count);
+            if (!values) {
+                return std::unexpected(values.error());
+            }
+            for (std::uint32_t index = 0; index < *record_count; ++index) {
+                chunk.records[index].quality = std::move(values->at(index));
             }
             break;
         }
