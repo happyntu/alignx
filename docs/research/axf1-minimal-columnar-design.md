@@ -205,15 +205,18 @@ Current correctness coverage:
 - atomic stdout behavior for malformed overlapping chunks;
 - magic-based AXF0/AXF1 CLI view routing.
 
-1. Add AXF1 data structs and format read/write tests in files that do not
-   disturb AXF0.
-2. Add writer/reader round-trip tests using synthetic toy records.
-3. Add an internal AXF1 query/view helper and tests for no-hit, missing
-   reference, malformed payload, and newline-stable output.
-4. Add `toy BAM -> AXF1 -> view` stdout parity against the existing BAM view
-   expectation after the format and query helpers are stable.
-5. Add CLI routing only after the internal AXF1 view path is covered.
-6. Keep AXF0 tests running unchanged.
+Completed implementation checklist:
+
+- AXF1 data structs and format read/write tests were added without mutating
+  AXF0.
+- Writer/reader round-trip tests cover synthetic toy records.
+- Internal AXF1 query/view tests cover no-hit, missing reference, malformed
+  payload, newline-stable output, and atomic stdout behavior.
+- Toy BAM -> AXF1 -> view stdout parity matches the existing BAM view
+  expectation for mapped toy records.
+- CLI view routing detects AXF0/AXF1 by magic after the internal AXF1 helper is
+  covered.
+- AXF0 tests continue to run unchanged alongside AXF1 tests.
 
 Suggested implementation boundary:
 

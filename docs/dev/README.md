@@ -121,3 +121,28 @@ For real BAMs, choose a work directory with enough space because the script
 writes an AXF file plus BAM/AXF SAM outputs for the requested region. For large
 datasets, prefer running the smoke on `missmi-server00` under `/mypool/alignx/`
 rather than growing the local WSL VHDX.
+
+## AXF0 and AXF1 development status
+
+AXF0 is the row-preserving MVP path. It stores SAM-line payloads in indexed AXF
+blocks so conversion, view routing, region filtering, and stdout parity can be
+validated before the columnar codec stack is complete.
+
+AXF1 is the raw-column correctness scaffold. It writes independently encoded
+raw columns, supports metadata-first lazy region view, and selectively decodes
+`POS` plus `CIGAR` before full output columns. The current converter is
+mapped-record only: unmapped records and invalid reference spans are skipped
+until unmapped AXF1 semantics are designed.
+
+`alignx view` detects AXF0 vs AXF1 by file magic before using extension-based
+assumptions. `.axf1` remains useful in tests and temporary files as a readability
+cue, but the view path is not dependent on that extension.
+
+AXF1 chunks currently use a deliberately tiny MVP max-record split to force
+multi-chunk correctness coverage on toy fixtures. Do not treat that threshold as
+a performance policy. Production chunk sizing still needs a byte budget,
+genomic span, record count, or hybrid policy.
+
+Before running benchmarks, repeated timing, profiling, or real-data performance
+work, notify the user and wait for confirmation. Lightweight builds, unit tests,
+and toy correctness smokes are allowed without benchmark confirmation.
