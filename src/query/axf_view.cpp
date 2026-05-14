@@ -128,10 +128,10 @@ std::expected<bool, std::string> sam_line_overlaps_region(std::string_view line,
     return start < region.end && region.start < end;
 }
 
-std::expected<std::uint32_t, std::string> find_reference_id(const format::AxfFile& axf,
-                                                            std::string_view reference) {
-    for (std::size_t index = 0; index < axf.references.size(); ++index) {
-        if (axf.references[index].name == reference) {
+std::expected<std::uint32_t, std::string>
+find_reference_id(const std::vector<format::AxfReference>& references, std::string_view reference) {
+    for (std::size_t index = 0; index < references.size(); ++index) {
+        if (references[index].name == reference) {
             return static_cast<std::uint32_t>(index);
         }
     }
@@ -148,12 +148,12 @@ std::expected<void, std::string> write_axf_region_sam(const std::filesystem::pat
         return std::unexpected(parsed_region.error());
     }
 
-    auto axf = format::read_axf_file(input);
+    auto axf = format::read_axf_index_metadata(input);
     if (!axf) {
         return std::unexpected(axf.error());
     }
 
-    auto ref_id = find_reference_id(*axf, parsed_region->reference);
+    auto ref_id = find_reference_id(axf->references, parsed_region->reference);
     if (!ref_id) {
         return std::unexpected(ref_id.error());
     }
@@ -164,9 +164,13 @@ std::expected<void, std::string> write_axf_region_sam(const std::filesystem::pat
     }
 
     std::string output;
-    for (const format::AxfBlock* block : *blocks) {
-        std::string_view payload(reinterpret_cast<const char*>(block->payload.data()),
-                                 block->payload.size());
+    for (const format::AxfBlockIndexEntry* block : *blocks) {
+        auto block_payload = format::read_axf_block_payload(input, *block);
+        if (!block_payload) {
+            return std::unexpected(block_payload.error());
+        }
+        std::string_view payload(reinterpret_cast<const char*>(block_payload->data()),
+                                 block_payload->size());
         while (!payload.empty()) {
             const std::size_t newline = payload.find('\n');
             const std::string_view line =

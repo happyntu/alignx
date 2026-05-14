@@ -74,9 +74,14 @@ Step 1 is implemented:
 - Metadata validation checks magic/version, index offset, block reference ids,
   block intervals, and payload byte ranges.
 
-The CLI still uses the original full-file `read_axf_file()` path. The next code
-step is to add seekable payload reads for only the block ranges returned by
-`AxfFileIndex::query_blocks()`.
+Step 2 is implemented:
+
+- `format::read_axf_block_payload(path, block)` reads a single block payload by
+  offset/length from the AXF file.
+- `alignx view` for AXF input now reads index metadata first, queries overlapping
+  block entries, and only reads payloads for those hits.
+- Output filtering still validates each SAM line against the requested region, so
+  stdout remains compatible with the prior full-file reader path.
 
 ## Later Columnar Path
 

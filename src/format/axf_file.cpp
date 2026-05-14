@@ -596,4 +596,42 @@ read_axf_index_metadata(const std::filesystem::path& path) {
     return index;
 }
 
+std::expected<std::vector<unsigned char>, std::string>
+read_axf_block_payload(const std::filesystem::path& path, const AxfBlockIndexEntry& block) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        return std::unexpected("failed to open AXF file: " + path.string());
+    }
+
+    input.seekg(0, std::ios::end);
+    const std::streamoff size = input.tellg();
+    if (size < 0) {
+        return std::unexpected("failed to determine AXF file size: " + path.string());
+    }
+    const auto file_size = static_cast<std::uint64_t>(size);
+    if (block.payload_offset > file_size ||
+        block.payload_length > file_size - block.payload_offset) {
+        return std::unexpected("AXF block payload points outside file");
+    }
+    if (block.payload_length >
+        static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+        return std::unexpected("AXF block payload is too large");
+    }
+
+    input.seekg(static_cast<std::streamoff>(block.payload_offset), std::ios::beg);
+    if (!input) {
+        return std::unexpected("failed to seek AXF file");
+    }
+
+    std::vector<unsigned char> payload(static_cast<std::size_t>(block.payload_length));
+    if (!payload.empty()) {
+        input.read(reinterpret_cast<char*>(payload.data()),
+                   static_cast<std::streamsize>(payload.size()));
+        if (!input) {
+            return std::unexpected("failed to read AXF file");
+        }
+    }
+    return payload;
+}
+
 } // namespace alignx::format

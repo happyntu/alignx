@@ -58,4 +58,7 @@ struct AxfFileIndex {
 [[nodiscard]] std::expected<AxfFileIndex, std::string>
 read_axf_index_metadata(const std::filesystem::path& path);
 
+[[nodiscard]] std::expected<std::vector<unsigned char>, std::string>
+read_axf_block_payload(const std::filesystem::path& path, const AxfBlockIndexEntry& block);
+
 } // namespace alignx::format

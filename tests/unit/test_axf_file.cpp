@@ -160,6 +160,38 @@ TEST(AxfFile, ReadsIndexMetadataWithoutPayloadObjects) {
     std::filesystem::remove(path);
 }
 
+TEST(AxfFile, ReadsBlockPayloadFromIndexEntry) {
+    const auto path = temp_path("alignx_metadata_payload_read.axf");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto metadata = alignx::format::read_axf_index_metadata(path);
+    ASSERT_TRUE(metadata) << metadata.error();
+    ASSERT_EQ(metadata->blocks.size(), 1);
+
+    auto payload = alignx::format::read_axf_block_payload(path, metadata->blocks[0]);
+    ASSERT_TRUE(payload) << payload.error();
+    EXPECT_EQ(*payload, file.blocks[0].payload);
+
+    std::filesystem::remove(path);
+}
+
+TEST(AxfFile, PayloadReaderRejectsRangeOutsideFile) {
+    const auto path = temp_path("alignx_metadata_payload_read_bad_range.axf");
+    auto write = alignx::format::write_axf_file(make_file(), path);
+    ASSERT_TRUE(write) << write.error();
+
+    alignx::format::AxfBlockIndexEntry block{.payload_offset = 1'000'000, .payload_length = 1};
+    auto payload = alignx::format::read_axf_block_payload(path, block);
+
+    ASSERT_FALSE(payload);
+    EXPECT_NE(payload.error().find("payload points outside file"), std::string::npos);
+
+    std::filesystem::remove(path);
+}
+
 TEST(AxfFile, MetadataRejectsInvalidBlockReference) {
     const auto path = temp_path("alignx_metadata_bad_ref.axf");
     auto write = alignx::format::write_axf_file(make_file(), path);
