@@ -175,6 +175,11 @@ distribution on all 7 chunks.
 For the HG002 chr1 small-region codec smoke, the current expected codecs are
 `pos_delta_varint`, `flag_bitpack`, `mapq_rle`, `cigar_token`, and
 `seq_2bit_literal`.
+Remote HG002 expected-codec smoke on 2026-05-15 used
+`/mypool/alignx/tmp/axf1_expect_codec_smoke_hg002_chr1_1000000_1010000_20260515`
+and asserted all five expected codecs with byte-identical SAM stdout
+(`6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`)
+for 64 records. The AXF1 output was 1,172,296 bytes.
 
 ## AXF0 and AXF1 development status
 
