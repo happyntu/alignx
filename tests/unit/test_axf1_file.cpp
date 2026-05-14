@@ -13,6 +13,13 @@ namespace {
 
 constexpr std::size_t kIndexOffsetFieldOffset = 20;
 constexpr std::size_t kVersionFieldOffset = 4;
+constexpr std::size_t kHeaderSize = 28;
+constexpr std::size_t kReferenceBytes = 12;
+constexpr std::size_t kMetadataOffset = kHeaderSize + kReferenceBytes;
+constexpr std::size_t kMetadataSubsetFlagOffset = kMetadataOffset;
+constexpr std::size_t kMetadataSourcePathLengthOffset = kMetadataOffset + 1;
+constexpr std::size_t kMetadataConversionRegionLengthOffset =
+    kMetadataSourcePathLengthOffset + sizeof(std::uint32_t);
 constexpr std::size_t kIndexRecordCountOffset = 12;
 constexpr std::size_t kIndexChunkOffsetOffset = 16;
 constexpr std::size_t kChunkStartPosOffset = 4;
@@ -113,6 +120,29 @@ std::uint64_t read_first_chunk_offset(const std::vector<unsigned char>& data) {
 std::size_t column_entry_offset(const std::vector<unsigned char>& data, std::size_t column_index) {
     return static_cast<std::size_t>(read_first_chunk_offset(data)) + kChunkHeaderSize +
            column_index * kColumnEntrySize;
+}
+
+template <typename Mutator>
+void expect_v2_metadata_corruption_rejected(std::string_view label, Mutator mutate,
+                                            std::string_view expected_error) {
+    const auto path = temp_path(label);
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    mutate(data);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find(expected_error), std::string::npos) << read.error();
+
+    auto metadata = alignx::format::read_axf1_index_metadata(path);
+    ASSERT_FALSE(metadata);
+    EXPECT_NE(metadata.error().find(expected_error), std::string::npos) << metadata.error();
+
+    std::filesystem::remove(path);
 }
 
 } // namespace
@@ -225,9 +255,6 @@ TEST(Axf1File, ReadsLegacyV1WithoutMetadata) {
 
     auto data = read_bytes(path);
     constexpr std::size_t kDefaultV2MetadataSize = 9;
-    constexpr std::size_t kHeaderSize = 28;
-    constexpr std::size_t kReferenceBytes = 12;
-    constexpr std::size_t kMetadataOffset = kHeaderSize + kReferenceBytes;
     const std::uint64_t old_index_offset = read_index_offset(data);
     const std::uint64_t old_chunk_offset = read_first_chunk_offset(data);
 
@@ -257,6 +284,40 @@ TEST(Axf1File, ReadsLegacyV1WithoutMetadata) {
     EXPECT_EQ(metadata->metadata.conversion_region, "");
 
     std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsInvalidMetadataSubsetFlag) {
+    expect_v2_metadata_corruption_rejected(
+        "alignx_axf1_bad_metadata_subset_flag",
+        [](std::vector<unsigned char>& data) { data.at(kMetadataSubsetFlagOffset) = 2; },
+        "invalid AXF1 subset metadata flag");
+}
+
+TEST(Axf1File, RejectsTruncatedMetadataSourcePath) {
+    expect_v2_metadata_corruption_rejected(
+        "alignx_axf1_bad_metadata_source_path",
+        [](std::vector<unsigned char>& data) {
+            write_u32_at(data, kMetadataSourcePathLengthOffset, 1'000'000);
+        },
+        "truncated AXF1 metadata");
+}
+
+TEST(Axf1File, RejectsTruncatedMetadataConversionRegion) {
+    expect_v2_metadata_corruption_rejected(
+        "alignx_axf1_bad_metadata_conversion_region",
+        [](std::vector<unsigned char>& data) {
+            write_u32_at(data, kMetadataConversionRegionLengthOffset, 1'000'000);
+        },
+        "truncated AXF1 metadata");
+}
+
+TEST(Axf1File, RejectsMetadataOverlappingIndex) {
+    expect_v2_metadata_corruption_rejected(
+        "alignx_axf1_metadata_overlaps_index",
+        [](std::vector<unsigned char>& data) {
+            write_u64_at(data, kIndexOffsetFieldOffset, kMetadataOffset + 1);
+        },
+        "AXF1 metadata overlaps index");
 }
 
 TEST(Axf1FileReader, OpensAndReadsQueryChunk) {

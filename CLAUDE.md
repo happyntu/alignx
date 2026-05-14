@@ -44,6 +44,7 @@ Completed:
 - AXF1 region-converted subset boundary smoke on HG002 chr1 small region
 - AXF1 v2 file metadata records source path, conversion region, and subset flag
 - AXF1 v2 metadata remote HG002 chr1 small-region correctness smoke
+- AXF1 v2 metadata corruption tests cover full-file reader, metadata-only reader, and Python inspector
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV

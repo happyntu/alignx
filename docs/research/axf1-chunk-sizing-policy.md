@@ -185,6 +185,10 @@ Remote AXF1 v2 metadata smoke on the same HG002 chr1 region confirmed
 region, unchanged chunk stats, and byte-identical stdout against BAM-backed
 `alignx view` and `samtools view`.
 
+AXF1 v2 metadata corruption coverage rejects invalid subset flags, truncated
+source/conversion-region strings, and metadata/index overlap in both C++ reader
+paths. The Python metadata inspector was checked against the same corruptions.
+
 Before any performance claim, run a separate remote HG002 benchmark with user
 confirmation. Notify the user before benchmark or profiling workloads.
 

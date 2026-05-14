@@ -93,6 +93,11 @@ The first implementation can keep chunk headers explicit and redundant with the
 index. Redundancy is acceptable while the format is still being validated.
 Readers still accept legacy AXF1 v1 files without `FileMetadata` and treat them
 as `is_subset=false` with empty source and region strings.
+AXF1 v2 metadata corruption coverage currently rejects invalid subset flags,
+truncated source path metadata, truncated conversion-region metadata, and
+metadata that overlaps the chunk index. The C++ full-file reader and
+metadata-only reader share this expectation, and `scripts/inspect_axf1_metadata.py`
+was checked against the same corruptions.
 
 ## Chunk Contract
 
@@ -221,6 +226,8 @@ Completed implementation checklist:
 - AXF1 data structs and format read/write tests were added without mutating
   AXF0.
 - Writer/reader round-trip tests cover synthetic toy records.
+- AXF1 v2 metadata round-trip and corruption tests cover both full-file and
+  metadata-only readers.
 - Internal AXF1 query/view tests cover no-hit, missing reference, malformed
   payload, newline-stable output, and atomic stdout behavior.
 - Toy BAM -> AXF1 -> view stdout parity matches the existing BAM view
@@ -392,5 +399,7 @@ Before replacing AXF0 in any workflow:
   designed;
 - require AXF1 multi-reference and multi-chunk ordering tests;
 - require malformed AXF1 payload tests to prove stdout atomicity;
+- require malformed AXF1 metadata tests to prove both full-file and
+  metadata-only readers reject corrupt file-level metadata;
 - require no-hit and missing-reference behavior to match AXF0;
 - do not run benchmark/profiling until the AXF1 correctness slice is stable.
