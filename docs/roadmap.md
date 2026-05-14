@@ -92,6 +92,7 @@ and region-query correctness.
 - [x] AXF1 zstd feature-gate skeleton with disabled-build rejection path
 - [x] AXF1 zstd compressed payload envelope reader
 - [x] Explicit AXF1 zstd quality payload writer path and CLI flag
+- [x] AXF1 zstd quality writer smoke on HG002 chr1 small region
 - [ ] Optional zstd/LZ4 compressed payload writer size policy with raw/base fallback
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read

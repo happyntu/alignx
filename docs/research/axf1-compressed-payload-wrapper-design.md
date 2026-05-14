@@ -238,6 +238,36 @@ it can reuse existing lossless transforms, selected-column decode, and raw
 fallback rules. It also benefits TAGS, QNAME, CIGAR, and noisy QUAL payloads
 without creating separate entropy-coding decisions for every column.
 
+## Remote HG002 Smoke
+
+Remote HG002 zstd quality writer correctness smoke on 2026-05-15 used:
+
+- Host: `missmi-server00`
+- Input:
+  `/mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam`
+- Region: `chr1:1000000-1010000`
+- Work directory:
+  `/mypool/alignx/tmp/axf1_zstd_quality_writer_smoke_hg002_chr1_1000000_1010000_20260515`
+- Command shape:
+  `alignx convert --format AXF1 --region chr1:1000000-1010000 --axf1-quality-compression zstd`
+
+The smoke compared `alignx view` on the zstd AXF1 output, `alignx view` on the
+source BAM, and `samtools view` on the source BAM. All three SAM outputs had
+SHA-256 `6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`
+for 64 records.
+
+Metadata-only inspection reported `quality` as `qual_pack_compressed` on all 7
+chunks. Payload summary for the zstd AXF1 output:
+
+```text
+quality:  qual_pack_compressed:7, 533,367 bytes, 67.369% of column payload bytes
+sequence: seq_2bit_literal:7, 227,010 bytes, 28.673% of column payload bytes
+cigar:    cigar_token:7, 20,689 bytes, 2.613% of column payload bytes
+```
+
+The AXF1 output was 798,039 bytes. This is a correctness smoke, not a benchmark
+or a general compression-ratio claim.
+
 ## Acceptance Criteria for a Future Implementation
 
 - Unit tests cover a compressed payload round-trip for at least one column.

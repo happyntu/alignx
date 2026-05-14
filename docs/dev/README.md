@@ -197,6 +197,13 @@ Remote HG002 expected-codec smoke on 2026-05-15 used
 and asserted all five expected codecs with byte-identical SAM stdout
 (`6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`)
 for 64 records. The AXF1 output was 1,172,296 bytes.
+Remote HG002 zstd quality writer smoke on 2026-05-15 used
+`/mypool/alignx/tmp/axf1_zstd_quality_writer_smoke_hg002_chr1_1000000_1010000_20260515`
+with `alignx convert --format AXF1 --axf1-quality-compression zstd`.
+It confirmed byte-identical SAM stdout with the same stdout SHA-256
+(`6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`)
+for 64 records. `quality` used `qual_pack_compressed` on all 7 chunks, and the
+AXF1 output was 798,039 bytes.
 
 ## AXF1 column payload summary
 
@@ -218,6 +225,9 @@ lossless QUAL codec beyond simple byte RLE.
 After `qual_pack`, the same region used `qual_pack` on all 7 chunks and reduced
 `quality` payload from 907,624 bytes to 794,762 bytes, or 75.468% of column
 payload bytes.
+With explicit zstd quality compression, the same region used
+`qual_pack_compressed` on all 7 chunks and reduced `quality` payload to
+533,367 bytes, or 67.369% of column payload bytes.
 
 ## AXF0 and AXF1 development status
 

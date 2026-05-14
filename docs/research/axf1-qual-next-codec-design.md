@@ -168,13 +168,19 @@ Compared with the previous raw QUAL payload for the same region, `qual_pack`
 reduced `quality` from 907,624 bytes to 794,762 bytes. This is a correctness
 smoke and metadata summary, not a benchmark.
 
+The generic compressed wrapper follow-up has also passed a correctness smoke on
+the same region. On 2026-05-15,
+`/mypool/alignx/tmp/axf1_zstd_quality_writer_smoke_hg002_chr1_1000000_1010000_20260515`
+preserved the same byte-identical SAM stdout for 64 records and used
+`qual_pack_compressed` on all 7 quality chunks. The zstd-wrapped quality payload
+was 533,367 bytes, or 67.369% of column payload bytes.
+
 ## Deferred Work
 
 If `qual_pack` does not improve HG002-style data, the next design should focus
 on either:
 
-- a generic compressed column wrapper with explicit dependency and metadata
-  policy; or
+- compressed wrapper size policy and additional algorithms; or
 - a QUAL-specific context model using read position/cycle and residual coding.
 
 Both are larger format decisions than `qual_pack` and should be designed before

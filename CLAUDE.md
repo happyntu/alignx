@@ -79,6 +79,7 @@ Completed:
 - AXF1 zstd feature-gate skeleton: `ALIGNX_ENABLE_ZSTD=OFF` by default; disabled builds reject zstd payload envelopes without changing writer output
 - AXF1 zstd compressed payload envelope reader: `ALIGNX_ENABLE_ZSTD=ON` can decode zstd-wrapped `qual_pack_compressed`; writer still emits base codecs by default
 - AXF1 explicit zstd quality writer path: `alignx convert --format AXF1 --axf1-quality-compression zstd` can emit zstd-wrapped `qual_pack_compressed` when built with `ALIGNX_ENABLE_ZSTD=ON`; default remains uncompressed base codec selection
+- AXF1 zstd quality writer remote HG002 chr1 small-region correctness smoke verified stdout parity and `qual_pack_compressed` on 7/7 quality chunks
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
