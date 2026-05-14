@@ -192,6 +192,63 @@ TEST(AxfFile, PayloadReaderRejectsRangeOutsideFile) {
     std::filesystem::remove(path);
 }
 
+TEST(AxfFileReader, OpensAndQueriesIndexMetadata) {
+    const auto path = temp_path("alignx_file_reader_open.axf");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto reader = alignx::format::AxfFileReader::open(path);
+    ASSERT_TRUE(reader) << reader.error();
+
+    ASSERT_EQ(reader->index().references.size(), 1);
+    EXPECT_EQ(reader->index().references[0].name, "chrToy");
+    ASSERT_EQ(reader->index().blocks.size(), 1);
+
+    auto hits = reader->query_blocks(0, 150, 160);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 1);
+    EXPECT_EQ(hits->at(0)->record_count, 2);
+
+    hits = reader->query_blocks(0, 200, 220);
+    ASSERT_TRUE(hits) << hits.error();
+    EXPECT_TRUE(hits->empty());
+
+    std::filesystem::remove(path);
+}
+
+TEST(AxfFileReader, ReadsPayloadForQueryHit) {
+    const auto path = temp_path("alignx_file_reader_payload.axf");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto reader = alignx::format::AxfFileReader::open(path);
+    ASSERT_TRUE(reader) << reader.error();
+
+    auto hits = reader->query_blocks(0, 150, 160);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 1);
+
+    auto payload = reader->read_payload(*hits->at(0));
+    ASSERT_TRUE(payload) << payload.error();
+    EXPECT_EQ(*payload, file.blocks[0].payload);
+
+    std::filesystem::remove(path);
+}
+
+TEST(AxfFileReader, ReportsOpenErrors) {
+    const auto path = temp_path("alignx_file_reader_missing.axf");
+    std::filesystem::remove(path);
+
+    auto reader = alignx::format::AxfFileReader::open(path);
+
+    ASSERT_FALSE(reader);
+    EXPECT_NE(reader.error().find("failed to open AXF file"), std::string::npos);
+}
+
 TEST(AxfFile, MetadataRejectsInvalidBlockReference) {
     const auto path = temp_path("alignx_metadata_bad_ref.axf");
     auto write = alignx::format::write_axf_file(make_file(), path);

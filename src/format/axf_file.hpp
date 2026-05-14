@@ -50,6 +50,25 @@ struct AxfFileIndex {
     query_blocks(std::uint32_t ref_id, std::int32_t start, std::int32_t end) const;
 };
 
+class AxfFileReader {
+public:
+    [[nodiscard]] static std::expected<AxfFileReader, std::string> open(std::filesystem::path path);
+
+    [[nodiscard]] const AxfFileIndex& index() const noexcept;
+
+    [[nodiscard]] std::expected<std::vector<const AxfBlockIndexEntry*>, std::string>
+    query_blocks(std::uint32_t ref_id, std::int32_t start, std::int32_t end) const;
+
+    [[nodiscard]] std::expected<std::vector<unsigned char>, std::string>
+    read_payload(const AxfBlockIndexEntry& block) const;
+
+private:
+    AxfFileReader(std::filesystem::path path, AxfFileIndex index);
+
+    std::filesystem::path path_;
+    AxfFileIndex index_;
+};
+
 [[nodiscard]] std::expected<void, std::string> write_axf_file(const AxfFile& file,
                                                               const std::filesystem::path& path);
 

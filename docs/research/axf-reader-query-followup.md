@@ -10,9 +10,9 @@ The current AXF0 MVP query flow is correctness-first:
 ```text
 alignx view sample.axf chr20:10000000-10010000
   -> query::write_axf_region_sam()
-  -> format::read_axf_index_metadata()
-  -> AxfFileIndex::query_blocks()
-  -> format::read_axf_block_payload() for each hit
+  -> format::AxfFileReader::open()
+  -> AxfFileReader::query_blocks()
+  -> AxfFileReader::read_payload() for each hit
   -> row-preserving SAM payload filter
   -> stdout
 ```
@@ -77,6 +77,8 @@ Step 2 is implemented:
 
 - `format::read_axf_block_payload(path, block)` reads a single block payload by
   offset/length from the AXF file.
+- `format::AxfFileReader` wraps metadata loading, block queries, and lazy payload
+  reads behind a reusable reader object.
 - `alignx view` for AXF input now reads index metadata first, queries overlapping
   block entries, and only reads payloads for those hits.
 - Output filtering still validates each SAM line against the requested region, so

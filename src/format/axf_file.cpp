@@ -346,6 +346,31 @@ AxfFileIndex::query_blocks(std::uint32_t ref_id, std::int32_t start, std::int32_
     return hits;
 }
 
+AxfFileReader::AxfFileReader(std::filesystem::path path, AxfFileIndex index)
+    : path_(std::move(path)), index_(std::move(index)) {}
+
+std::expected<AxfFileReader, std::string> AxfFileReader::open(std::filesystem::path path) {
+    auto index = read_axf_index_metadata(path);
+    if (!index) {
+        return std::unexpected(index.error());
+    }
+    return AxfFileReader(std::move(path), std::move(*index));
+}
+
+const AxfFileIndex& AxfFileReader::index() const noexcept {
+    return index_;
+}
+
+std::expected<std::vector<const AxfBlockIndexEntry*>, std::string>
+AxfFileReader::query_blocks(std::uint32_t ref_id, std::int32_t start, std::int32_t end) const {
+    return index_.query_blocks(ref_id, start, end);
+}
+
+std::expected<std::vector<unsigned char>, std::string>
+AxfFileReader::read_payload(const AxfBlockIndexEntry& block) const {
+    return read_axf_block_payload(path_, block);
+}
+
 std::expected<void, std::string> write_axf_file(const AxfFile& file,
                                                 const std::filesystem::path& path) {
     auto validation = validate_file(file);

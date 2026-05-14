@@ -148,24 +148,24 @@ std::expected<void, std::string> write_axf_region_sam(const std::filesystem::pat
         return std::unexpected(parsed_region.error());
     }
 
-    auto axf = format::read_axf_index_metadata(input);
-    if (!axf) {
-        return std::unexpected(axf.error());
+    auto reader = format::AxfFileReader::open(input);
+    if (!reader) {
+        return std::unexpected(reader.error());
     }
 
-    auto ref_id = find_reference_id(axf->references, parsed_region->reference);
+    auto ref_id = find_reference_id(reader->index().references, parsed_region->reference);
     if (!ref_id) {
         return std::unexpected(ref_id.error());
     }
 
-    auto blocks = axf->query_blocks(*ref_id, parsed_region->start, parsed_region->end);
+    auto blocks = reader->query_blocks(*ref_id, parsed_region->start, parsed_region->end);
     if (!blocks) {
         return std::unexpected(blocks.error());
     }
 
     std::string output;
     for (const format::AxfBlockIndexEntry* block : *blocks) {
-        auto block_payload = format::read_axf_block_payload(input, *block);
+        auto block_payload = reader->read_payload(*block);
         if (!block_payload) {
             return std::unexpected(block_payload.error());
         }
