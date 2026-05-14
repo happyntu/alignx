@@ -167,8 +167,9 @@ without creating separate entropy-coding decisions for every column.
   Implemented by keeping writers on the base codec path.
 - Malformed tests cover truncated envelope, unknown compression id,
   uncompressed-size mismatch, compressed-size mismatch, decompressor failure,
-  and trailing bytes. Partially implemented for unsupported compression,
-  stored-size mismatch, and unsupported base codec.
+  and trailing bytes. Implemented for truncated envelope fields, unsupported
+  compression, stored-size mismatch, truncated stored bytes, trailing bytes, and
+  unsupported base codec. Decompressor failure remains future zstd/LZ4 work.
 - Selected-column tests prove only requested compressed columns are decompressed.
   Implemented for `quality`.
 - Python metadata tools report wrapper codec names. Implemented for

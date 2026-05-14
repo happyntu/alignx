@@ -1133,6 +1133,20 @@ decode_compressed_payload_envelope(const std::vector<unsigned char>& bytes) {
                                       std::vector<unsigned char>(payload->begin(), payload->end())};
 }
 
+std::expected<std::vector<unsigned char>, std::string>
+decode_compressed_base_payload(const std::vector<unsigned char>& bytes,
+                               Axf1CodecId expected_base_codec_id,
+                               std::string_view unsupported_base_error) {
+    auto envelope = decode_compressed_payload_envelope(bytes);
+    if (!envelope) {
+        return std::unexpected(envelope.error());
+    }
+    if (envelope->base_codec_id != expected_base_codec_id) {
+        return std::unexpected(std::string(unsupported_base_error));
+    }
+    return std::move(envelope->payload);
+}
+
 std::expected<std::vector<std::int32_t>, std::string>
 decode_pos_delta_varint_column(const std::vector<unsigned char>& bytes,
                                std::uint32_t record_count) {
@@ -1702,14 +1716,13 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
             } else if (entry.codec_id == Axf1CodecId::qual_pack) {
                 values = decode_qual_pack_column(*payload, *record_count);
             } else if (entry.codec_id == Axf1CodecId::qual_pack_compressed) {
-                auto envelope = decode_compressed_payload_envelope(*payload);
-                if (!envelope) {
-                    return std::unexpected(envelope.error());
+                auto base_payload =
+                    decode_compressed_base_payload(*payload, Axf1CodecId::qual_pack,
+                                                   "unsupported AXF1 compressed QUAL base codec");
+                if (!base_payload) {
+                    return std::unexpected(base_payload.error());
                 }
-                if (envelope->base_codec_id != Axf1CodecId::qual_pack) {
-                    return std::unexpected("unsupported AXF1 compressed QUAL base codec");
-                }
-                values = decode_qual_pack_column(envelope->payload, *record_count);
+                values = decode_qual_pack_column(*base_payload, *record_count);
             } else {
                 values = decode_string_column(*payload, *record_count);
             }
