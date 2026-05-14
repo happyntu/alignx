@@ -81,6 +81,7 @@ Completed:
 - AXF1 explicit zstd quality writer path: `alignx convert --format AXF1 --axf1-quality-compression zstd` may emit zstd-wrapped `qual_pack_compressed` when built with `ALIGNX_ENABLE_ZSTD=ON`; default remains uncompressed base codec selection and explicit zstd falls back when the wrapper is not smaller
 - AXF1 zstd quality writer remote HG002 chr1 small-region correctness smoke verified stdout parity and `qual_pack_compressed` on 7/7 quality chunks
 - AXF1 zstd quality writer size-policy remote HG002 chr1 small-region correctness smoke reverified stdout parity and `qual_pack_compressed` on 7/7 quality chunks
+- `scripts/smoke_axf1_codecs.sh` supports `--axf1-quality-compression none|zstd` for reusable zstd quality writer correctness smoke checks
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV

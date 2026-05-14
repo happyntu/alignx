@@ -7,6 +7,7 @@ INSPECTOR="${AXF1_INSPECTOR:-scripts/inspect_axf1_metadata.py}"
 INPUT_BAM=""
 REGION=""
 WORK_DIR=""
+AXF1_QUALITY_COMPRESSION="none"
 EXPECT_CODECS=()
 
 usage() {
@@ -28,6 +29,9 @@ Options:
   --input <path>      input BAM
   --region <region>   region query, for example chrToy:1-250
   --work-dir <dir>    output directory for AXF1, SAM outputs, SHA256, and codec TSVs
+  --axf1-quality-compression <none|zstd>
+                      pass AXF1 quality compression policy to alignx convert;
+                      default is none
   --expect-codec <column=codec>
                       require a column to use exactly one codec across all chunks;
                       may be repeated, for example --expect-codec cigar=cigar_token
@@ -61,6 +65,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --work-dir)
       WORK_DIR="$2"
+      shift 2
+      ;;
+    --axf1-quality-compression)
+      AXF1_QUALITY_COMPRESSION="$2"
       shift 2
       ;;
     --expect-codec)
@@ -136,6 +144,9 @@ check_expected_codec() {
 [[ -n "$INPUT_BAM" ]] || fail_usage "--input is required"
 [[ -n "$REGION" ]] || fail_usage "--region is required"
 [[ -n "$WORK_DIR" ]] || fail_usage "--work-dir is required"
+if [[ "$AXF1_QUALITY_COMPRESSION" != "none" && "$AXF1_QUALITY_COMPRESSION" != "zstd" ]]; then
+  fail_usage "--axf1-quality-compression must be none or zstd"
+fi
 
 require_executable "$ALIGNX"
 require_executable "$SAMTOOLS"
@@ -169,7 +180,11 @@ rm -f \
   "$COLUMNS_OUT" \
   "$SUMMARY_OUT"
 
-"$ALIGNX" convert "$INPUT_BAM" -o "$AXF1_FILE" --format AXF1 --region "$REGION" >/dev/null
+convert_args=(convert "$INPUT_BAM" -o "$AXF1_FILE" --format AXF1 --region "$REGION")
+if [[ "$AXF1_QUALITY_COMPRESSION" != "none" ]]; then
+  convert_args+=(--axf1-quality-compression "$AXF1_QUALITY_COMPRESSION")
+fi
+"$ALIGNX" "${convert_args[@]}" >/dev/null
 "$ALIGNX" view "$AXF1_FILE" "$REGION" >"$AXF1_SAM"
 "$ALIGNX" view "$INPUT_BAM" "$REGION" >"$BAM_SAM"
 "$SAMTOOLS" view "$INPUT_BAM" "$REGION" >"$SAMTOOLS_SAM"
@@ -201,6 +216,7 @@ expected_codecs="$(IFS=,; echo "${EXPECT_CODECS[*]}")"
   echo -e "region\t$REGION"
   echo -e "work_dir\t$WORK_DIR"
   echo -e "axf1\t$AXF1_FILE"
+  echo -e "axf1_quality_compression\t$AXF1_QUALITY_COMPRESSION"
   echo -e "axf1_sam\t$AXF1_SAM"
   echo -e "bam_sam\t$BAM_SAM"
   echo -e "samtools_sam\t$SAMTOOLS_SAM"

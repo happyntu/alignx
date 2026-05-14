@@ -148,6 +148,22 @@ scripts/smoke_axf1_codecs.sh \
   --expect-codec quality=qual_pack
 ```
 
+For zstd-enabled AXF1 quality writer checks, add
+`--axf1-quality-compression zstd` and assert the wrapper codec when the selected
+region is expected to benefit from it:
+
+```bash
+scripts/smoke_axf1_codecs.sh \
+  --alignx /mypool/alignx/bin/alignx_zstd_quality_size_policy_3e7f980 \
+  --samtools samtools \
+  --inspector /mypool/alignx/bin/inspect_axf1_metadata.py \
+  --input /mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam \
+  --region chr1:1000000-1010000 \
+  --work-dir /mypool/alignx/tmp/axf1_zstd_quality_size_policy_script_smoke_hg002_chr1_1000000_1010000_20260515 \
+  --axf1-quality-compression zstd \
+  --expect-codec quality=qual_pack_compressed
+```
+
 Use `--expect-codec column=codec` when a smoke region is expected to use a
 specific codec for every chunk of that column. The option may be repeated and
 accepts either column names or numeric column ids, and either codec names or

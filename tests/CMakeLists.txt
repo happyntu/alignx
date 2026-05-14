@@ -47,6 +47,12 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_summarize_axf1_columns.py"
             "${CMAKE_SOURCE_DIR}/scripts/summarize_axf1_columns.py"
   )
+  add_test(
+    NAME SmokeAxf1CodecsScript.Options
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_smoke_axf1_codecs.py"
+            "${CMAKE_SOURCE_DIR}/scripts/smoke_axf1_codecs.sh"
+  )
 else()
   message(STATUS "Python3 interpreter not found; skipping Python script tests.")
 endif()
