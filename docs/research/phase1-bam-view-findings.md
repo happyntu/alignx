@@ -57,6 +57,33 @@ A 30-repeat local smoke benchmark using the script-level
 All runs had zero nonzero exits and identical stdout byte counts. This is about
 a 1.38x median speedup for the current BAM-backed path on this smoke workload.
 
+## Remote HG002 Chr1 Benchmark
+
+After remote preflight passed on `missmi-server00`, a first timed Phase 1
+single-thread baseline was run on 2026-05-14. This is an engineering benchmark
+for the BAM-backed path; it is not a paper-grade result.
+
+- Host: `missmi-server00`
+- BAM:
+  `/mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam`
+- Region: `chr1:1000000-2000000`
+- Command shape: `bench_region_query.sh --warmup 1 --repeats 5`
+- Threads: single-thread baseline; no `--alignx-hts-threads`
+- Raw TSV:
+  `/mypool/alignx/results/phase1_view_chr1_samtools.tsv`
+- Summary TSV:
+  `/mypool/alignx/results/phase1_view_chr1_samtools.summary.tsv`
+
+| Tool | Runs | Avg ms | Median ms | P95 ms | Min ms | Max ms | Stdout bytes |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| alignx | 5 | 298.799 | 289.201 | 337.271 | 279.654 | 337.271 | 89,692,257 |
+| samtools | 5 | 336.221 | 331.710 | 359.713 | 319.290 | 359.713 | 89,692,257 |
+
+All runs had zero nonzero exits and identical stdout byte counts. The benchmark
+script also diffed `alignx view` stdout against `samtools view` stdout for each
+run. This run shows about a 1.15x median speedup for `alignx view` on this
+specific HG002 chr1 region.
+
 ## Decision
 
 The BAM-backed `alignx view` path now has a useful low-risk improvement through
