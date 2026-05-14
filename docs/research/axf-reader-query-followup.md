@@ -10,31 +10,30 @@ The current AXF0 MVP query flow is correctness-first:
 ```text
 alignx view sample.axf chr20:10000000-10010000
   -> query::write_axf_region_sam()
-  -> format::read_axf_file()
-  -> AxfFile::query_blocks()
+  -> format::read_axf_index_metadata()
+  -> AxfFileIndex::query_blocks()
+  -> format::read_axf_block_payload() for each hit
   -> row-preserving SAM payload filter
   -> stdout
 ```
 
 Current implementation characteristics:
 
-- `format::read_axf_file()` reads the entire AXF file into memory.
-- AXF reference metadata and block index entries are parsed from that in-memory
-  byte vector.
-- Each block payload is copied into `AxfBlock::payload` during file read.
-- `AxfFile::query_blocks()` linearly scans all blocks.
+- `format::read_axf_index_metadata()` reads reference metadata and block index
+  entries without materializing payloads.
+- `format::read_axf_block_payload()` reads payload bytes lazily by offset and
+  length for query hits.
+- `AxfFileIndex::query_blocks()` linearly scans all block entries.
 - `query::write_axf_region_sam()` filters records inside the already-loaded
   row-preserving SAM payloads and writes atomic stdout after successful
   validation.
 
-This is acceptable for toy and small-region correctness smoke checks. It is not
-the target shape for production AXF region queries.
+This is acceptable for toy and small-region correctness smoke checks. It is still
+not the target shape for production AXF region queries because block lookup is
+linear and payloads are row-preserving SAM text.
 
 ## Limitations
 
-- Full-file read makes memory use scale with AXF file size, not query size.
-- Eager payload copy defeats the intended region-query advantage of indexed
-  AXF access.
 - Linear block scan is fine for small MVP files but will not scale to many
   blocks.
 - The row-preserving SAM payload is deliberately not columnar and cannot support
@@ -82,6 +81,23 @@ Step 2 is implemented:
   block entries, and only reads payloads for those hits.
 - Output filtering still validates each SAM line against the requested region, so
   stdout remains compatible with the prior full-file reader path.
+
+## Correctness Smoke Checks
+
+Remote HG002 seekable AXF view smoke passed on 2026-05-14:
+
+- Host: `missmi-server00`
+- Work directory:
+  `/mypool/alignx/tmp/axf_seekable_smoke_hg002_chr20_10000000_10010000`
+- BAM:
+  `/mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam`
+- Region: `chr20:10000000-10010000`
+- Records: 107
+- BAM stdout bytes: 3,133,962
+- AXF stdout bytes: 3,133,962
+- AXF file bytes: 3,138,290
+- BAM vs AXF diff bytes: 0
+- Convert/BAM view/AXF view stderr bytes: 0/0/0
 
 ## Later Columnar Path
 
