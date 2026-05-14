@@ -54,6 +54,7 @@ Completed:
 - AXF1 MAPQ run-length codec with raw fallback when RLE is not smaller
 - AXF1 MAPQ RLE remote HG002 chr1 small-region correctness smoke
 - AXF1 column codec inspector verified on the remote HG002 MAPQ RLE smoke output
+- `scripts/smoke_axf1_codecs.sh` correctness smoke for AXF1 conversion, three-way SAM stdout parity, and codec distribution inspection
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV

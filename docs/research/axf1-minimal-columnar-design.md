@@ -379,6 +379,10 @@ Remote AXF1 MAPQ RLE smoke, run on `missmi-server00` on 2026-05-14:
 - The codec distribution was verified with
   `scripts/inspect_axf1_metadata.py --column-codecs`, which reported
   `pos_delta_varint`, `flag_bitpack`, and `mapq_rle` on all 7 chunks.
+- The reusable `scripts/smoke_axf1_codecs.sh` path was then checked on the same
+  HG002 chr1 region. It produced the same stdout SHA256 and codec distribution
+  under
+  `/mypool/alignx/tmp/axf1_codec_script_smoke_hg002_chr1_1000000_1010000_20260514`.
 
 This was a correctness smoke only, not a benchmark or profiling run.
 

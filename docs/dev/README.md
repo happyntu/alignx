@@ -122,6 +122,34 @@ writes an AXF file plus BAM/AXF SAM outputs for the requested region. For large
 datasets, prefer running the smoke on `missmi-server00` under `/mypool/alignx/`
 rather than growing the local WSL VHDX.
 
+## AXF1 codec correctness smoke
+
+Use `scripts/smoke_axf1_codecs.sh` to verify AXF1 conversion, AXF1 view output,
+BAM-backed `alignx view`, and `samtools view` for the same region. The script
+also records AXF1 column codec distribution through
+`scripts/inspect_axf1_metadata.py --column-codecs`. It performs no timing,
+repeats, profiling, or benchmark reporting, and it should not be used as a
+performance result.
+
+```bash
+mamba run -n alignx-dev cmake --build --preset wsl-release
+mkdir -p /tmp/alignx_axf1_codec_smoke
+scripts/smoke_axf1_codecs.sh \
+  --alignx build/wsl-release/alignx \
+  --samtools samtools \
+  --inspector scripts/inspect_axf1_metadata.py \
+  --input tests/toy_data/toy_alignment.sorted.bam \
+  --region chrToy:1-250 \
+  --work-dir /tmp/alignx_axf1_codec_smoke
+```
+
+For large BAMs, copy the script and inspector to `missmi-server00` and use a
+work directory under `/mypool/alignx/tmp`. The HG002 chr1 small-region script
+smoke on 2026-05-14 used
+`/mypool/alignx/tmp/axf1_codec_script_smoke_hg002_chr1_1000000_1010000_20260514`
+and confirmed byte-identical SAM stdout plus POS/FLAG/MAPQ codec distribution
+of `pos_delta_varint`, `flag_bitpack`, and `mapq_rle` on all 7 chunks.
+
 ## AXF0 and AXF1 development status
 
 AXF0 is the row-preserving MVP path. It stores SAM-line payloads in indexed AXF
