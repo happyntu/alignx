@@ -63,6 +63,21 @@ establish the correct access pattern:
 - only overlapping block payloads are read for a region query;
 - tests continue to compare BAM view stdout vs AXF view stdout.
 
+## Implementation Status
+
+Step 1 is implemented:
+
+- `format::AxfBlockIndexEntry` stores block metadata plus payload offset/length.
+- `format::AxfFileIndex` stores references plus block index entries.
+- `format::read_axf_index_metadata(path)` reads header, reference metadata, and
+  block index entries without materializing `AxfBlock::payload`.
+- Metadata validation checks magic/version, index offset, block reference ids,
+  block intervals, and payload byte ranges.
+
+The CLI still uses the original full-file `read_axf_file()` path. The next code
+step is to add seekable payload reads for only the block ranges returned by
+`AxfFileIndex::query_blocks()`.
+
 ## Later Columnar Path
 
 After the seekable AXF0 reader is stable, replace row-preserving payloads with

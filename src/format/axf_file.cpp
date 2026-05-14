@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <fstream>
 #include <limits>
+#include <string>
 #include <utility>
 
 namespace alignx::format {
@@ -140,6 +141,111 @@ private:
     std::size_t offset_ = 0;
 };
 
+class StreamReader {
+public:
+    StreamReader(std::ifstream& input, std::uint64_t file_size)
+        : input_(input), file_size_(file_size) {}
+
+    [[nodiscard]] std::expected<void, std::string> expect_magic() {
+        unsigned char bytes[sizeof(kMagic)]{};
+        auto read = read_exact(bytes, sizeof(bytes));
+        if (!read) {
+            return std::unexpected(read.error());
+        }
+        for (std::size_t index = 0; index < sizeof(kMagic); ++index) {
+            if (bytes[index] != kMagic[index]) {
+                return std::unexpected("invalid AXF magic");
+            }
+        }
+        return {};
+    }
+
+    [[nodiscard]] std::expected<std::uint16_t, std::string> read_u16() {
+        return read_little_endian<std::uint16_t>();
+    }
+
+    [[nodiscard]] std::expected<std::uint32_t, std::string> read_u32() {
+        return read_little_endian<std::uint32_t>();
+    }
+
+    [[nodiscard]] std::expected<std::int32_t, std::string> read_i32() {
+        auto value = read_u32();
+        if (!value) {
+            return std::unexpected(value.error());
+        }
+        return static_cast<std::int32_t>(*value);
+    }
+
+    [[nodiscard]] std::expected<std::uint64_t, std::string> read_u64() {
+        return read_little_endian<std::uint64_t>();
+    }
+
+    [[nodiscard]] std::expected<std::string, std::string> read_string(std::size_t size) {
+        if (size > remaining()) {
+            return std::unexpected("truncated AXF file");
+        }
+
+        std::string value(size, '\0');
+        auto read = read_exact(reinterpret_cast<unsigned char*>(value.data()), size);
+        if (!read) {
+            return std::unexpected(read.error());
+        }
+        return value;
+    }
+
+    [[nodiscard]] std::expected<void, std::string> seek(std::uint64_t offset) {
+        if (offset > file_size_) {
+            return std::unexpected("AXF index offset points outside file");
+        }
+        input_.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+        if (!input_) {
+            return std::unexpected("failed to seek AXF file");
+        }
+        offset_ = offset;
+        return {};
+    }
+
+    [[nodiscard]] std::uint64_t offset() const noexcept { return offset_; }
+    [[nodiscard]] std::uint64_t size() const noexcept { return file_size_; }
+
+private:
+    [[nodiscard]] std::uint64_t remaining() const noexcept {
+        return offset_ > file_size_ ? 0 : file_size_ - offset_;
+    }
+
+    [[nodiscard]] std::expected<void, std::string> read_exact(unsigned char* output,
+                                                              std::size_t size) {
+        if (size > remaining()) {
+            return std::unexpected("truncated AXF file");
+        }
+        input_.read(reinterpret_cast<char*>(output), static_cast<std::streamsize>(size));
+        if (!input_) {
+            return std::unexpected("failed to read AXF file");
+        }
+        offset_ += size;
+        return {};
+    }
+
+    template <typename UInt>
+    [[nodiscard]] std::expected<UInt, std::string> read_little_endian() {
+        unsigned char bytes[sizeof(UInt)]{};
+        auto read = read_exact(bytes, sizeof(bytes));
+        if (!read) {
+            return std::unexpected(read.error());
+        }
+
+        UInt value = 0;
+        for (std::size_t byte = 0; byte < sizeof(UInt); ++byte) {
+            value |= static_cast<UInt>(bytes[byte]) << (byte * 8U);
+        }
+        return value;
+    }
+
+    std::ifstream& input_;
+    std::uint64_t file_size_ = 0;
+    std::uint64_t offset_ = 0;
+};
+
 std::expected<void, std::string> validate_file(const AxfFile& file) {
     if (file.references.size() > std::numeric_limits<std::uint32_t>::max()) {
         return std::unexpected("too many AXF references");
@@ -166,9 +272,41 @@ std::expected<void, std::string> validate_file(const AxfFile& file) {
     return {};
 }
 
+std::expected<void, std::string> validate_index_metadata(const AxfFileIndex& index,
+                                                         std::uint64_t file_size,
+                                                         std::uint64_t index_offset) {
+    for (const AxfReference& reference : index.references) {
+        if (reference.name.size() > std::numeric_limits<std::uint16_t>::max()) {
+            return std::unexpected("AXF reference name is too long");
+        }
+    }
+
+    for (const AxfBlockIndexEntry& block : index.blocks) {
+        if (block.ref_id >= index.references.size()) {
+            return std::unexpected("AXF block reference id out of range");
+        }
+        if (block.start_pos >= block.end_pos) {
+            return std::unexpected("AXF block requires start_pos < end_pos");
+        }
+        if (block.payload_offset > file_size ||
+            block.payload_length > file_size - block.payload_offset) {
+            return std::unexpected("AXF block payload points outside file");
+        }
+        if (block.payload_offset + block.payload_length > index_offset) {
+            return std::unexpected("AXF block payload overlaps index");
+        }
+    }
+
+    return {};
+}
+
 } // namespace
 
 bool AxfBlock::overlaps(std::int32_t query_start, std::int32_t query_end) const noexcept {
+    return start_pos < query_end && query_start < end_pos;
+}
+
+bool AxfBlockIndexEntry::overlaps(std::int32_t query_start, std::int32_t query_end) const noexcept {
     return start_pos < query_end && query_start < end_pos;
 }
 
@@ -183,6 +321,24 @@ AxfFile::query_blocks(std::uint32_t ref_id, std::int32_t start, std::int32_t end
 
     std::vector<const AxfBlock*> hits;
     for (const AxfBlock& block : blocks) {
+        if (block.ref_id == ref_id && block.overlaps(start, end)) {
+            hits.push_back(&block);
+        }
+    }
+    return hits;
+}
+
+std::expected<std::vector<const AxfBlockIndexEntry*>, std::string>
+AxfFileIndex::query_blocks(std::uint32_t ref_id, std::int32_t start, std::int32_t end) const {
+    if (start >= end) {
+        return std::unexpected("AXF query requires start < end");
+    }
+    if (ref_id >= references.size()) {
+        return std::unexpected("AXF query reference id out of range");
+    }
+
+    std::vector<const AxfBlockIndexEntry*> hits;
+    for (const AxfBlockIndexEntry& block : blocks) {
         if (block.ref_id == ref_id && block.overlaps(start, end)) {
             hits.push_back(&block);
         }
@@ -339,6 +495,105 @@ std::expected<AxfFile, std::string> read_axf_file(const std::filesystem::path& p
         return lhs.end_pos < rhs.end_pos;
     });
     return file;
+}
+
+std::expected<AxfFileIndex, std::string>
+read_axf_index_metadata(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        return std::unexpected("failed to open AXF file: " + path.string());
+    }
+
+    input.seekg(0, std::ios::end);
+    const std::streamoff size = input.tellg();
+    if (size < 0) {
+        return std::unexpected("failed to determine AXF file size: " + path.string());
+    }
+    input.seekg(0, std::ios::beg);
+
+    StreamReader reader(input, static_cast<std::uint64_t>(size));
+    auto magic = reader.expect_magic();
+    if (!magic) {
+        return std::unexpected(magic.error());
+    }
+
+    auto version = reader.read_u32();
+    auto ref_count = reader.read_u32();
+    auto block_count = reader.read_u64();
+    auto index_offset = reader.read_u64();
+    if (!version || !ref_count || !block_count || !index_offset) {
+        return std::unexpected("truncated AXF file");
+    }
+    if (*version != kVersion) {
+        return std::unexpected("unsupported AXF version");
+    }
+    if (*index_offset > reader.size()) {
+        return std::unexpected("AXF index offset points outside file");
+    }
+
+    AxfFileIndex index;
+    index.references.reserve(*ref_count);
+    for (std::uint32_t ref_id = 0; ref_id < *ref_count; ++ref_id) {
+        auto name_length = reader.read_u16();
+        if (!name_length) {
+            return std::unexpected(name_length.error());
+        }
+        auto name = reader.read_string(*name_length);
+        auto length = reader.read_u32();
+        if (!name || !length) {
+            return std::unexpected("truncated AXF file");
+        }
+        index.references.push_back({.name = *name, .length = *length});
+    }
+
+    if (reader.offset() > *index_offset) {
+        return std::unexpected("AXF references overlap index");
+    }
+
+    auto seek = reader.seek(*index_offset);
+    if (!seek) {
+        return std::unexpected(seek.error());
+    }
+
+    index.blocks.reserve(static_cast<std::size_t>(*block_count));
+    for (std::uint64_t block_index = 0; block_index < *block_count; ++block_index) {
+        auto ref_id = reader.read_u32();
+        auto start_pos = reader.read_i32();
+        auto end_pos = reader.read_i32();
+        auto record_count = reader.read_u32();
+        auto payload_offset = reader.read_u64();
+        auto payload_length = reader.read_u64();
+        if (!ref_id || !start_pos || !end_pos || !record_count || !payload_offset ||
+            !payload_length) {
+            return std::unexpected("truncated AXF file");
+        }
+        index.blocks.push_back({.ref_id = *ref_id,
+                                .start_pos = *start_pos,
+                                .end_pos = *end_pos,
+                                .record_count = *record_count,
+                                .payload_offset = *payload_offset,
+                                .payload_length = *payload_length});
+    }
+
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("unexpected trailing bytes in AXF file");
+    }
+
+    auto validation = validate_index_metadata(index, reader.size(), *index_offset);
+    if (!validation) {
+        return std::unexpected(validation.error());
+    }
+    std::sort(index.blocks.begin(), index.blocks.end(),
+              [](const AxfBlockIndexEntry& lhs, const AxfBlockIndexEntry& rhs) {
+                  if (lhs.ref_id != rhs.ref_id) {
+                      return lhs.ref_id < rhs.ref_id;
+                  }
+                  if (lhs.start_pos != rhs.start_pos) {
+                      return lhs.start_pos < rhs.start_pos;
+                  }
+                  return lhs.end_pos < rhs.end_pos;
+              });
+    return index;
 }
 
 } // namespace alignx::format
