@@ -108,6 +108,22 @@ Remote HG002 seekable AXF view smoke passed on 2026-05-14:
 - BAM vs AXF diff bytes: 0
 - Convert/BAM view/AXF view stderr bytes: 0/0/0
 
+Remote HG002 AXF query-index smoke passed on 2026-05-14 after adding
+per-reference ranges, end-sorted candidate indices, and index encapsulation:
+
+- Host: `missmi-server00`
+- Work directory:
+  `/mypool/alignx/tmp/axf_index_smoke_hg002_chr20_10000000_10010000_20260514`
+- BAM:
+  `/mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam`
+- Region: `chr20:10000000-10010000`
+- Records: 107
+- BAM stdout bytes: 3,133,962
+- AXF stdout bytes: 3,133,962
+- AXF file bytes: 3,138,290
+- BAM vs AXF diff bytes: 0
+- Convert/BAM view/AXF view stderr bytes: 0/0/0
+
 ## Later Columnar Path
 
 After the seekable AXF0 reader is stable, replace row-preserving payloads with
