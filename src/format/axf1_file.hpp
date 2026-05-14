@@ -26,6 +26,7 @@ enum class Axf1CodecId : std::uint16_t {
     raw = 0,
     pos_delta_varint = 1,
     flag_bitpack = 2,
+    mapq_rle = 3,
 };
 
 struct Axf1Reference {

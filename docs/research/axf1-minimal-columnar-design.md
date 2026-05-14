@@ -133,7 +133,7 @@ The minimum practical column set is:
 | `FLAG` | bit-packed unsigned values; raw `u16` fallback | Keep the full SAM bitmask lossless. |
 | `RNAME` | implicit chunk `ref_id` for mapped records | Cross-reference records can be handled later. |
 | `POS` | delta varint for monotonic chunks; raw `i32` fallback | Keep 0-based internally; print 1-based SAM POS. |
-| `MAPQ` | raw `u8` array | RLE later. |
+| `MAPQ` | run-length encoded `u8`; raw `u8` fallback | Chunk-local runs only. |
 | `CIGAR` | length-prefixed strings | Op/length streams later. |
 | `RNEXT` | length-prefixed strings or sentinel encoding | Preserve stdout first. |
 | `PNEXT` | raw `i32`/`u32` array | Preserve SAM semantics. |
@@ -196,6 +196,8 @@ Chunks with non-monotonic record order fall back to raw `i32` POS storage.
 The FLAG column uses a one-byte bit width followed by LSB-first packed unsigned
 values when that payload is smaller than raw `u16`; otherwise the writer falls
 back to raw `u16` FLAG values.
+The MAPQ column uses repeated `(run_length varint, MAPQ byte)` pairs when RLE is
+smaller than raw `u8`; otherwise the writer falls back to raw MAPQ bytes.
 This is a correctness scaffold, not a benchmark claim.
 
 The AXF1 converter now emits deterministic chunks using the first

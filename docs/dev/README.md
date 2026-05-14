@@ -132,7 +132,7 @@ AXF1 is the columnar correctness scaffold. It writes independently encoded
 columns, supports metadata-first lazy region view, and selectively decodes
 `POS` plus `CIGAR` before full output columns. `POS` uses delta-varint encoding
 for monotonic chunks and raw fallback otherwise; `FLAG` uses bit-packing when
-smaller than raw `u16`. The current converter is
+smaller than raw `u16`; `MAPQ` uses RLE when smaller than raw `u8`. The current converter is
 mapped-record only: unmapped records and invalid reference spans are skipped
 until unmapped AXF1 semantics are designed.
 

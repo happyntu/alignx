@@ -33,6 +33,7 @@ constexpr std::size_t kColumnLengthOffset = 12;
 constexpr std::size_t kIndexChunkLengthOffset = 24;
 constexpr std::size_t kFlagColumnIndex = 1;
 constexpr std::size_t kPosColumnIndex = 2;
+constexpr std::size_t kMapqColumnIndex = 3;
 
 std::filesystem::path temp_path(std::string_view label) {
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -259,6 +260,58 @@ TEST(Axf1File, FallsBackToRawFlagsWhenBitpackIsNotSmaller) {
     ASSERT_EQ(read->chunks[0].records.size(), 2);
     EXPECT_EQ(read->chunks[0].records[0].flag, 0xFFFF);
     EXPECT_EQ(read->chunks[0].records[1].flag, 0);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, WritesRepeatedMapqAsRle) {
+    const auto path = temp_path("alignx_axf1_mapq_rle");
+    auto file = make_file();
+    file.chunks[0].records[1].mapq = file.chunks[0].records[0].mapq;
+    auto third_record = file.chunks[0].records[1];
+    third_record.qname = "read003";
+    third_record.pos = 155;
+    file.chunks[0].records.push_back(third_record);
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kMapqColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::mapq_rle));
+    EXPECT_EQ(read_u64_at(data, column_entry_offset(data, kMapqColumnIndex) + kColumnLengthOffset),
+              2);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 3);
+    EXPECT_EQ(read->chunks[0].records[0].mapq, 60);
+    EXPECT_EQ(read->chunks[0].records[1].mapq, 60);
+    EXPECT_EQ(read->chunks[0].records[2].mapq, 60);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, FallsBackToRawMapqWhenRleIsNotSmaller) {
+    const auto path = temp_path("alignx_axf1_mapq_rle_raw_fallback");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kMapqColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::raw));
+    EXPECT_EQ(read_u64_at(data, column_entry_offset(data, kMapqColumnIndex) + kColumnLengthOffset),
+              2);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].mapq, 60);
+    EXPECT_EQ(read->chunks[0].records[1].mapq, 50);
 
     std::filesystem::remove(path);
 }
@@ -644,6 +697,77 @@ TEST(Axf1File, RejectsInvalidFlagBitpackWidth) {
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
     EXPECT_NE(read.error().find("invalid AXF1 FLAG bitpack width"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedMapqRleRunLength) {
+    const auto path = temp_path("alignx_axf1_truncated_mapq_rle_run");
+    auto file = make_file();
+    file.chunks[0].records[1].mapq = file.chunks[0].records[0].mapq;
+    auto third_record = file.chunks[0].records[1];
+    third_record.qname = "read003";
+    third_record.pos = 155;
+    file.chunks[0].records.push_back(third_record);
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto payload_offset = column_payload_offset(data, kMapqColumnIndex);
+    write_u8_at(data, payload_offset, 0x80);
+    write_u64_at(data, column_entry_offset(data, kMapqColumnIndex) + kColumnLengthOffset, 1);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("truncated AXF1 MAPQ RLE run length"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsZeroMapqRleRunLength) {
+    const auto path = temp_path("alignx_axf1_zero_mapq_rle_run");
+    auto file = make_file();
+    file.chunks[0].records[1].mapq = file.chunks[0].records[0].mapq;
+    auto third_record = file.chunks[0].records[1];
+    third_record.qname = "read003";
+    third_record.pos = 155;
+    file.chunks[0].records.push_back(third_record);
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u8_at(data, column_payload_offset(data, kMapqColumnIndex), 0);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("AXF1 MAPQ RLE run length is zero"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsMapqRleValueCountMismatch) {
+    const auto path = temp_path("alignx_axf1_mapq_rle_count_mismatch");
+    auto file = make_file();
+    file.chunks[0].records[1].mapq = file.chunks[0].records[0].mapq;
+    auto third_record = file.chunks[0].records[1];
+    third_record.qname = "read003";
+    third_record.pos = 155;
+    file.chunks[0].records.push_back(third_record);
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u8_at(data, column_payload_offset(data, kMapqColumnIndex), 4);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("AXF1 MAPQ RLE value count mismatch"), std::string::npos)
         << read.error();
 
     std::filesystem::remove(path);
