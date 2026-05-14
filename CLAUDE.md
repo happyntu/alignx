@@ -56,6 +56,8 @@ Completed:
 - AXF1 column codec inspector verified on the remote HG002 MAPQ RLE smoke output
 - `scripts/smoke_axf1_codecs.sh` correctness smoke for AXF1 conversion, three-way SAM stdout parity, and codec distribution inspection
 - AXF1 SEQ codec design note: implement chunk-local 2-bit literal with raw fallback before any reference-delta codec; defer reference-delta until reference identity metadata and CIGAR/strand semantics are designed
+- AXF1 SEQ 2-bit literal codec with raw fallback for non-ACGT sequences
+- AXF1 SEQ 2-bit literal toy smoke verified byte-identical SAM stdout and `seq_2bit_literal` codec distribution
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV

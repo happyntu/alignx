@@ -37,6 +37,7 @@ CODEC_NAMES = {
     1: "pos_delta_varint",
     2: "flag_bitpack",
     3: "mapq_rle",
+    4: "seq_2bit_literal",
 }
 
 

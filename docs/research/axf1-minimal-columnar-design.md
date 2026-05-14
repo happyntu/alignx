@@ -138,7 +138,7 @@ The minimum practical column set is:
 | `RNEXT` | length-prefixed strings or sentinel encoding | Preserve stdout first. |
 | `PNEXT` | raw `i32`/`u32` array | Preserve SAM semantics. |
 | `TLEN` | raw `i32` array | Preserve SAM semantics. |
-| `SEQ` | length-prefixed strings | Planned next step is 2-bit literal with raw fallback; reference-delta requires separate metadata and semantics design. |
+| `SEQ` | 2-bit literal for uppercase A/C/G/T; raw string fallback | Reference-delta requires separate metadata and semantics design. |
 | `QUAL` | length-prefixed strings | Lossless raw first. |
 | `TAGS` | length-prefixed trailing SAM text | Per-tag streams later. |
 
@@ -198,10 +198,11 @@ values when that payload is smaller than raw `u16`; otherwise the writer falls
 back to raw `u16` FLAG values.
 The MAPQ column uses repeated `(run_length varint, MAPQ byte)` pairs when RLE is
 smaller than raw `u8`; otherwise the writer falls back to raw MAPQ bytes.
-The SEQ column remains raw length-prefixed strings for now. The recommended next
-SEQ codec is a chunk-local 2-bit literal codec with raw fallback; reference-delta
-is deferred until reference identity metadata and exact CIGAR/strand
-reconstruction semantics are designed.
+The SEQ column uses a chunk-local 2-bit literal codec for uppercase A/C/G/T
+sequences when it is smaller than raw strings. It falls back to raw
+length-prefixed strings for ambiguity codes, lowercase bases, `*`, empty values,
+or non-beneficial payloads. Reference-delta is deferred until reference identity
+metadata and exact CIGAR/strand reconstruction semantics are designed.
 This is a correctness scaffold, not a benchmark claim.
 
 The AXF1 converter now emits deterministic chunks using the first

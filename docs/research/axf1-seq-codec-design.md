@@ -1,7 +1,7 @@
 # AXF1 SEQ Codec Design
 
-Status: design note, 2026-05-14. No format change is implemented by this
-note.
+Status: implemented for `seq_2bit_literal`, 2026-05-14. Reference-delta remains
+design-only.
 
 ## Goals
 
@@ -34,6 +34,13 @@ first column codecs already implemented are deliberately narrow:
 `SEQ` should follow the same conservative pattern: implement a simple,
 self-contained, correctness-gated codec first, then consider reference-aware
 compression only after the metadata and alignment semantics are designed.
+
+Implementation status: AXF1 now writes `seq_2bit_literal` for chunks whose
+stored sequences are all uppercase `A/C/G/T` and whose encoded payload is
+smaller than raw length-prefixed strings. It falls back to raw strings for
+ambiguity codes, lowercase bases, `*`, empty strings, or non-beneficial payloads.
+WSL `ctest` and toy `scripts/smoke_axf1_codecs.sh` coverage were checked on
+2026-05-14.
 
 ## First Implementation Candidate: `seq_2bit_literal`
 

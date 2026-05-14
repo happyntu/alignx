@@ -631,9 +631,67 @@ EncodedColumn encode_mapq_column(const std::vector<Axf1Record>& records) {
     return {.column_id = Axf1ColumnId::mapq, .codec_id = Axf1CodecId::raw, .payload = raw};
 }
 
+std::expected<std::uint8_t, std::string> encode_acgt_base_2bit(char base) {
+    switch (base) {
+    case 'A':
+        return 0;
+    case 'C':
+        return 1;
+    case 'G':
+        return 2;
+    case 'T':
+        return 3;
+    default:
+        return std::unexpected("AXF1 SEQ 2-bit literal requires uppercase A/C/G/T");
+    }
+}
+
+std::expected<std::vector<unsigned char>, std::string>
+encode_seq_2bit_literal_payload(const std::vector<Axf1Record>& records) {
+    std::vector<unsigned char> bytes;
+    for (const Axf1Record& record : records) {
+        if (record.sequence.empty()) {
+            return std::unexpected("AXF1 SEQ 2-bit literal requires non-empty sequence");
+        }
+
+        append_varint_u64(bytes, record.sequence.size());
+        std::uint8_t packed = 0;
+        std::uint8_t bases_in_byte = 0;
+        for (char base : record.sequence) {
+            auto encoded_base = encode_acgt_base_2bit(base);
+            if (!encoded_base) {
+                return std::unexpected(encoded_base.error());
+            }
+            packed |= static_cast<std::uint8_t>(*encoded_base << (bases_in_byte * 2U));
+            ++bases_in_byte;
+            if (bases_in_byte == 4) {
+                append_u8(bytes, packed);
+                packed = 0;
+                bases_in_byte = 0;
+            }
+        }
+        if (bases_in_byte != 0) {
+            append_u8(bytes, packed);
+        }
+    }
+    return bytes;
+}
+
+EncodedColumn encode_sequence_column(const std::vector<Axf1Record>& records) {
+    const auto raw = encode_strings(records, &Axf1Record::sequence);
+    auto encoded = encode_seq_2bit_literal_payload(records);
+    if (encoded && encoded->size() < raw.size()) {
+        return {.column_id = Axf1ColumnId::sequence,
+                .codec_id = Axf1CodecId::seq_2bit_literal,
+                .payload = std::move(*encoded)};
+    }
+    return {.column_id = Axf1ColumnId::sequence, .codec_id = Axf1CodecId::raw, .payload = raw};
+}
+
 std::vector<EncodedColumn> encode_columns(const Axf1Chunk& chunk) {
     auto flag_column = encode_flag_column(chunk.records);
     auto mapq_column = encode_mapq_column(chunk.records);
+    auto sequence_column = encode_sequence_column(chunk.records);
     return {{.column_id = Axf1ColumnId::qname,
              .codec_id = Axf1CodecId::raw,
              .payload = encode_strings(chunk.records, &Axf1Record::qname)},
@@ -652,9 +710,7 @@ std::vector<EncodedColumn> encode_columns(const Axf1Chunk& chunk) {
             {.column_id = Axf1ColumnId::template_length,
              .codec_id = Axf1CodecId::raw,
              .payload = encode_i32(chunk.records, &Axf1Record::template_length)},
-            {.column_id = Axf1ColumnId::sequence,
-             .codec_id = Axf1CodecId::raw,
-             .payload = encode_strings(chunk.records, &Axf1Record::sequence)},
+            std::move(sequence_column),
             {.column_id = Axf1ColumnId::quality,
              .codec_id = Axf1CodecId::raw,
              .payload = encode_strings(chunk.records, &Axf1Record::quality)},
@@ -857,6 +913,68 @@ decode_mapq_rle_column(const std::vector<unsigned char>& bytes, std::uint32_t re
     return values;
 }
 
+std::expected<char, std::string> decode_acgt_base_2bit(std::uint8_t value) {
+    switch (value) {
+    case 0:
+        return 'A';
+    case 1:
+        return 'C';
+    case 2:
+        return 'G';
+    case 3:
+        return 'T';
+    default:
+        return std::unexpected("invalid AXF1 SEQ 2-bit base");
+    }
+}
+
+std::expected<std::vector<std::string>, std::string>
+decode_seq_2bit_literal_column(const std::vector<unsigned char>& bytes,
+                               std::uint32_t record_count) {
+    Reader reader(bytes);
+    std::vector<std::string> values;
+    values.reserve(record_count);
+
+    for (std::uint32_t index = 0; index < record_count; ++index) {
+        auto length = read_varint_u64(reader, "truncated AXF1 SEQ 2-bit length",
+                                      "AXF1 SEQ 2-bit length overflow");
+        if (!length) {
+            return std::unexpected(length.error());
+        }
+        if (*length > static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())) {
+            return std::unexpected("AXF1 SEQ 2-bit length is too large");
+        }
+
+        std::string sequence;
+        sequence.reserve(static_cast<std::size_t>(*length));
+        for (std::uint64_t base_index = 0; base_index < *length; ++base_index) {
+            std::uint8_t packed = 0;
+            if (base_index % 4U == 0) {
+                auto byte = reader.read_u8();
+                if (!byte) {
+                    return std::unexpected("truncated AXF1 SEQ 2-bit bases");
+                }
+                packed = *byte;
+            } else {
+                packed = bytes.at(reader.offset() - 1U);
+            }
+
+            auto base = decode_acgt_base_2bit(
+                static_cast<std::uint8_t>((packed >> ((base_index % 4U) * 2U)) & 0x03U));
+            if (!base) {
+                return std::unexpected(base.error());
+            }
+            sequence.push_back(*base);
+        }
+        values.push_back(std::move(sequence));
+    }
+
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 SEQ 2-bit column has trailing bytes");
+    }
+    return values;
+}
+
 bool is_known_column(Axf1ColumnId column_id) {
     return std::find(kRequiredColumns.begin(), kRequiredColumns.end(), column_id) !=
            kRequiredColumns.end();
@@ -868,7 +986,8 @@ bool is_supported_column_codec(Axf1ColumnId column_id, Axf1CodecId codec_id) {
     }
     return (column_id == Axf1ColumnId::pos && codec_id == Axf1CodecId::pos_delta_varint) ||
            (column_id == Axf1ColumnId::flag && codec_id == Axf1CodecId::flag_bitpack) ||
-           (column_id == Axf1ColumnId::mapq && codec_id == Axf1CodecId::mapq_rle);
+           (column_id == Axf1ColumnId::mapq && codec_id == Axf1CodecId::mapq_rle) ||
+           (column_id == Axf1ColumnId::sequence && codec_id == Axf1CodecId::seq_2bit_literal);
 }
 
 bool contains_column(const std::vector<Axf1ColumnId>& columns, Axf1ColumnId column_id) {
@@ -1047,7 +1166,6 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
         }
         case Axf1ColumnId::cigar:
         case Axf1ColumnId::mate_reference:
-        case Axf1ColumnId::sequence:
         case Axf1ColumnId::quality:
         case Axf1ColumnId::tags: {
             auto values = decode_string_column(*payload, *record_count);
@@ -1066,6 +1184,18 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
                 } else {
                     chunk.records[index].tags = std::move(values->at(index));
                 }
+            }
+            break;
+        }
+        case Axf1ColumnId::sequence: {
+            auto values = entry.codec_id == Axf1CodecId::seq_2bit_literal
+                              ? decode_seq_2bit_literal_column(*payload, *record_count)
+                              : decode_string_column(*payload, *record_count);
+            if (!values) {
+                return std::unexpected(values.error());
+            }
+            for (std::uint32_t index = 0; index < *record_count; ++index) {
+                chunk.records[index].sequence = std::move(values->at(index));
             }
             break;
         }

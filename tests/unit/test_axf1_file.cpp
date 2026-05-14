@@ -34,6 +34,7 @@ constexpr std::size_t kIndexChunkLengthOffset = 24;
 constexpr std::size_t kFlagColumnIndex = 1;
 constexpr std::size_t kPosColumnIndex = 2;
 constexpr std::size_t kMapqColumnIndex = 3;
+constexpr std::size_t kSeqColumnIndex = 8;
 
 std::filesystem::path temp_path(std::string_view label) {
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -316,6 +317,59 @@ TEST(Axf1File, FallsBackToRawMapqWhenRleIsNotSmaller) {
     std::filesystem::remove(path);
 }
 
+TEST(Axf1File, WritesAcgtSequenceAsTwoBitLiteral) {
+    const auto path = temp_path("alignx_axf1_seq_2bit_literal");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kSeqColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::seq_2bit_literal));
+    EXPECT_EQ(read_u64_at(data, column_entry_offset(data, kSeqColumnIndex) + kColumnLengthOffset),
+              8);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].sequence, "ACGTACGTAA");
+    EXPECT_EQ(read->chunks[0].records[1].sequence, "TTTTACGGGA");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, FallsBackToRawSequenceForNonAcgtBases) {
+    const std::vector<std::string> fallback_sequences{"TTTTNCGGGA", "ttttACGGGA", "*"};
+
+    for (const std::string& fallback_sequence : fallback_sequences) {
+        const auto path = temp_path("alignx_axf1_seq_2bit_literal_raw_fallback");
+        auto file = make_file();
+        file.chunks[0].records[1].sequence = fallback_sequence;
+
+        auto write = alignx::format::write_axf1_file(file, path);
+        ASSERT_TRUE(write) << write.error();
+
+        auto data = read_bytes(path);
+        EXPECT_EQ(
+            read_u16_at(data, column_entry_offset(data, kSeqColumnIndex) + kColumnCodecOffset),
+            static_cast<std::uint16_t>(alignx::format::Axf1CodecId::raw));
+        EXPECT_EQ(
+            read_u64_at(data, column_entry_offset(data, kSeqColumnIndex) + kColumnLengthOffset),
+            4 + file.chunks[0].records[0].sequence.size() + 4 + fallback_sequence.size());
+
+        auto read = alignx::format::read_axf1_file(path);
+        ASSERT_TRUE(read) << read.error();
+        ASSERT_EQ(read->chunks.size(), 1);
+        ASSERT_EQ(read->chunks[0].records.size(), 2);
+        EXPECT_EQ(read->chunks[0].records[0].sequence, "ACGTACGTAA");
+        EXPECT_EQ(read->chunks[0].records[1].sequence, fallback_sequence);
+
+        std::filesystem::remove(path);
+    }
+}
+
 TEST(Axf1File, WritesMonotonicPosAsDeltaVarint) {
     const auto path = temp_path("alignx_axf1_pos_delta_varint");
     const auto file = make_file();
@@ -553,6 +607,31 @@ TEST(Axf1FileReader, ReadsSelectedChunkColumns) {
     std::filesystem::remove(path);
 }
 
+TEST(Axf1FileReader, ReadsSelectedTwoBitSequenceColumn) {
+    const auto path = temp_path("alignx_axf1_file_reader_sequence_column");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto reader = alignx::format::Axf1FileReader::open(path);
+    ASSERT_TRUE(reader) << reader.error();
+
+    auto hits = reader->query_chunks(0, 150, 151);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 1);
+
+    auto chunk = reader->read_chunk_columns(*hits->at(0), {alignx::format::Axf1ColumnId::sequence});
+    ASSERT_TRUE(chunk) << chunk.error();
+    ASSERT_EQ(chunk->records.size(), 2);
+    EXPECT_EQ(chunk->records[0].sequence, "ACGTACGTAA");
+    EXPECT_EQ(chunk->records[1].sequence, "TTTTACGGGA");
+    EXPECT_EQ(chunk->records[0].qname, "");
+    EXPECT_EQ(chunk->records[1].quality, "");
+
+    std::filesystem::remove(path);
+}
+
 TEST(Axf1File, RejectsInvalidMagic) {
     const auto path = temp_path("alignx_axf1_bad_magic");
     {
@@ -768,6 +847,43 @@ TEST(Axf1File, RejectsMapqRleValueCountMismatch) {
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
     EXPECT_NE(read.error().find("AXF1 MAPQ RLE value count mismatch"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedSeqTwoBitLength) {
+    const auto path = temp_path("alignx_axf1_truncated_seq_2bit_length");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u8_at(data, column_payload_offset(data, kSeqColumnIndex), 0x80);
+    write_u64_at(data, column_entry_offset(data, kSeqColumnIndex) + kColumnLengthOffset, 1);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("truncated AXF1 SEQ 2-bit length"), std::string::npos)
+        << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedSeqTwoBitBases) {
+    const auto path = temp_path("alignx_axf1_truncated_seq_2bit_bases");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    write_u64_at(data, column_entry_offset(data, kSeqColumnIndex) + kColumnLengthOffset, 1);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("truncated AXF1 SEQ 2-bit bases"), std::string::npos)
         << read.error();
 
     std::filesystem::remove(path);
