@@ -195,6 +195,11 @@ all 7 chunks used FLAG codec id `2` and POS codec id `1`, with byte-identical
 stdout against BAM-backed `alignx view` and `samtools view`. The resulting file
 was 1,857,974 bytes, with max 294,483-byte chunk length.
 
+Remote AXF1 MAPQ RLE smoke on the same HG002 chr1 region confirmed that all 7
+chunks used MAPQ codec id `3`, FLAG codec id `2`, and POS codec id `1`, with
+byte-identical stdout against BAM-backed `alignx view` and `samtools view`. The
+resulting file was 1,857,924 bytes, with max 294,474-byte chunk length.
+
 AXF1 v2 metadata corruption coverage rejects invalid subset flags, truncated
 source/conversion-region strings, and metadata/index overlap in both C++ reader
 paths. The Python metadata inspector was checked against the same corruptions.

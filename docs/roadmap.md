@@ -69,6 +69,7 @@ and region-query correctness.
 - [x] AXF1 FLAG bit-pack codec with raw fallback
 - [x] AXF1 FLAG bit-pack smoke on HG002 chr1 small region
 - [x] AXF1 MAPQ RLE codec with raw fallback
+- [x] AXF1 MAPQ RLE smoke on HG002 chr1 small region
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec: SEQ reference-delta 2-bit

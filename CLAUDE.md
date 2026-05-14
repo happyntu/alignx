@@ -52,6 +52,7 @@ Completed:
 - AXF1 FLAG bit-pack codec with raw fallback when bit-packing is not smaller
 - AXF1 FLAG bit-pack remote HG002 chr1 small-region correctness smoke
 - AXF1 MAPQ run-length codec with raw fallback when RLE is not smaller
+- AXF1 MAPQ RLE remote HG002 chr1 small-region correctness smoke
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
