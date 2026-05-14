@@ -104,7 +104,7 @@ Initial compression registry:
 | id | Name | Status |
 |---:|---|---|
 | 0 | stored | Implemented dependency-free validation path; not emitted by default writers |
-| 1 | zstd | Future candidate |
+| 1 | zstd | Planned optional feature-gated implementation |
 | 2 | lz4 | Future fast-profile candidate |
 
 The first implemented algorithm is `stored`, which preserves the envelope
@@ -144,12 +144,79 @@ requirements for uncompressed AXF1 files.
 
 Before enabling zstd:
 
-- CMake must detect zstd explicitly.
+- CMake must detect zstd explicitly using the existing optional-dependency
+  pattern: try `find_package(zstd CONFIG QUIET)` first, then a pkg-config
+  fallback if needed.
 - Builds without zstd must still read uncompressed AXF1 files.
 - Builds without zstd must reject zstd-wrapped required columns with a clear
   error, not silently fall back.
 - Test coverage must include both supported and unsupported-compression paths if
   practical.
+
+## zstd Integration Mini-Design
+
+The first real compression algorithm should be zstd behind an explicit feature
+gate. It must not make zstd a required dependency for normal AXF1 builds.
+
+### CMake Policy
+
+- Add an `ALIGNX_ENABLE_ZSTD` option, default `OFF`.
+- When the option is `OFF`, do not search for zstd and do not link zstd.
+- When the option is `ON`, detect zstd with CMake config first and pkg-config
+  second, mirroring the HTSlib pattern where practical.
+- If `ALIGNX_ENABLE_ZSTD=ON` and zstd is unavailable, fail configure with a
+  clear message.
+- If detected, link `alignx_lib` to the selected zstd target and define
+  `ALIGNX_HAVE_ZSTD`.
+
+This is stricter than HTSlib's current optional behavior because enabling zstd
+is an explicit request to produce or consume zstd-compressed AXF1 payloads.
+
+### Reader Behavior
+
+- `compression_id = 1` means zstd-compressed payload bytes inside the existing
+  envelope.
+- Builds with `ALIGNX_HAVE_ZSTD` decompress the payload, require output size to
+  exactly match `uncompressed_size`, then pass the bytes to the base codec
+  decoder.
+- Builds without `ALIGNX_HAVE_ZSTD` must reject `compression_id = 1` with a
+  clear "unsupported AXF1 compressed payload compression" style error.
+- Existing uncompressed AXF1 files and `stored` envelopes remain readable
+  without zstd.
+- Reader errors must preserve atomic stdout behavior; no partial view output.
+
+### Writer Behavior
+
+- Do not change default writer output when zstd support lands.
+- Add a hidden/internal writer policy first, not a user-facing promise, so
+  correctness and compatibility are validated before CLI exposure.
+- Produce the base codec payload first.
+- Try zstd only for columns whose wrapper codec id is explicitly supported, such
+  as `qual_pack_compressed`.
+- Emit the wrapper only when `envelope_size + zstd_payload_size` is smaller than
+  the base payload.
+- Fall back to the base codec when zstd is unavailable, disabled, unsupported
+  for that column, or non-beneficial.
+- Never apply lossy quality-score binning in the zstd wrapper path.
+
+### Test Matrix
+
+- Configure/build with `ALIGNX_ENABLE_ZSTD=OFF`; uncompressed and `stored`
+  compressed-envelope tests pass.
+- With zstd off, a fixture containing `compression_id = 1` is rejected cleanly.
+- Configure/build with `ALIGNX_ENABLE_ZSTD=ON` in an environment that provides
+  zstd; zstd envelope round-trip passes for one column.
+- Corruption tests cover bad compressed bytes, decompressed-size mismatch, and
+  base-codec validation after successful decompression.
+- Writer tests cover smaller-than-base emission and non-beneficial fallback.
+- Metadata tools continue to report wrapper codec names without needing zstd.
+
+### CLI Exposure
+
+Do not add a public compression flag until toy and remote correctness smokes are
+stable. A future user-facing flag should be explicit, for example
+`--axf1-compression zstd`, and the default should remain the current base-codec
+selection until benchmark/profiling work justifies a change.
 
 ## Why This Before QUAL Context Models
 
