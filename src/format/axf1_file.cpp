@@ -930,42 +930,110 @@ EncodedColumn encode_quality_column(const std::vector<Axf1Record>& records) {
     return best;
 }
 
-std::vector<EncodedColumn> encode_columns(const Axf1Chunk& chunk) {
+std::expected<std::vector<unsigned char>, std::string>
+encode_compressed_payload_envelope(Axf1CodecId base_codec_id, Axf1Compression compression,
+                                   const std::vector<unsigned char>& payload) {
+    std::vector<unsigned char> envelope;
+    append_varint_u64(envelope, static_cast<std::uint16_t>(base_codec_id));
+    if (compression == Axf1Compression::none) {
+        append_varint_u64(envelope, static_cast<std::uint64_t>(Axf1CompressionId::stored));
+        append_varint_u64(envelope, static_cast<std::uint64_t>(payload.size()));
+        append_varint_u64(envelope, static_cast<std::uint64_t>(payload.size()));
+        envelope.insert(envelope.end(), payload.begin(), payload.end());
+        return envelope;
+    }
+    if (compression != Axf1Compression::zstd) {
+        return std::unexpected("unsupported AXF1 writer compression");
+    }
+
+#ifdef ALIGNX_HAVE_ZSTD
+    const std::size_t bound = ZSTD_compressBound(payload.size());
+    std::vector<unsigned char> compressed(bound);
+    const std::size_t compressed_size =
+        ZSTD_compress(compressed.data(), compressed.size(), payload.data(), payload.size(), 1);
+    if (ZSTD_isError(compressed_size) != 0) {
+        return std::unexpected(std::string("failed to compress AXF1 zstd payload: ") +
+                               ZSTD_getErrorName(compressed_size));
+    }
+    compressed.resize(compressed_size);
+    append_varint_u64(envelope, static_cast<std::uint64_t>(Axf1CompressionId::zstd));
+    append_varint_u64(envelope, static_cast<std::uint64_t>(payload.size()));
+    append_varint_u64(envelope, static_cast<std::uint64_t>(compressed.size()));
+    envelope.insert(envelope.end(), compressed.begin(), compressed.end());
+    return envelope;
+#else
+    return std::unexpected("AXF1 zstd writer compression requires ALIGNX_ENABLE_ZSTD=ON");
+#endif
+}
+
+std::expected<EncodedColumn, std::string>
+encode_quality_column(const std::vector<Axf1Record>& records, const Axf1WriteOptions& options) {
+    if (options.quality_compression == Axf1Compression::none) {
+        return encode_quality_column(records);
+    }
+    if (options.quality_compression != Axf1Compression::zstd) {
+        return std::unexpected("unsupported AXF1 writer quality compression");
+    }
+
+    auto packed = encode_qual_pack_payload(records);
+    if (!packed) {
+        return encode_quality_column(records);
+    }
+    auto envelope = encode_compressed_payload_envelope(Axf1CodecId::qual_pack,
+                                                       options.quality_compression, *packed);
+    if (!envelope) {
+        return std::unexpected(envelope.error());
+    }
+    return EncodedColumn{.column_id = Axf1ColumnId::quality,
+                         .codec_id = Axf1CodecId::qual_pack_compressed,
+                         .payload = std::move(*envelope)};
+}
+
+std::expected<std::vector<EncodedColumn>, std::string>
+encode_columns(const Axf1Chunk& chunk, const Axf1WriteOptions& options) {
     auto flag_column = encode_flag_column(chunk.records);
     auto mapq_column = encode_mapq_column(chunk.records);
     auto cigar_column = encode_cigar_column(chunk.records);
     auto sequence_column = encode_sequence_column(chunk.records);
-    auto quality_column = encode_quality_column(chunk.records);
-    return {{.column_id = Axf1ColumnId::qname,
-             .codec_id = Axf1CodecId::raw,
-             .payload = encode_strings(chunk.records, &Axf1Record::qname)},
-            std::move(flag_column),
-            encode_pos_column(chunk.records),
-            std::move(mapq_column),
-            std::move(cigar_column),
-            {.column_id = Axf1ColumnId::mate_reference,
-             .codec_id = Axf1CodecId::raw,
-             .payload = encode_strings(chunk.records, &Axf1Record::mate_reference)},
-            {.column_id = Axf1ColumnId::mate_pos,
-             .codec_id = Axf1CodecId::raw,
-             .payload = encode_i32(chunk.records, &Axf1Record::mate_pos)},
-            {.column_id = Axf1ColumnId::template_length,
-             .codec_id = Axf1CodecId::raw,
-             .payload = encode_i32(chunk.records, &Axf1Record::template_length)},
-            std::move(sequence_column),
-            std::move(quality_column),
-            {.column_id = Axf1ColumnId::tags,
-             .codec_id = Axf1CodecId::raw,
-             .payload = encode_strings(chunk.records, &Axf1Record::tags)}};
+    auto quality_column = encode_quality_column(chunk.records, options);
+    if (!quality_column) {
+        return std::unexpected(quality_column.error());
+    }
+    return std::vector<EncodedColumn>{
+        {.column_id = Axf1ColumnId::qname,
+         .codec_id = Axf1CodecId::raw,
+         .payload = encode_strings(chunk.records, &Axf1Record::qname)},
+        std::move(flag_column),
+        encode_pos_column(chunk.records),
+        std::move(mapq_column),
+        std::move(cigar_column),
+        {.column_id = Axf1ColumnId::mate_reference,
+         .codec_id = Axf1CodecId::raw,
+         .payload = encode_strings(chunk.records, &Axf1Record::mate_reference)},
+        {.column_id = Axf1ColumnId::mate_pos,
+         .codec_id = Axf1CodecId::raw,
+         .payload = encode_i32(chunk.records, &Axf1Record::mate_pos)},
+        {.column_id = Axf1ColumnId::template_length,
+         .codec_id = Axf1CodecId::raw,
+         .payload = encode_i32(chunk.records, &Axf1Record::template_length)},
+        std::move(sequence_column),
+        std::move(*quality_column),
+        {.column_id = Axf1ColumnId::tags,
+         .codec_id = Axf1CodecId::raw,
+         .payload = encode_strings(chunk.records, &Axf1Record::tags)}};
 }
 
-std::vector<unsigned char> write_chunk(const Axf1Chunk& chunk) {
-    const auto encoded_columns = encode_columns(chunk);
+std::expected<std::vector<unsigned char>, std::string>
+write_chunk(const Axf1Chunk& chunk, const Axf1WriteOptions& options) {
+    auto encoded_columns = encode_columns(chunk, options);
+    if (!encoded_columns) {
+        return std::unexpected(encoded_columns.error());
+    }
     std::vector<ColumnEntry> entries;
-    entries.reserve(encoded_columns.size());
+    entries.reserve(encoded_columns->size());
 
     std::uint64_t payload_offset = 0;
-    for (const EncodedColumn& column : encoded_columns) {
+    for (const EncodedColumn& column : *encoded_columns) {
         entries.push_back({.column_id = column.column_id,
                            .codec_id = column.codec_id,
                            .offset = payload_offset,
@@ -985,7 +1053,7 @@ std::vector<unsigned char> write_chunk(const Axf1Chunk& chunk) {
         append_u64(bytes, entry.offset);
         append_u64(bytes, entry.length);
     }
-    for (const EncodedColumn& column : encoded_columns) {
+    for (const EncodedColumn& column : *encoded_columns) {
         bytes.insert(bytes.end(), column.payload.begin(), column.payload.end());
     }
     return bytes;
@@ -1839,6 +1907,12 @@ Axf1FileReader::read_chunk_columns(const Axf1ChunkIndexEntry& chunk,
 
 std::expected<void, std::string> write_axf1_file(const Axf1File& file,
                                                  const std::filesystem::path& path) {
+    return write_axf1_file(file, path, Axf1WriteOptions{});
+}
+
+std::expected<void, std::string> write_axf1_file(const Axf1File& file,
+                                                 const std::filesystem::path& path,
+                                                 const Axf1WriteOptions& options) {
     auto validation = validate_file(file);
     if (!validation) {
         return std::unexpected(validation.error());
@@ -1856,15 +1930,18 @@ std::expected<void, std::string> write_axf1_file(const Axf1File& file,
     std::vector<Axf1ChunkIndexEntry> index_entries;
     std::uint64_t chunk_offset = kHeaderSize + reference_bytes.size() + metadata_bytes.size();
     for (const Axf1Chunk& chunk : file.chunks) {
-        std::vector<unsigned char> bytes = write_chunk(chunk);
+        auto bytes = write_chunk(chunk, options);
+        if (!bytes) {
+            return std::unexpected(bytes.error());
+        }
         index_entries.push_back({.ref_id = chunk.ref_id,
                                  .start_pos = chunk.start_pos,
                                  .end_pos = chunk.end_pos,
                                  .record_count = static_cast<std::uint32_t>(chunk.records.size()),
                                  .chunk_offset = chunk_offset,
-                                 .chunk_length = static_cast<std::uint64_t>(bytes.size())});
-        chunk_bytes.insert(chunk_bytes.end(), bytes.begin(), bytes.end());
-        chunk_offset += bytes.size();
+                                 .chunk_length = static_cast<std::uint64_t>(bytes->size())});
+        chunk_bytes.insert(chunk_bytes.end(), bytes->begin(), bytes->end());
+        chunk_offset += bytes->size();
     }
     const std::uint64_t index_offset = chunk_offset;
 

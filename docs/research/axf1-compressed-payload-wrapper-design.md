@@ -2,9 +2,9 @@
 
 Status: partially implemented, 2026-05-15. AXF1 currently has a
 dependency-free `qual_pack_compressed` reader path for a stored payload envelope;
-zstd envelope decode is available when built with `ALIGNX_ENABLE_ZSTD=ON`.
-Writers still emit the smaller base codec directly and do not emit zstd
-wrappers.
+zstd envelope decode is available when built with `ALIGNX_ENABLE_ZSTD=ON`, and
+the writer can explicitly emit zstd-wrapped `qual_pack_compressed` payloads for
+quality columns. Default writers still emit the smaller base codec directly.
 
 ## Motivation
 
@@ -40,7 +40,8 @@ unsupported-codec behavior.
 
 ## Non-Goals
 
-- Do not implement zstd, LZ4, rANS, or arithmetic coding in this note.
+- Do not implement LZ4, rANS, arithmetic coding, or zstd dictionaries in this
+  note.
 - Do not introduce lossy quality-score binning.
 - Do not implement FQZComp-like QUAL context modeling.
 - Do not make compression-ratio or throughput claims before scheduled
@@ -106,7 +107,7 @@ Initial compression registry:
 | id | Name | Status |
 |---:|---|---|
 | 0 | stored | Implemented dependency-free validation path; not emitted by default writers |
-| 1 | zstd | Implemented reader when built with `ALIGNX_ENABLE_ZSTD=ON`; writer pending |
+| 1 | zstd | Implemented reader and explicit quality writer when built with `ALIGNX_ENABLE_ZSTD=ON` |
 | 2 | lz4 | Future fast-profile candidate |
 
 The first implemented algorithm is `stored`, which preserves the envelope
@@ -118,12 +119,14 @@ one-off `*_zstd` codec ids.
 
 - Produce the base transform payload first.
 - Compress the base payload only if the algorithm is available and configured.
-- Use the compressed wrapper only if total envelope payload is smaller than the
-  base payload.
-- Fall back to the base codec if compression is unavailable, unsupported for the
-  selected profile, or non-beneficial.
-- Current writers do this unconditionally: they still emit the smaller base
-  codec directly and never write `qual_pack_compressed`.
+- Default writers still emit the smaller base codec directly and never write
+  `qual_pack_compressed`.
+- With explicit `zstd` quality compression, the current writer emits a zstd
+  `qual_pack_compressed` wrapper when `qual_pack` can encode the quality column.
+  If `qual_pack` cannot encode the column, it falls back to the regular quality
+  codec selection.
+- A future size-policy pass should decide whether explicit zstd should also
+  fall back when the envelope is non-beneficial.
 - Never apply lossy transforms in this wrapper.
 - Keep each column payload independently compressed; do not share dictionaries
   across columns or chunks in the first implementation.
@@ -193,15 +196,15 @@ is an explicit request to produce or consume zstd-compressed AXF1 payloads.
 ### Writer Behavior
 
 - Do not change default writer output when zstd support lands.
-- Add a hidden/internal writer policy first, not a user-facing promise, so
-  correctness and compatibility are validated before CLI exposure.
+- Add an explicit writer policy and CLI flag; keep the default on the base-codec
+  path until correctness and benchmark/profiling work justify changing it.
 - Produce the base codec payload first.
 - Try zstd only for columns whose wrapper codec id is explicitly supported, such
   as `qual_pack_compressed`.
-- Emit the wrapper only when `envelope_size + zstd_payload_size` is smaller than
-  the base payload.
-- Fall back to the base codec when zstd is unavailable, disabled, unsupported
-  for that column, or non-beneficial.
+- Current implementation emits the wrapper when explicitly requested and zstd is
+  enabled; it falls back to the base quality codec only when `qual_pack` cannot
+  encode the column.
+- Builds without zstd reject explicit zstd writer requests clearly.
 - Never apply lossy quality-score binning in the zstd wrapper path.
 
 ### Test Matrix
@@ -213,15 +216,19 @@ is an explicit request to produce or consume zstd-compressed AXF1 payloads.
   zstd; zstd envelope round-trip passes for one column.
 - Corruption tests cover bad compressed bytes, decompressed-size mismatch, and
   base-codec validation after successful decompression.
-- Writer tests cover smaller-than-base emission and non-beneficial fallback.
+- Writer tests cover explicit zstd emission and disabled-build rejection.
 - Metadata tools continue to report wrapper codec names without needing zstd.
 
 ### CLI Exposure
 
-Do not add a public compression flag until toy and remote correctness smokes are
-stable. A future user-facing flag should be explicit, for example
-`--axf1-compression zstd`, and the default should remain the current base-codec
-selection until benchmark/profiling work justifies a change.
+The public CLI flag is intentionally explicit:
+
+```bash
+alignx convert input.bam -o output.axf1 --format AXF1 --axf1-quality-compression zstd
+```
+
+The default remains `--axf1-quality-compression none`, which preserves the
+current base-codec selection until benchmark/profiling work justifies a change.
 
 ## Why This Before QUAL Context Models
 
@@ -234,9 +241,9 @@ without creating separate entropy-coding decisions for every column.
 ## Acceptance Criteria for a Future Implementation
 
 - Unit tests cover a compressed payload round-trip for at least one column.
-  Implemented for `qual_pack_compressed` with `stored`.
-- Unit tests cover raw/base fallback when compression is not smaller.
-  Implemented by keeping writers on the base codec path.
+  Implemented for `qual_pack_compressed` with `stored` and zstd.
+- Unit tests cover default raw/base writer behavior and explicit zstd writer
+  behavior. Non-beneficial zstd fallback remains deferred.
 - Malformed tests cover truncated envelope, unknown compression id,
   uncompressed-size mismatch, compressed-size mismatch, decompressor failure,
   and trailing bytes. Implemented for truncated envelope fields, unsupported

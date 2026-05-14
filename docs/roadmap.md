@@ -91,7 +91,8 @@ and region-query correctness.
 - [x] AXF1 zstd payload wrapper feature-gate design
 - [x] AXF1 zstd feature-gate skeleton with disabled-build rejection path
 - [x] AXF1 zstd compressed payload envelope reader
-- [ ] Optional zstd/LZ4 compressed payload writer path with raw/base fallback
+- [x] Explicit AXF1 zstd quality payload writer path and CLI flag
+- [ ] Optional zstd/LZ4 compressed payload writer size policy with raw/base fallback
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec design: SEQ reference-delta with reference identity metadata

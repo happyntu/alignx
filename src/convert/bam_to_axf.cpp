@@ -259,6 +259,13 @@ std::expected<void, std::string> convert_bam_to_axf_mvp(const std::filesystem::p
 std::expected<void, std::string> convert_bam_to_axf1_mvp(const std::filesystem::path& input_bam,
                                                          const std::filesystem::path& output_axf,
                                                          const std::optional<std::string>& region) {
+    return convert_bam_to_axf1_mvp(input_bam, output_axf, region, format::Axf1WriteOptions{});
+}
+
+std::expected<void, std::string> convert_bam_to_axf1_mvp(const std::filesystem::path& input_bam,
+                                                         const std::filesystem::path& output_axf,
+                                                         const std::optional<std::string>& region,
+                                                         const format::Axf1WriteOptions& options) {
     std::optional<query::SamRegion> parsed_region;
     if (region.has_value()) {
         auto parsed = query::parse_sam_region(*region);
@@ -355,7 +362,7 @@ std::expected<void, std::string> convert_bam_to_axf1_mvp(const std::filesystem::
         flush_axf1_chunk(file, *pending_ref_id, pending_chunk);
     }
 
-    return format::write_axf1_file(file, output_axf);
+    return format::write_axf1_file(file, output_axf, options);
 }
 
 } // namespace alignx::convert

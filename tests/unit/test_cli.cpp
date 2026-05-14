@@ -363,6 +363,43 @@ TEST(Cli, ConvertRejectsUnsupportedFormat) {
     std::filesystem::remove_all(temp_dir);
 }
 
+TEST(Cli, ConvertRejectsUnsupportedAxf1QualityCompression) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_bad_axf1_quality_compression");
+    const auto output = temp_dir / "toy.axf1";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "convert", toy_bam_path().string(), "-o", output.string(),
+                              "--format", "AXF1", "--axf1-quality-compression", "lz4"},
+                             out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("--axf1-quality-compression must be none or zstd"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(output));
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ConvertRejectsAxf1QualityCompressionForAxf0) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_axf0_quality_compression");
+    const auto output = temp_dir / "toy.axf";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "convert", toy_bam_path().string(), "-o", output.string(),
+                              "--format", "AXF0", "--axf1-quality-compression", "zstd"},
+                             out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("--axf1-quality-compression requires --format AXF1"),
+              std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(output));
+
+    std::filesystem::remove_all(temp_dir);
+}
+
 #ifdef ALIGNX_HAVE_HTSLIB
 
 TEST(Cli, ConvertWritesToyAxfMvp) {
@@ -414,6 +451,37 @@ TEST(Cli, ConvertWritesToyAxf1Mvp) {
     EXPECT_EQ(axf->references[0].name, "chrToy");
     ASSERT_EQ(axf->chunks.size(), 1);
     EXPECT_EQ(axf->chunks[0].records.size(), 2);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ConvertWritesToyAxf1WithZstdQualityCompressionWhenEnabled) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_axf1_zstd_quality");
+    const auto output = temp_dir / "toy.axf1";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "convert", toy_bam_path().string(), "-o", output.string(),
+                              "--format", "AXF1", "--axf1-quality-compression", "zstd"},
+                             out, err);
+
+#ifdef ALIGNX_HAVE_ZSTD
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(err.str(), "");
+    EXPECT_NE(out.str().find("format\tAXF1"), std::string::npos);
+    EXPECT_NE(out.str().find("axf1_quality_compression\tzstd"), std::string::npos);
+    ASSERT_TRUE(std::filesystem::is_regular_file(output));
+
+    auto axf = alignx::format::read_axf1_file(output);
+    ASSERT_TRUE(axf) << axf.error();
+    ASSERT_EQ(axf->chunks.size(), 1);
+    EXPECT_EQ(axf->chunks[0].records.size(), 2);
+#else
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("ALIGNX_ENABLE_ZSTD=ON"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(output));
+#endif
 
     std::filesystem::remove_all(temp_dir);
 }

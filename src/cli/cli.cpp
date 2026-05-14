@@ -18,6 +18,7 @@
 #include "analysis/stats.hpp"
 #include "cli/runner.hpp"
 #include "convert/bam_to_axf.hpp"
+#include "format/axf1_file.hpp"
 #include "index/axf_index.hpp"
 #include "index/bai_reader.hpp"
 #include "index/bam_index_projection.hpp"
@@ -253,7 +254,7 @@ int run_stats(const std::filesystem::path& input, std::ostream& out, std::ostrea
 
 int run_convert(const std::filesystem::path& input, const std::filesystem::path& output,
                 const std::optional<std::string>& region, std::string_view format,
-                std::ostream& out, std::ostream& err) {
+                std::string_view axf1_quality_compression, std::ostream& out, std::ostream& err) {
     std::string normalized_format(format);
     std::transform(normalized_format.begin(), normalized_format.end(), normalized_format.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
@@ -262,8 +263,26 @@ int run_convert(const std::filesystem::path& input, const std::filesystem::path&
         return 1;
     }
 
+    std::string normalized_quality_compression(axf1_quality_compression);
+    std::transform(normalized_quality_compression.begin(), normalized_quality_compression.end(),
+                   normalized_quality_compression.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (normalized_quality_compression != "none" && normalized_quality_compression != "zstd") {
+        err << "alignx convert: --axf1-quality-compression must be none or zstd\n";
+        return 1;
+    }
+    if (normalized_format != "AXF1" && normalized_quality_compression != "none") {
+        err << "alignx convert: --axf1-quality-compression requires --format AXF1\n";
+        return 1;
+    }
+
+    format::Axf1WriteOptions axf1_options;
+    if (normalized_quality_compression == "zstd") {
+        axf1_options.quality_compression = format::Axf1Compression::zstd;
+    }
+
     auto conversion = normalized_format == "AXF1"
-                          ? convert::convert_bam_to_axf1_mvp(input, output, region)
+                          ? convert::convert_bam_to_axf1_mvp(input, output, region, axf1_options)
                           : convert::convert_bam_to_axf_mvp(input, output, region);
     if (!conversion) {
         err << "alignx convert: " << conversion.error() << '\n';
@@ -276,6 +295,9 @@ int run_convert(const std::filesystem::path& input, const std::filesystem::path&
         out << "region\t" << *region << '\n';
     }
     out << "format\t" << normalized_format << '\n';
+    if (normalized_format == "AXF1") {
+        out << "axf1_quality_compression\t" << normalized_quality_compression << '\n';
+    }
     return 0;
 }
 
@@ -415,6 +437,7 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     std::filesystem::path convert_output;
     std::optional<std::string> convert_region;
     std::string convert_format = "AXF0";
+    std::string convert_axf1_quality_compression = "none";
     auto* convert_cmd = app.add_subcommand("convert", "Convert BAM to AXF MVP format");
     convert_cmd->add_option("input", convert_input, "Input BAM file")
         ->required()
@@ -423,6 +446,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     convert_cmd->add_option("--region", convert_region,
                             "Optional BAM region to convert, for example chr1:1-1000");
     convert_cmd->add_option("--format", convert_format, "Output AXF format: AXF0 or AXF1");
+    convert_cmd->add_option("--axf1-quality-compression", convert_axf1_quality_compression,
+                            "AXF1 quality payload compression: none or zstd");
 
     std::filesystem::path index_input;
     std::filesystem::path index_output;
@@ -451,7 +476,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
         return run_stats(stats_input, out, err);
     }
     if (*convert_cmd) {
-        return run_convert(convert_input, convert_output, convert_region, convert_format, out, err);
+        return run_convert(convert_input, convert_output, convert_region, convert_format,
+                           convert_axf1_quality_compression, out, err);
     }
     if (*index_cmd) {
         return run_index(index_input, index_output, out, err);

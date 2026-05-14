@@ -119,6 +119,20 @@ std::uint16_t read_u16_at(const std::vector<unsigned char>& data, std::size_t of
     return value;
 }
 
+std::uint64_t read_varint_at(const std::vector<unsigned char>& data, std::size_t& offset) {
+    std::uint64_t value = 0;
+    std::uint8_t shift = 0;
+    for (;;) {
+        const unsigned char byte = data.at(offset);
+        ++offset;
+        value |= static_cast<std::uint64_t>(byte & 0x7FU) << shift;
+        if ((byte & 0x80U) == 0) {
+            return value;
+        }
+        shift = static_cast<std::uint8_t>(shift + 7U);
+    }
+}
+
 void write_u16_at(std::vector<unsigned char>& data, std::size_t offset, std::uint16_t value) {
     for (std::size_t byte = 0; byte < sizeof(value); ++byte) {
         data.at(offset + byte) = static_cast<unsigned char>((value >> (byte * 8U)) & 0xFFU);
@@ -570,6 +584,61 @@ TEST(Axf1File, WritesSmallAlphabetQualityAsPack) {
     EXPECT_EQ(read->chunks[0].records[1].quality, "FFFFFFFFFF");
 
     std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsZstdQualityCompressionWhenZstdIsDisabled) {
+#ifndef ALIGNX_HAVE_ZSTD
+    const auto path = temp_path("alignx_axf1_zstd_writer_disabled");
+    const auto file = make_file();
+    const alignx::format::Axf1WriteOptions options{.quality_compression =
+                                                       alignx::format::Axf1Compression::zstd};
+
+    auto write = alignx::format::write_axf1_file(file, path, options);
+    ASSERT_FALSE(write);
+    EXPECT_NE(write.error().find("ALIGNX_ENABLE_ZSTD=ON"), std::string::npos) << write.error();
+    EXPECT_FALSE(std::filesystem::exists(path));
+#endif
+}
+
+TEST(Axf1File, WritesZstdCompressedQualPackEnvelopeWhenEnabled) {
+#ifdef ALIGNX_HAVE_ZSTD
+    const auto path = temp_path("alignx_axf1_zstd_writer");
+    const auto file = make_file();
+    const alignx::format::Axf1WriteOptions options{.quality_compression =
+                                                       alignx::format::Axf1Compression::zstd};
+
+    auto write = alignx::format::write_axf1_file(file, path, options);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack_compressed));
+
+    std::size_t payload_offset = column_payload_offset(data, kQualColumnIndex);
+    EXPECT_EQ(read_varint_at(data, payload_offset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qual_pack));
+    EXPECT_EQ(read_varint_at(data, payload_offset), 1);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].quality, "FFFFFFFFFF");
+    EXPECT_EQ(read->chunks[0].records[1].quality, "FFFFFFFFFF");
+
+    auto reader = alignx::format::Axf1FileReader::open(path);
+    ASSERT_TRUE(reader) << reader.error();
+    auto hits = reader->query_chunks(0, 100, 101);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 1);
+    auto chunk = reader->read_chunk_columns(*hits->at(0), {alignx::format::Axf1ColumnId::quality});
+    ASSERT_TRUE(chunk) << chunk.error();
+    ASSERT_EQ(chunk->records.size(), 2);
+    EXPECT_EQ(chunk->records[0].quality, "FFFFFFFFFF");
+    EXPECT_EQ(chunk->records[1].quality, "FFFFFFFFFF");
+
+    std::filesystem::remove(path);
+#endif
 }
 
 TEST(Axf1File, ReadsStoredCompressedQualPackEnvelope) {

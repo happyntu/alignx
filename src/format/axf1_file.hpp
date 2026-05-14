@@ -34,6 +34,15 @@ enum class Axf1CodecId : std::uint16_t {
     qual_pack_compressed = 8,
 };
 
+enum class Axf1Compression {
+    none,
+    zstd,
+};
+
+struct Axf1WriteOptions {
+    Axf1Compression quality_compression = Axf1Compression::none;
+};
+
 struct Axf1Reference {
     std::string name;
     std::uint32_t length = 0;
@@ -124,6 +133,10 @@ private:
 
 [[nodiscard]] std::expected<void, std::string> write_axf1_file(const Axf1File& file,
                                                                const std::filesystem::path& path);
+
+[[nodiscard]] std::expected<void, std::string> write_axf1_file(const Axf1File& file,
+                                                               const std::filesystem::path& path,
+                                                               const Axf1WriteOptions& options);
 
 [[nodiscard]] std::expected<Axf1File, std::string>
 read_axf1_file(const std::filesystem::path& path);
