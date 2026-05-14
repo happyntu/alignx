@@ -40,7 +40,25 @@ stored sequences are all uppercase `A/C/G/T` and whose encoded payload is
 smaller than raw length-prefixed strings. It falls back to raw strings for
 ambiguity codes, lowercase bases, `*`, empty strings, or non-beneficial payloads.
 WSL `ctest` and toy `scripts/smoke_axf1_codecs.sh` coverage were checked on
-2026-05-14.
+2026-05-14. The remote HG002 chr1 small-region smoke also passed on 2026-05-14,
+with `seq_2bit_literal` used on all 7 chunks.
+
+Remote HG002 SEQ 2-bit literal smoke, run on `missmi-server00` on 2026-05-14:
+
+- BAM:
+  `/mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam`
+- Region: `chr1:1000000-1010000`
+- Output directory:
+  `/mypool/alignx/tmp/axf1_seq_codec_smoke_hg002_chr1_1000000_1010000_20260514`
+- AXF1 output: `sample.axf1`
+- AXF1 file size: 1,177,310 bytes
+- Records: 64
+- `axf1 view`, `alignx view` on BAM, and `samtools view` stdout SHA256:
+  `6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`
+- Codec distribution: `seq_2bit_literal`, `pos_delta_varint`, `flag_bitpack`,
+  and `mapq_rle` on all 7 chunks.
+
+This was a correctness smoke only, not a benchmark or profiling run.
 
 ## First Implementation Candidate: `seq_2bit_literal`
 

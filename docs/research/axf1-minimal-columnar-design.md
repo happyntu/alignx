@@ -391,6 +391,29 @@ Remote AXF1 MAPQ RLE smoke, run on `missmi-server00` on 2026-05-14:
 
 This was a correctness smoke only, not a benchmark or profiling run.
 
+Remote AXF1 SEQ 2-bit literal smoke, run on `missmi-server00` on 2026-05-14:
+
+- Output directory:
+  `/mypool/alignx/tmp/axf1_seq_codec_smoke_hg002_chr1_1000000_1010000_20260514`
+- AXF1 output: `sample.axf1`
+- Version: 2
+- `is_subset`: true
+- `source_path`:
+  `/mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam`
+- `conversion_region`: `chr1:1000000-1010000`
+- AXF1 file size: 1,177,310 bytes
+- Records: 64
+- SEQ codec distribution: `seq_2bit_literal` on 7/7 chunks
+- POS codec distribution: `pos_delta_varint` on 7/7 chunks
+- FLAG codec distribution: `flag_bitpack` on 7/7 chunks
+- MAPQ codec distribution: `mapq_rle` on 7/7 chunks
+- `axf1 view`, `alignx view` on BAM, and `samtools view` stdout SHA256:
+  `6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`
+- Result: every chunk used the SEQ 2-bit literal codec, and AXF1 stdout matched
+  both BAM-backed alignx output and samtools output.
+
+This was a correctness smoke only, not a benchmark or profiling run.
+
 ## Region-Converted AXF1 Subset Semantics
 
 `alignx convert --region` writes a subset AXF1 file containing records selected

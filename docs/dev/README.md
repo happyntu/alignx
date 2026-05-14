@@ -152,6 +152,11 @@ of `pos_delta_varint`, `flag_bitpack`, and `mapq_rle` on all 7 chunks.
 The toy smoke path has also verified SEQ `seq_2bit_literal` distribution after
 the SEQ 2-bit literal codec was added.
 
+Remote HG002 SEQ 2-bit literal smoke on 2026-05-14 used
+`/mypool/alignx/tmp/axf1_seq_codec_smoke_hg002_chr1_1000000_1010000_20260514`
+and confirmed byte-identical SAM stdout plus SEQ `seq_2bit_literal`
+distribution on all 7 chunks.
+
 ## AXF0 and AXF1 development status
 
 AXF0 is the row-preserving MVP path. It stores SAM-line payloads in indexed AXF
