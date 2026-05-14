@@ -447,6 +447,31 @@ TEST(AxfFileReader, ReadsMultiplePayloadsInSortedQueryOrder) {
     std::filesystem::remove(path);
 }
 
+TEST(AxfFileReader, PreferredQueryApiReadsPayloadsForLongOverlap) {
+    const auto path = temp_path("alignx_file_reader_preferred_query_api.axf");
+    const auto file = make_long_overlap_file();
+
+    auto write = alignx::format::write_axf_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto reader = alignx::format::AxfFileReader::open(path);
+    ASSERT_TRUE(reader) << reader.error();
+
+    auto hits = reader->query_blocks(0, 550, 560);
+    ASSERT_TRUE(hits) << hits.error();
+    ASSERT_EQ(hits->size(), 2);
+
+    auto first_payload = reader->read_payload(*hits->at(0));
+    ASSERT_TRUE(first_payload) << first_payload.error();
+    EXPECT_EQ(*first_payload, bytes("early-long\n"));
+
+    auto second_payload = reader->read_payload(*hits->at(1));
+    ASSERT_TRUE(second_payload) << second_payload.error();
+    EXPECT_EQ(*second_payload, bytes("late-short\n"));
+
+    std::filesystem::remove(path);
+}
+
 TEST(AxfFileReader, ReportsOpenErrors) {
     const auto path = temp_path("alignx_file_reader_missing.axf");
     std::filesystem::remove(path);

@@ -63,15 +63,18 @@ alignx convert sample.bam -o sample.axf
 ### AXF region query (v0.3 MVP)
 ```
 alignx view sample.axf chr1:1M-2M
-  → format: read AXF0 header, reference metadata, payload bytes, block index
-  → query:  select overlapping blocks and filter row-preserving SAM payloads
+  → format: AxfFileReader::open(path) reads AXF0 header/reference/index metadata
+  → format: AxfFileReader::query_blocks(ref_id, start, end)
+  → format: AxfFileReader::read_payload(block) for each query hit
+  → query:  filter row-preserving SAM payloads
   → cli:    print matching SAM records to stdout
 ```
 
-The current AXF0 MVP implementation is correctness-first: `read_axf_file()` reads
-the full AXF file and copies all payloads before query filtering. The next AXF0
-step is a seekable reader that loads header/reference/index metadata up front
-and reads only overlapping payload byte ranges for a region query. AXF0 remains
+The current AXF0 MVP query path uses `AxfFileReader` as the preferred API. It
+loads header/reference/block-index metadata up front, uses per-reference query
+indices to find overlapping blocks, and reads only matching payload byte ranges.
+`read_axf_file()` remains a compatibility/full-file helper for round-trip tests
+and code that explicitly needs materialized payloads. AXF0 remains
 row-preserving staging and is not the final performance model.
 
 ### AXF region query (future columnar path)

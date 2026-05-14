@@ -19,10 +19,12 @@ alignx view sample.axf chr20:10000000-10010000
 
 Current implementation characteristics:
 
+- `format::AxfFileReader` is the preferred AXF query API for production call
+  sites.
 - `format::read_axf_index_metadata()` reads reference metadata and block index
-  entries without materializing payloads.
+  entries without materializing payloads; it is a lower-level parser helper.
 - `format::read_axf_block_payload()` reads payload bytes lazily by offset and
-  length for query hits.
+  length for query hits; it is a lower-level payload helper.
 - `AxfFileIndex::query_blocks()` uses a per-reference end-sorted candidate index
   to skip blocks ending before the query start, then returns hits in the stable
   start-sorted block order.
@@ -86,10 +88,21 @@ Step 2 is implemented:
   offset/length from the AXF file.
 - `format::AxfFileReader` wraps metadata loading, block queries, and lazy payload
   reads behind a reusable reader object.
-- `alignx view` for AXF input now reads index metadata first, queries overlapping
+- `alignx view` for AXF input uses `format::AxfFileReader`, queries overlapping
   block entries, and only reads payloads for those hits.
 - Output filtering still validates each SAM line against the requested region, so
   stdout remains compatible with the prior full-file reader path.
+
+## Public API Boundary
+
+- Preferred query path: `format::AxfFileReader::open(path)`,
+  `AxfFileReader::query_blocks(ref_id, start, end)`, then
+  `AxfFileReader::read_payload(block)`.
+- Compatibility/full-file path: `format::read_axf_file(path)` remains available
+  for round-trip tests and code that explicitly needs materialized payloads.
+- Lower-level helpers: `format::read_axf_index_metadata(path)` and
+  `format::read_axf_block_payload(path, block)` remain available for focused
+  parser/payload tests, but new query code should prefer `AxfFileReader`.
 
 ## Correctness Smoke Checks
 
