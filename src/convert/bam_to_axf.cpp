@@ -33,6 +33,8 @@ struct PendingAxf1Chunk {
     std::vector<format::Axf1Record> records;
 };
 
+constexpr std::size_t kAxf1MvpMaxRecordsPerChunk = 1;
+
 void append_line(PendingBlock& block, std::string_view line, const io::BamRecord& record) {
     if (!block.has_records) {
         block.start_pos = record.position;
@@ -164,6 +166,18 @@ void append_axf1_record(PendingAxf1Chunk& chunk, format::Axf1Record record,
         }
     }
     chunk.records.push_back(std::move(record));
+}
+
+void flush_axf1_chunk(format::Axf1File& file, std::uint32_t ref_id, PendingAxf1Chunk& chunk) {
+    if (!chunk.has_records) {
+        return;
+    }
+
+    file.chunks.push_back({.ref_id = ref_id,
+                           .start_pos = chunk.start_pos,
+                           .end_pos = chunk.end_pos,
+                           .records = std::move(chunk.records)});
+    chunk = PendingAxf1Chunk{};
 }
 
 bool overlaps_region(const io::BamRecord& record, const query::SamRegion& region) {
@@ -322,18 +336,15 @@ std::expected<void, std::string> convert_bam_to_axf1_mvp(const std::filesystem::
         if (!axf1_record) {
             return std::unexpected(axf1_record.error());
         }
-        append_axf1_record(chunks.at(ref_id), std::move(*axf1_record), view.record);
+        PendingAxf1Chunk& chunk = chunks.at(ref_id);
+        append_axf1_record(chunk, std::move(*axf1_record), view.record);
+        if (chunk.records.size() >= kAxf1MvpMaxRecordsPerChunk) {
+            flush_axf1_chunk(file, static_cast<std::uint32_t>(ref_id), chunk);
+        }
     }
 
     for (std::size_t ref_id = 0; ref_id < chunks.size(); ++ref_id) {
-        PendingAxf1Chunk& chunk = chunks[ref_id];
-        if (!chunk.has_records) {
-            continue;
-        }
-        file.chunks.push_back({.ref_id = static_cast<std::uint32_t>(ref_id),
-                               .start_pos = chunk.start_pos,
-                               .end_pos = chunk.end_pos,
-                               .records = std::move(chunk.records)});
+        flush_axf1_chunk(file, static_cast<std::uint32_t>(ref_id), chunks[ref_id]);
     }
 
     return format::write_axf1_file(file, output_axf);

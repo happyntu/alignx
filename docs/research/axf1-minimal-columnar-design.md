@@ -175,6 +175,11 @@ to identify records that overlap the requested region. Full output columns are
 decoded only if the chunk contains at least one matching record. This is still a
 raw-codec correctness scaffold, not a benchmark claim.
 
+The AXF1 converter now emits deterministic MVP chunks instead of one chunk per
+reference. The current implementation uses a deliberately small max-record rule
+to force multi-chunk toy coverage; production chunk sizing by byte budget,
+genomic span, or compression block behavior remains future work.
+
 1. Add AXF1 data structs and format read/write tests in files that do not
    disturb AXF0.
 2. Add writer/reader round-trip tests using synthetic toy records.
@@ -224,8 +229,9 @@ Suggested implementation boundary:
 
 - Should AXF1 use `.axf` with magic detection only, or a temporary `.axf1`
   extension in tests while the format is unstable?
-- Should the first chunking strategy remain one chunk per reference, matching
-  AXF0, or should it introduce a max-record/max-span chunk split immediately?
+- What production chunk-sizing rule should replace the current deterministic
+  MVP max-record split: byte budget, max genomic span, record count, or a hybrid
+  tuned to independent column decode?
 - Should optional tags remain one raw `TAGS` column for v0, or should common tags
   such as `NM` and `MD` get early per-tag streams?
 - Should `RNAME` be implicit from chunk `ref_id` only for the first slice, or

@@ -360,8 +360,9 @@ TEST(Cli, ConvertWritesToyAxf1Mvp) {
     ASSERT_TRUE(axf) << axf.error();
     ASSERT_EQ(axf->references.size(), 1);
     EXPECT_EQ(axf->references[0].name, "chrToy");
-    ASSERT_EQ(axf->chunks.size(), 1);
-    EXPECT_EQ(axf->chunks[0].records.size(), 2);
+    ASSERT_EQ(axf->chunks.size(), 2);
+    EXPECT_EQ(axf->chunks[0].records.size(), 1);
+    EXPECT_EQ(axf->chunks[1].records.size(), 1);
 
     std::filesystem::remove_all(temp_dir);
 }

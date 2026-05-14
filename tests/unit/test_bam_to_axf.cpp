@@ -155,12 +155,12 @@ TEST(BamToAxf, ConvertsToyBamToAxf1Mvp) {
     EXPECT_EQ(axf->references[0].name, "chrToy");
     EXPECT_EQ(axf->references[0].length, 1000);
 
-    ASSERT_EQ(axf->chunks.size(), 1);
+    ASSERT_EQ(axf->chunks.size(), 2);
     EXPECT_EQ(axf->chunks[0].ref_id, 0);
     EXPECT_EQ(axf->chunks[0].start_pos, 100);
-    EXPECT_EQ(axf->chunks[0].end_pos, 159);
+    EXPECT_EQ(axf->chunks[0].end_pos, 110);
 
-    ASSERT_EQ(axf->chunks[0].records.size(), 2);
+    ASSERT_EQ(axf->chunks[0].records.size(), 1);
     EXPECT_EQ(axf->chunks[0].records[0].qname, "read001");
     EXPECT_EQ(axf->chunks[0].records[0].flag, 0);
     EXPECT_EQ(axf->chunks[0].records[0].pos, 100);
@@ -173,14 +173,21 @@ TEST(BamToAxf, ConvertsToyBamToAxf1Mvp) {
     EXPECT_EQ(axf->chunks[0].records[0].quality, "FFFFFFFFFF");
     EXPECT_EQ(axf->chunks[0].records[0].tags, "NM:i:0");
 
-    EXPECT_EQ(axf->chunks[0].records[1].qname, "read002");
-    EXPECT_EQ(axf->chunks[0].records[1].flag, 16);
-    EXPECT_EQ(axf->chunks[0].records[1].pos, 150);
-    EXPECT_EQ(axf->chunks[0].records[1].mapq, 50);
-    EXPECT_EQ(axf->chunks[0].records[1].cigar, "5M1I4M");
-    EXPECT_EQ(axf->chunks[0].records[1].sequence, "TTTTACGGGA");
-    EXPECT_EQ(axf->chunks[0].records[1].quality, "FFFFFFFFFF");
-    EXPECT_EQ(axf->chunks[0].records[1].tags, "NM:i:1");
+    EXPECT_EQ(axf->chunks[1].ref_id, 0);
+    EXPECT_EQ(axf->chunks[1].start_pos, 150);
+    EXPECT_EQ(axf->chunks[1].end_pos, 159);
+    ASSERT_EQ(axf->chunks[1].records.size(), 1);
+    EXPECT_EQ(axf->chunks[1].records[0].qname, "read002");
+    EXPECT_EQ(axf->chunks[1].records[0].flag, 16);
+    EXPECT_EQ(axf->chunks[1].records[0].pos, 150);
+    EXPECT_EQ(axf->chunks[1].records[0].mapq, 50);
+    EXPECT_EQ(axf->chunks[1].records[0].cigar, "5M1I4M");
+    EXPECT_EQ(axf->chunks[1].records[0].mate_reference, "*");
+    EXPECT_EQ(axf->chunks[1].records[0].mate_pos, 0);
+    EXPECT_EQ(axf->chunks[1].records[0].template_length, 0);
+    EXPECT_EQ(axf->chunks[1].records[0].sequence, "TTTTACGGGA");
+    EXPECT_EQ(axf->chunks[1].records[0].quality, "FFFFFFFFFF");
+    EXPECT_EQ(axf->chunks[1].records[0].tags, "NM:i:1");
 
     std::filesystem::remove(path);
 }
@@ -197,6 +204,23 @@ TEST(BamToAxf, Axf1ViewMatchesToyBamViewOutput) {
     EXPECT_TRUE(view) << view.error();
     EXPECT_EQ(out.str(),
               "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n"
+              "read002\t16\tchrToy\t151\t50\t5M1I4M\t*\t0\t0\tTTTTACGGGA\tFFFFFFFFFF\tNM:i:1\n");
+
+    std::filesystem::remove(path);
+}
+
+TEST(BamToAxf, Axf1ViewCanQuerySecondConvertedChunk) {
+    const auto path =
+        std::filesystem::temp_directory_path() / "alignx_toy_convert_view_second_chunk.axf1";
+
+    auto convert = alignx::convert::convert_bam_to_axf1_mvp(toy_bam_path(), path);
+    ASSERT_TRUE(convert) << convert.error();
+
+    std::ostringstream out;
+    auto view = alignx::query::write_axf1_region_sam(path, "chrToy:151-159", out);
+
+    ASSERT_TRUE(view) << view.error();
+    EXPECT_EQ(out.str(),
               "read002\t16\tchrToy\t151\t50\t5M1I4M\t*\t0\t0\tTTTTACGGGA\tFFFFFFFFFF\tNM:i:1\n");
 
     std::filesystem::remove(path);
