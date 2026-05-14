@@ -180,6 +180,11 @@ AXF1 v2 now records `source_path`, `conversion_region`, and `is_subset` in file
 metadata so tools can distinguish full-input caches from region-converted subset
 caches without decoding chunk payloads.
 
+Remote AXF1 v2 metadata smoke on the same HG002 chr1 region confirmed
+`version=2`, `is_subset=true`, the expected source BAM path and conversion
+region, unchanged chunk stats, and byte-identical stdout against BAM-backed
+`alignx view` and `samtools view`.
+
 Before any performance claim, run a separate remote HG002 benchmark with user
 confirmation. Notify the user before benchmark or profiling workloads.
 
