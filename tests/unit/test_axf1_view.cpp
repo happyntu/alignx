@@ -1,0 +1,165 @@
+#include <gtest/gtest.h>
+
+#include <chrono>
+#include <filesystem>
+#include <sstream>
+#include <string_view>
+#include <utility>
+
+#include "format/axf1_file.hpp"
+#include "query/axf1_view.hpp"
+
+namespace {
+
+std::filesystem::path temp_path(std::string_view label) {
+    const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::filesystem::temp_directory_path() /
+           (std::string(label) + "_" + std::to_string(suffix) + ".axf1");
+}
+
+alignx::format::Axf1Record make_record(std::string qname, std::int32_t pos,
+                                       std::string cigar = "10M", std::string tags = "NM:i:0") {
+    return alignx::format::Axf1Record{.qname = std::move(qname),
+                                      .flag = 0,
+                                      .pos = pos,
+                                      .mapq = 60,
+                                      .cigar = std::move(cigar),
+                                      .mate_reference = "*",
+                                      .mate_pos = 0,
+                                      .template_length = 0,
+                                      .sequence = "ACGTACGTAA",
+                                      .quality = "FFFFFFFFFF",
+                                      .tags = std::move(tags)};
+}
+
+alignx::format::Axf1File make_file() {
+    return alignx::format::Axf1File{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .chunks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 310,
+                    .records = {make_record("read001", 100, "10M", "NM:i:0"),
+                                make_record("read002", 300, "10M", "NM:i:1")}}}};
+}
+
+void write_axf1_or_fail(const alignx::format::Axf1File& file, const std::filesystem::path& path) {
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+}
+
+} // namespace
+
+TEST(Axf1View, FiltersRecordsInsideOverlappingChunk) {
+    const auto path = temp_path("alignx_axf1_view_filter");
+    write_axf1_or_fail(make_file(), path);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf1_region_sam(path, "chrToy:101-110", out);
+
+    EXPECT_TRUE(result) << result.error();
+    EXPECT_EQ(out.str(),
+              "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1View, UsesCigarReferenceConsumingOperations) {
+    const auto path = temp_path("alignx_axf1_view_cigar");
+    alignx::format::Axf1File file{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .chunks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 116,
+                    .records = {make_record("readCigar", 100, "2S5M1I3D4N2=1X1H1P", "")}}}};
+    write_axf1_or_fail(file, path);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf1_region_sam(path, "chrToy:115-115", out);
+
+    EXPECT_TRUE(result) << result.error();
+    EXPECT_EQ(out.str(), "readCigar\t0\tchrToy\t101\t60\t2S5M1I3D4N2=1X1H1P\t*\t0\t0\tACGTACGTAA\t"
+                         "FFFFFFFFFF\n");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1View, ReturnsNoRecordsForNoHitRegion) {
+    const auto path = temp_path("alignx_axf1_view_no_hit");
+    write_axf1_or_fail(make_file(), path);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf1_region_sam(path, "chrToy:501-510", out);
+
+    EXPECT_TRUE(result) << result.error();
+    EXPECT_EQ(out.str(), "");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1View, ReportsMissingReference) {
+    const auto path = temp_path("alignx_axf1_view_missing_ref");
+    write_axf1_or_fail(make_file(), path);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf1_region_sam(path, "chrMissing:1-10", out);
+
+    ASSERT_FALSE(result);
+    EXPECT_NE(result.error().find("reference not found in AXF1"), std::string::npos);
+    EXPECT_EQ(out.str(), "");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1View, ReportsMalformedRegion) {
+    const auto path = temp_path("alignx_axf1_view_bad_region");
+    write_axf1_or_fail(make_file(), path);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf1_region_sam(path, "chrToy", out);
+
+    ASSERT_FALSE(result);
+    EXPECT_NE(result.error().find("region must use ref:start-end"), std::string::npos);
+    EXPECT_EQ(out.str(), "");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1View, WritesNewlineTerminatedOutputWithoutTags) {
+    const auto path = temp_path("alignx_axf1_view_newline");
+    alignx::format::Axf1File file{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .chunks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 110,
+                    .records = {make_record("read001", 100, "10M", "")}}}};
+    write_axf1_or_fail(file, path);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf1_region_sam(path, "chrToy:101-110", out);
+
+    EXPECT_TRUE(result) << result.error();
+    EXPECT_EQ(out.str(), "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\n");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1View, DoesNotWritePartialOutputWhenLaterRecordIsInvalid) {
+    const auto path = temp_path("alignx_axf1_view_atomic_error");
+    alignx::format::Axf1File file{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .chunks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 140,
+                    .records = {make_record("read001", 100, "10M", "NM:i:0"),
+                                make_record("badCigar", 120, "10Z", "NM:i:1")}}}};
+    write_axf1_or_fail(file, path);
+
+    std::ostringstream out;
+    auto result = alignx::query::write_axf1_region_sam(path, "chrToy:101-130", out);
+
+    ASSERT_FALSE(result);
+    EXPECT_NE(result.error().find("invalid CIGAR operation"), std::string::npos);
+    EXPECT_EQ(out.str(), "");
+
+    std::filesystem::remove(path);
+}
