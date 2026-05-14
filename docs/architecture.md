@@ -68,6 +68,12 @@ alignx view sample.axf chr1:1M-2M
   → cli:    print matching SAM records to stdout
 ```
 
+The current AXF0 MVP implementation is correctness-first: `read_axf_file()` reads
+the full AXF file and copies all payloads before query filtering. The next AXF0
+step is a seekable reader that loads header/reference/index metadata up front
+and reads only overlapping payload byte ranges for a region query. AXF0 remains
+row-preserving staging and is not the final performance model.
+
 ### AXF region query (future columnar path)
 ```
 alignx view sample.axf chr1:1M-2M

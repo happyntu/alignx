@@ -158,6 +158,15 @@ This status does not change the long-term ADR-002 columnar target. AXF0 remains
 a correctness staging format and should not be used for final compression-ratio
 or performance claims.
 
+Next implementation direction:
+
+- Do not benchmark AXF0 as the final AXF performance model.
+- Split the current full-file `read_axf_file()` query path into a seekable AXF0
+  reader that loads header/reference/index metadata up front and reads only
+  overlapping payload byte ranges for region queries.
+- Keep row-preserving payloads until the seekable reader shape is tested, then
+  move toward the ADR-002 columnar codec path.
+
 ---
 
 ## Consequences
@@ -182,7 +191,7 @@ or performance claims.
 
 ## Follow-up Decision Point
 
-After the toy AXF closed loop passes, decide whether to:
+After the seekable AXF0 reader passes correctness tests, decide whether to:
 
 1. Replace SAM-line payloads with minimal column streams for POS/FLAG/MAPQ/CIGAR.
 2. Keep SAM-line payloads briefly for CLI integration while implementing
