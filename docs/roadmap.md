@@ -97,7 +97,7 @@ and region-query correctness.
 - [x] AXF1 zstd quality writer size-policy smoke on HG002 chr1 small region
 - [x] Reusable AXF1 codec smoke script supports zstd quality compression option
 - [x] Scripted AXF1 zstd quality writer smoke on HG002 chr1 small region
-- [ ] Optional LZ4 compressed payload writer path and size policy
+- [x] AXF1 LZ4 compressed payload decision: reserve id 2, defer implementation pending profiling evidence
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec design: SEQ reference-delta with reference identity metadata

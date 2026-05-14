@@ -108,12 +108,15 @@ Initial compression registry:
 |---:|---|---|
 | 0 | stored | Implemented dependency-free validation path; not emitted by default writers |
 | 1 | zstd | Implemented reader and explicit quality writer when built with `ALIGNX_ENABLE_ZSTD=ON` |
-| 2 | lz4 | Future fast-profile candidate |
+| 2 | lz4 | Reserved; deferred fast-profile candidate pending profiling evidence |
 
 The first implemented algorithm is `stored`, which preserves the envelope
-semantics without adding a compression dependency. Future zstd/LZ4 support must
-reuse the same envelope validation and fallback rules rather than creating
-one-off `*_zstd` codec ids.
+semantics without adding a compression dependency. zstd is the first real
+compression algorithm. LZ4 remains reserved but deferred; see
+`docs/research/axf1-lz4-compressed-payload-design.md`.
+
+Future compression algorithms must reuse the same envelope validation and
+fallback rules rather than creating one-off `*_zstd` or `*_lz4` codec ids.
 
 ## Writer Rules
 

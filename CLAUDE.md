@@ -83,6 +83,7 @@ Completed:
 - AXF1 zstd quality writer size-policy remote HG002 chr1 small-region correctness smoke reverified stdout parity and `qual_pack_compressed` on 7/7 quality chunks
 - `scripts/smoke_axf1_codecs.sh` supports `--axf1-quality-compression none|zstd` for reusable zstd quality writer correctness smoke checks
 - Scripted AXF1 zstd quality writer remote HG002 chr1 small-region correctness smoke passed with `scripts/smoke_axf1_codecs.sh --axf1-quality-compression zstd`
+- AXF1 LZ4 compressed payload decision: keep `compression_id=2` reserved but defer implementation until profiling shows a fast-profile need
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
