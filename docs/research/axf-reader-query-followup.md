@@ -140,7 +140,9 @@ per-reference ranges, end-sorted candidate indices, and index encapsulation:
 ## Later Columnar Path
 
 After the seekable AXF0 reader is stable, replace row-preserving payloads with
-minimal column streams. At that point, region query can evolve from:
+minimal column streams. The first AXF1 correctness slice is sketched in
+`docs/research/axf1-minimal-columnar-design.md`. At that point, region query can
+evolve from:
 
 ```text
 read overlapping SAM payloads -> parse SAM lines -> print SAM
