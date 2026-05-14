@@ -160,18 +160,47 @@ AXF1 should inherit the AXF0 query behavior:
 
 ## First Implementation Slice
 
-1. Add AXF1 data structs in a new module or files that do not disturb AXF0.
+1. Add AXF1 data structs and format read/write tests in files that do not
+   disturb AXF0.
 2. Add writer/reader round-trip tests using synthetic toy records.
-3. Add `toy BAM -> AXF1 -> view` stdout parity against the existing BAM view
-   expectation.
-4. Add malformed AXF1 metadata/payload tests for atomic error behavior.
-5. Keep AXF0 tests running unchanged.
+3. Add an internal AXF1 query/view helper and tests for no-hit, missing
+   reference, malformed payload, and newline-stable output.
+4. Add `toy BAM -> AXF1 -> view` stdout parity against the existing BAM view
+   expectation after the format and query helpers are stable.
+5. Add CLI routing only after the internal AXF1 view path is covered.
+6. Keep AXF0 tests running unchanged.
 
 Suggested implementation boundary:
 
 - new format code: `src/format/axf1_file.hpp/.cpp`;
-- new query code only if AXF0 and AXF1 paths diverge materially;
-- CLI routing can detect magic and dispatch to AXF0 or AXF1 view handlers.
+- new format tests: `tests/unit/test_axf1_file.cpp`;
+- new query code: `src/query/axf1_view.hpp/.cpp`, because AXF1 decodes columns
+  while AXF0 parses row-preserving SAM payloads;
+- new query tests: `tests/unit/test_axf1_view.cpp`;
+- optional converter entry point: `convert::convert_bam_to_axf1_mvp()` only
+  after format/query tests pass;
+- CLI routing should be a later slice. The current CLI dispatch treats `.axf`
+  as AXF0 and `convert` always reports `format AXF0`, so AXF1 should first stay
+  behind tests or an explicit option before magic-based routing is introduced.
+
+## Current Codebase Entry Points
+
+- `src/format/axf_file.hpp/.cpp` owns AXF0 read/write, metadata parsing, lazy
+  payload reading, and `AxfFileReader`. AXF1 should not extend these types
+  directly; keep AXF0 compatibility isolated.
+- `src/query/axf_view.hpp/.cpp` owns AXF0 region query and SAM payload filtering.
+  AXF1 should use a separate view helper because it filters from row-aligned
+  columns instead of parsing SAM payload text.
+- `src/convert/bam_to_axf.hpp/.cpp` currently emits AXF0 only. AXF1 conversion
+  should use a separate function or option so existing `alignx convert` behavior
+  stays stable.
+- `src/cli/cli.cpp` currently detects AXF by `.axf` extension and dispatches all
+  such files to the AXF0 view path. Magic-based AXF0/AXF1 routing is a separate
+  compatibility change and should not be part of the first AXF1 format
+  round-trip patch.
+- `CMakeLists.txt` already globs `src/format/*.cpp`, `src/query/*.cpp`,
+  `src/convert/*.cpp`, and `tests/unit/*.cpp`, so the proposed AXF1 source and
+  test files are automatically added to `alignx_lib` and `unit_tests`.
 
 ## Open Questions
 
