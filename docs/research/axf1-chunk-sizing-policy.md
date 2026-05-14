@@ -199,6 +199,9 @@ Remote AXF1 MAPQ RLE smoke on the same HG002 chr1 region confirmed that all 7
 chunks used MAPQ codec id `3`, FLAG codec id `2`, and POS codec id `1`, with
 byte-identical stdout against BAM-backed `alignx view` and `samtools view`. The
 resulting file was 1,857,924 bytes, with max 294,474-byte chunk length.
+The finalized `scripts/inspect_axf1_metadata.py --column-codecs` path was
+checked against this AXF1 file and reported `mapq_rle`, `flag_bitpack`, and
+`pos_delta_varint` on all 7 chunks without decoding payloads.
 
 AXF1 v2 metadata corruption coverage rejects invalid subset flags, truncated
 source/conversion-region strings, and metadata/index overlap in both C++ reader

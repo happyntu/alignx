@@ -376,6 +376,9 @@ Remote AXF1 MAPQ RLE smoke, run on `missmi-server00` on 2026-05-14:
   `6caf2d4a3142f62d51d3f4d64216de1372ebe3c629dbbc95581f1cd71f815389`
 - Result: every chunk used MAPQ RLE, FLAG bit-pack, and POS delta-varint, and
   AXF1 stdout matched both BAM-backed alignx output and samtools output.
+- The codec distribution was verified with
+  `scripts/inspect_axf1_metadata.py --column-codecs`, which reported
+  `pos_delta_varint`, `flag_bitpack`, and `mapq_rle` on all 7 chunks.
 
 This was a correctness smoke only, not a benchmark or profiling run.
 
