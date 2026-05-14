@@ -286,6 +286,9 @@ std::expected<void, std::string> convert_bam_to_axf1_mvp(const std::filesystem::
     }
 
     format::Axf1File file;
+    file.metadata.source_path = input_bam.string();
+    file.metadata.conversion_region = region.value_or("");
+    file.metadata.is_subset = region.has_value();
     file.references.reserve(references->size());
     for (const io::BamReference& reference : *references) {
         file.references.push_back({.name = reference.name, .length = reference.length});

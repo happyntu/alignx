@@ -43,6 +43,9 @@ class Axf1Metadata:
     file_size: int
     version: int
     index_offset: int
+    source_path: str
+    conversion_region: str
+    is_subset: bool
     references: list[Reference]
     chunks: list[Chunk]
 
@@ -50,6 +53,20 @@ class Axf1Metadata:
 def require_range(data: bytes, offset: int, size: int, label: str) -> None:
     if offset < 0 or size < 0 or offset + size > len(data):
         raise ValueError(f"truncated AXF1 file while reading {label}")
+
+
+def read_u8(data: bytes, offset: int, label: str) -> tuple[int, int]:
+    require_range(data, offset, 1, label)
+    return data[offset], offset + 1
+
+
+def read_string(data: bytes, offset: int, label: str) -> tuple[str, int]:
+    require_range(data, offset, 4, f"{label} length")
+    (size,) = struct.unpack_from("<I", data, offset)
+    offset += 4
+    require_range(data, offset, size, label)
+    value = data[offset : offset + size].decode("utf-8")
+    return value, offset + size
 
 
 def read_metadata(path: Path) -> Axf1Metadata:
@@ -77,6 +94,21 @@ def read_metadata(path: Path) -> Axf1Metadata:
 
     if offset > index_offset:
         raise ValueError("AXF1 references overlap index")
+
+    source_path = ""
+    conversion_region = ""
+    is_subset = False
+    if version == 2:
+        subset_flag, offset = read_u8(data, offset, "subset flag")
+        if subset_flag > 1:
+            raise ValueError("invalid AXF1 subset metadata flag")
+        is_subset = subset_flag == 1
+        source_path, offset = read_string(data, offset, "source path")
+        conversion_region, offset = read_string(data, offset, "conversion region")
+    elif version != 1:
+        raise ValueError("unsupported AXF1 version")
+    if offset > index_offset:
+        raise ValueError("AXF1 metadata overlaps index")
 
     chunks: list[Chunk] = []
     offset = index_offset
@@ -111,6 +143,9 @@ def read_metadata(path: Path) -> Axf1Metadata:
         file_size=len(data),
         version=version,
         index_offset=index_offset,
+        source_path=source_path,
+        conversion_region=conversion_region,
+        is_subset=is_subset,
         references=references,
         chunks=chunks,
     )
@@ -127,6 +162,9 @@ def format_summary(metadata: Axf1Metadata) -> list[tuple[str, str]]:
         ("path", str(metadata.path)),
         ("file_size", str(metadata.file_size)),
         ("version", str(metadata.version)),
+        ("is_subset", "true" if metadata.is_subset else "false"),
+        ("source_path", metadata.source_path),
+        ("conversion_region", metadata.conversion_region),
         ("reference_count", str(len(metadata.references))),
         ("chunk_count", str(len(chunks))),
         ("total_records", str(total_records)),

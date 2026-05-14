@@ -59,6 +59,7 @@ and region-query correctness.
 - [x] AXF1 raw-column toy correctness path with magic-based view routing
 - [x] AXF1 hybrid chunk sizing correctness smoke on HG002 chr1 small region
 - [x] AXF1 region-converted subset boundary smoke on HG002 chr1 small region
+- [x] AXF1 v2 file metadata records source path and subset conversion region
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec: POS varint delta, FLAG bit-pack, MAPQ byte/RLE, SEQ reference-delta 2-bit

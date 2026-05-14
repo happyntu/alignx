@@ -52,9 +52,22 @@ struct Axf1Chunk {
     std::vector<Axf1Record> records;
 };
 
+struct Axf1FileMetadata {
+    std::string source_path;
+    std::string conversion_region;
+    bool is_subset = false;
+};
+
 struct Axf1File {
+    Axf1FileMetadata metadata;
     std::vector<Axf1Reference> references;
     std::vector<Axf1Chunk> chunks;
+};
+
+struct Axf1FileIndexMetadata {
+    std::string source_path;
+    std::string conversion_region;
+    bool is_subset = false;
 };
 
 struct Axf1ChunkIndexEntry {
@@ -69,6 +82,7 @@ struct Axf1ChunkIndexEntry {
 };
 
 struct Axf1FileIndex {
+    Axf1FileIndexMetadata metadata;
     std::vector<Axf1Reference> references;
     std::vector<Axf1ChunkIndexEntry> chunks;
 

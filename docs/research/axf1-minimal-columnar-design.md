@@ -62,7 +62,7 @@ Use a distinct magic/version so AXF0 and AXF1 are never ambiguous:
 ```text
 FileHeader:
   magic          "AXF1"
-  version        u32
+  version        u32   # current writer emits 2
   ref_count      u32
   chunk_count    u64
   index_offset   u64
@@ -71,6 +71,14 @@ ReferenceEntry repeated ref_count:
   name_length    u16
   name_bytes     [name_length]
   length         u32
+
+FileMetadata:
+  # present for version 2+
+  is_subset          u8
+  source_path_len    u32
+  source_path        [source_path_len]
+  region_len         u32
+  conversion_region  [region_len]
 
 Chunk payloads:
   ChunkHeader
@@ -83,6 +91,8 @@ Index at index_offset:
 
 The first implementation can keep chunk headers explicit and redundant with the
 index. Redundancy is acceptable while the format is still being validated.
+Readers still accept legacy AXF1 v1 files without `FileMetadata` and treat them
+as `is_subset=false` with empty source and region strings.
 
 ## Chunk Contract
 
@@ -265,6 +275,12 @@ BAM for that region. Queries outside the conversion region are answered only
 from records that were written into the AXF1 file, so they can differ from full
 BAM queries.
 
+AXF1 v2 records this in file metadata:
+
+- `is_subset=false` and empty `conversion_region` for full-input conversion;
+- `is_subset=true` and the original region string for `convert --region`;
+- `source_path` records the input path used by the converter.
+
 Remote boundary smoke for the HG002 AXF1 subset above:
 
 | Label | Query region | AXF1 records | Full BAM records | AXF1 vs full BAM | Full BAM vs samtools |
@@ -310,7 +326,8 @@ Suggested implementation boundary:
 - `src/convert/axf1_chunk_policy.hpp/.cpp` owns the first AXF1 hybrid chunk
   sizing policy and its testable flush predicates.
 - `scripts/inspect_axf1_metadata.py` inspects AXF1 header and chunk-index
-  metadata without decoding chunk payloads.
+  metadata, including v2 source/subset metadata, without decoding chunk
+  payloads.
 - `src/cli/cli.cpp` detects AXF0/AXF1 by file magic before falling back to the
   BAM/HTSlib view path. `.axf`/`.axf1` files with unknown magic are rejected
   instead of being treated as BAM.
@@ -334,8 +351,8 @@ Suggested implementation boundary:
   magic-based?
 - What final threshold values should the implemented hybrid chunk sizing policy
   use after empirical tuning?
-- Should subset AXF1 files carry source/conversion-region metadata so callers
-  can distinguish partial caches from complete reference caches?
+- Should AXF1 metadata later include source identity stronger than path text,
+  such as file size, mtime, content hash, or BAM header digest?
 - Should optional tags remain one raw `TAGS` column for v0, or should common tags
   such as `NM` and `MD` get early per-tag streams?
 - Should `RNAME` be implicit from chunk `ref_id` only for the first slice, or

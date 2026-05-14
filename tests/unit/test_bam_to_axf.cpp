@@ -152,6 +152,9 @@ TEST(BamToAxf, ConvertsToyBamToAxf1Mvp) {
     ASSERT_TRUE(axf) << axf.error();
 
     ASSERT_EQ(axf->references.size(), 1);
+    EXPECT_EQ(axf->metadata.source_path, toy_bam_path().string());
+    EXPECT_EQ(axf->metadata.conversion_region, "");
+    EXPECT_FALSE(axf->metadata.is_subset);
     EXPECT_EQ(axf->references[0].name, "chrToy");
     EXPECT_EQ(axf->references[0].length, 1000);
 
@@ -254,6 +257,9 @@ TEST(BamToAxf, ConvertsOnlyRequestedRegionToAxf1) {
     auto axf = alignx::format::read_axf1_file(path);
     ASSERT_TRUE(axf) << axf.error();
     ASSERT_EQ(axf->references.size(), 1);
+    EXPECT_EQ(axf->metadata.source_path, toy_bam_path().string());
+    EXPECT_EQ(axf->metadata.conversion_region, "chrToy:151-160");
+    EXPECT_TRUE(axf->metadata.is_subset);
     ASSERT_EQ(axf->chunks.size(), 1);
     EXPECT_EQ(axf->chunks[0].start_pos, 150);
     EXPECT_EQ(axf->chunks[0].end_pos, 159);

@@ -176,6 +176,10 @@ subset-cache semantics: queries inside `chr1:1000000-1010000` matched the full
 BAM and `samtools view`, while queries outside that conversion region returned
 only records present in the AXF1 subset.
 
+AXF1 v2 now records `source_path`, `conversion_region`, and `is_subset` in file
+metadata so tools can distinguish full-input caches from region-converted subset
+caches without decoding chunk payloads.
+
 Before any performance claim, run a separate remote HG002 benchmark with user
 confirmation. Notify the user before benchmark or profiling workloads.
 

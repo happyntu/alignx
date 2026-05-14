@@ -11,7 +11,8 @@ namespace alignx::format {
 namespace {
 
 constexpr std::array<unsigned char, 4> kMagic{'A', 'X', 'F', '1'};
-constexpr std::uint32_t kVersion = 1;
+constexpr std::uint32_t kVersionV1 = 1;
+constexpr std::uint32_t kVersion = 2;
 constexpr std::uint64_t kHeaderSize = kMagic.size() + sizeof(std::uint32_t) +
                                       sizeof(std::uint32_t) + sizeof(std::uint64_t) +
                                       sizeof(std::uint64_t);
@@ -61,6 +62,10 @@ void append_u64(std::vector<unsigned char>& bytes, std::uint64_t value) {
 void append_string(std::vector<unsigned char>& bytes, std::string_view value) {
     append_u32(bytes, static_cast<std::uint32_t>(value.size()));
     bytes.insert(bytes.end(), value.begin(), value.end());
+}
+
+void append_metadata_string(std::vector<unsigned char>& bytes, std::string_view value) {
+    append_string(bytes, value);
 }
 
 class Reader {
@@ -166,6 +171,15 @@ public:
             }
         }
         return {};
+    }
+
+    [[nodiscard]] std::expected<std::uint8_t, std::string> read_u8() {
+        unsigned char byte{};
+        auto read = read_exact(&byte, sizeof(byte));
+        if (!read) {
+            return std::unexpected(read.error());
+        }
+        return byte;
     }
 
     [[nodiscard]] std::expected<std::uint16_t, std::string> read_u16() {
@@ -347,6 +361,10 @@ std::expected<void, std::string> validate_file(const Axf1File& file) {
             return std::unexpected("AXF1 reference name is too long");
         }
     }
+    if (file.metadata.source_path.size() > std::numeric_limits<std::uint32_t>::max() ||
+        file.metadata.conversion_region.size() > std::numeric_limits<std::uint32_t>::max()) {
+        return std::unexpected("AXF1 metadata string is too long");
+    }
     for (const Axf1Chunk& chunk : file.chunks) {
         if (chunk.ref_id >= file.references.size()) {
             return std::unexpected("AXF1 chunk reference id out of range");
@@ -372,6 +390,78 @@ std::expected<void, std::string> validate_file(const Axf1File& file) {
         }
     }
     return {};
+}
+
+std::vector<unsigned char> encode_file_metadata(const Axf1FileMetadata& metadata) {
+    std::vector<unsigned char> bytes;
+    append_u8(bytes, metadata.is_subset ? 1 : 0);
+    append_metadata_string(bytes, metadata.source_path);
+    append_metadata_string(bytes, metadata.conversion_region);
+    return bytes;
+}
+
+std::expected<Axf1FileMetadata, std::string> read_file_metadata(Reader& reader) {
+    auto is_subset = reader.read_u8();
+    if (!is_subset) {
+        return std::unexpected("truncated AXF1 metadata");
+    }
+    if (*is_subset > 1) {
+        return std::unexpected("invalid AXF1 subset metadata flag");
+    }
+
+    auto source_path_size = reader.read_u32();
+    if (!source_path_size) {
+        return std::unexpected("truncated AXF1 metadata");
+    }
+    auto source_path = reader.read_string(*source_path_size);
+    if (!source_path) {
+        return std::unexpected("truncated AXF1 metadata");
+    }
+
+    auto conversion_region_size = reader.read_u32();
+    if (!conversion_region_size) {
+        return std::unexpected("truncated AXF1 metadata");
+    }
+    auto conversion_region = reader.read_string(*conversion_region_size);
+    if (!conversion_region) {
+        return std::unexpected("truncated AXF1 metadata");
+    }
+
+    return Axf1FileMetadata{.source_path = std::move(*source_path),
+                            .conversion_region = std::move(*conversion_region),
+                            .is_subset = *is_subset == 1};
+}
+
+std::expected<Axf1FileIndexMetadata, std::string> read_file_index_metadata(StreamReader& reader) {
+    auto is_subset = reader.read_u8();
+    if (!is_subset) {
+        return std::unexpected("truncated AXF1 metadata");
+    }
+    if (*is_subset > 1) {
+        return std::unexpected("invalid AXF1 subset metadata flag");
+    }
+
+    auto source_path_size = reader.read_u32();
+    if (!source_path_size) {
+        return std::unexpected("truncated AXF1 metadata");
+    }
+    auto source_path = reader.read_string(*source_path_size);
+    if (!source_path) {
+        return std::unexpected("truncated AXF1 metadata");
+    }
+
+    auto conversion_region_size = reader.read_u32();
+    if (!conversion_region_size) {
+        return std::unexpected("truncated AXF1 metadata");
+    }
+    auto conversion_region = reader.read_string(*conversion_region_size);
+    if (!conversion_region) {
+        return std::unexpected("truncated AXF1 metadata");
+    }
+
+    return Axf1FileIndexMetadata{.source_path = std::move(*source_path),
+                                 .conversion_region = std::move(*conversion_region),
+                                 .is_subset = *is_subset == 1};
 }
 
 std::vector<unsigned char> encode_strings(const std::vector<Axf1Record>& records,
@@ -786,10 +876,11 @@ std::expected<void, std::string> write_axf1_file(const Axf1File& file,
         reference_bytes.insert(reference_bytes.end(), reference.name.begin(), reference.name.end());
         append_u32(reference_bytes, reference.length);
     }
+    const std::vector<unsigned char> metadata_bytes = encode_file_metadata(file.metadata);
 
     std::vector<unsigned char> chunk_bytes;
     std::vector<Axf1ChunkIndexEntry> index_entries;
-    std::uint64_t chunk_offset = kHeaderSize + reference_bytes.size();
+    std::uint64_t chunk_offset = kHeaderSize + reference_bytes.size() + metadata_bytes.size();
     for (const Axf1Chunk& chunk : file.chunks) {
         std::vector<unsigned char> bytes = write_chunk(chunk);
         index_entries.push_back({.ref_id = chunk.ref_id,
@@ -810,6 +901,7 @@ std::expected<void, std::string> write_axf1_file(const Axf1File& file,
     append_u64(output, static_cast<std::uint64_t>(file.chunks.size()));
     append_u64(output, index_offset);
     output.insert(output.end(), reference_bytes.begin(), reference_bytes.end());
+    output.insert(output.end(), metadata_bytes.begin(), metadata_bytes.end());
     output.insert(output.end(), chunk_bytes.begin(), chunk_bytes.end());
     for (const Axf1ChunkIndexEntry& entry : index_entries) {
         append_u32(output, entry.ref_id);
@@ -840,7 +932,7 @@ std::expected<Axf1File, std::string> read_axf1_file(const std::filesystem::path&
     if (!version || !ref_count || !chunk_count || !index_offset) {
         return std::unexpected("truncated AXF1 file");
     }
-    if (*version != kVersion) {
+    if (*version != kVersionV1 && *version != kVersion) {
         return std::unexpected("unsupported AXF1 version");
     }
     if (*index_offset > reader.size()) {
@@ -863,6 +955,16 @@ std::expected<Axf1File, std::string> read_axf1_file(const std::filesystem::path&
     }
     if (reader.offset() > *index_offset) {
         return std::unexpected("AXF1 references overlap index");
+    }
+    if (*version == kVersion) {
+        auto metadata = read_file_metadata(reader);
+        if (!metadata) {
+            return std::unexpected(metadata.error());
+        }
+        file.metadata = std::move(*metadata);
+    }
+    if (reader.offset() > *index_offset) {
+        return std::unexpected("AXF1 metadata overlaps index");
     }
 
     auto seek = reader.seek(*index_offset);
@@ -945,7 +1047,7 @@ read_axf1_index_metadata(const std::filesystem::path& path) {
     if (!version || !ref_count || !chunk_count || !index_offset) {
         return std::unexpected("truncated AXF1 file");
     }
-    if (*version != kVersion) {
+    if (*version != kVersionV1 && *version != kVersion) {
         return std::unexpected("unsupported AXF1 version");
     }
     if (*index_offset > reader.size()) {
@@ -968,6 +1070,16 @@ read_axf1_index_metadata(const std::filesystem::path& path) {
     }
     if (reader.offset() > *index_offset) {
         return std::unexpected("AXF1 references overlap index");
+    }
+    if (*version == kVersion) {
+        auto metadata = read_file_index_metadata(reader);
+        if (!metadata) {
+            return std::unexpected(metadata.error());
+        }
+        index.metadata = std::move(*metadata);
+    }
+    if (reader.offset() > *index_offset) {
+        return std::unexpected("AXF1 metadata overlaps index");
     }
 
     auto seek = reader.seek(*index_offset);

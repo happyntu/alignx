@@ -42,6 +42,7 @@ Completed:
 - AXF1 converter implements hybrid chunk sizing policy
 - AXF1 hybrid chunk sizing remote HG002 chr1 small-region correctness smoke
 - AXF1 region-converted subset boundary smoke on HG002 chr1 small region
+- AXF1 v2 file metadata records source path, conversion region, and subset flag
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
@@ -88,7 +89,9 @@ For commands that write binary genomics files to stdout (BAM/CRAM/BCF or compres
 `alignx convert --region` writes a subset AXF/AXF1 file for the selected source
 records. It is not a complete chromosome or whole-BAM cache. Queries outside the
 conversion region are answered only from records stored in the subset file and
-can differ from full BAM queries.
+can differ from full BAM queries. AXF1 v2 records source path, conversion region,
+and subset flag in file metadata; legacy AXF1 v1 files are read as full-input
+caches with empty metadata.
 
 **Remote large-data execution:**
 - For large BAM/CRAM/genome assets and benchmark/profiling workloads, prefer `missmi-server00` storage and execution over this Windows machine or WSL disk.
@@ -97,7 +100,7 @@ can differ from full BAM queries.
 - `missmi-server00` alignx remote root: `/mypool/alignx/` on the large ZFS `mypool` filesystem.
 - Recommended remote layout: `/mypool/alignx/bin`, `/mypool/alignx/data`, `/mypool/alignx/refs`, `/mypool/alignx/results`, `/mypool/alignx/logs`, `/mypool/alignx/tmp`, and `/mypool/alignx/test_data`.
 - Remote alignx binaries can use the existing server HTSlib environment with `LD_LIBRARY_PATH=/home/happyntu/miniconda3/envs/hg002sv/lib`.
-- `scripts/inspect_axf1_metadata.py` can inspect AXF1 header and chunk-index metadata without decoding payloads; copy it to `/mypool/alignx/bin` for remote smoke checks when needed.
+- `scripts/inspect_axf1_metadata.py` can inspect AXF1 header, v2 source/subset metadata, and chunk-index metadata without decoding payloads; copy it to `/mypool/alignx/bin` for remote smoke checks when needed.
 - If repository scripts or binaries are needed remotely, stream the script, copy the built binary, or create a minimal runtime snapshot from the local working tree over SSH. Keep the authoritative repository and commits on the local Windows workspace.
 
 **Note:** Phase 0 includes only a minimal `alignx_lib` scaffold source for test target creation.

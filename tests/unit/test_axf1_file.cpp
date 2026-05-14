@@ -12,6 +12,7 @@
 namespace {
 
 constexpr std::size_t kIndexOffsetFieldOffset = 20;
+constexpr std::size_t kVersionFieldOffset = 4;
 constexpr std::size_t kIndexRecordCountOffset = 12;
 constexpr std::size_t kIndexChunkOffsetOffset = 16;
 constexpr std::size_t kChunkStartPosOffset = 4;
@@ -154,6 +155,31 @@ TEST(Axf1File, WriteReadRoundTrip) {
     std::filesystem::remove(path);
 }
 
+TEST(Axf1File, WriteReadRoundTripPreservesMetadata) {
+    const auto path = temp_path("alignx_axf1_metadata_roundtrip");
+    auto file = make_file();
+    file.metadata = {
+        .source_path = "/data/input.bam", .conversion_region = "chrToy:101-160", .is_subset = true};
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+
+    EXPECT_EQ(read->metadata.source_path, "/data/input.bam");
+    EXPECT_EQ(read->metadata.conversion_region, "chrToy:101-160");
+    EXPECT_TRUE(read->metadata.is_subset);
+
+    auto metadata = alignx::format::read_axf1_index_metadata(path);
+    ASSERT_TRUE(metadata) << metadata.error();
+    EXPECT_EQ(metadata->metadata.source_path, "/data/input.bam");
+    EXPECT_EQ(metadata->metadata.conversion_region, "chrToy:101-160");
+    EXPECT_TRUE(metadata->metadata.is_subset);
+
+    std::filesystem::remove(path);
+}
+
 TEST(Axf1File, ReadsIndexMetadataWithoutDecodingChunks) {
     const auto path = temp_path("alignx_axf1_metadata");
     const auto file = make_file();
@@ -165,6 +191,9 @@ TEST(Axf1File, ReadsIndexMetadataWithoutDecodingChunks) {
     ASSERT_TRUE(metadata) << metadata.error();
 
     ASSERT_EQ(metadata->references.size(), 1);
+    EXPECT_EQ(metadata->metadata.source_path, "");
+    EXPECT_EQ(metadata->metadata.conversion_region, "");
+    EXPECT_FALSE(metadata->metadata.is_subset);
     EXPECT_EQ(metadata->references[0].name, "chrToy");
     EXPECT_EQ(metadata->references[0].length, 1000);
 
@@ -184,6 +213,48 @@ TEST(Axf1File, ReadsIndexMetadataWithoutDecodingChunks) {
     hits = metadata->query_chunks(0, 160, 170);
     ASSERT_TRUE(hits) << hits.error();
     EXPECT_TRUE(hits->empty());
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, ReadsLegacyV1WithoutMetadata) {
+    const auto path = temp_path("alignx_axf1_legacy_v1");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    constexpr std::size_t kDefaultV2MetadataSize = 9;
+    constexpr std::size_t kHeaderSize = 28;
+    constexpr std::size_t kReferenceBytes = 12;
+    constexpr std::size_t kMetadataOffset = kHeaderSize + kReferenceBytes;
+    const std::uint64_t old_index_offset = read_index_offset(data);
+    const std::uint64_t old_chunk_offset = read_first_chunk_offset(data);
+
+    write_u32_at(data, kVersionFieldOffset, 1);
+    write_u64_at(data, kIndexOffsetFieldOffset, old_index_offset - kDefaultV2MetadataSize);
+    data.erase(data.begin() + static_cast<std::ptrdiff_t>(kMetadataOffset),
+               data.begin() +
+                   static_cast<std::ptrdiff_t>(kMetadataOffset + kDefaultV2MetadataSize));
+    write_u64_at(data,
+                 static_cast<std::size_t>(old_index_offset - kDefaultV2MetadataSize) +
+                     kIndexChunkOffsetOffset,
+                 old_chunk_offset - kDefaultV2MetadataSize);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    EXPECT_FALSE(read->metadata.is_subset);
+    EXPECT_EQ(read->metadata.source_path, "");
+    EXPECT_EQ(read->metadata.conversion_region, "");
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+
+    auto metadata = alignx::format::read_axf1_index_metadata(path);
+    ASSERT_TRUE(metadata) << metadata.error();
+    EXPECT_FALSE(metadata->metadata.is_subset);
+    EXPECT_EQ(metadata->metadata.source_path, "");
+    EXPECT_EQ(metadata->metadata.conversion_region, "");
 
     std::filesystem::remove(path);
 }
