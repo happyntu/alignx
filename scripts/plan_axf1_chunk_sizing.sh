@@ -19,7 +19,7 @@ Options:
   --work-dir <path>    planning output directory (default: benchmarks/results/axf1_chunk_sizing_plan)
   --region <region>    add a query region; may be repeated
   --variant <name>     add a policy variant; may be repeated
-                       variants: baseline, smaller_chunks, denser_chunks, span_biased
+                       variants: baseline, smaller_chunks, denser_chunks, span_biased, span_tight
   --manifest-out <path>
                        write a TSV manifest of planned commands
   --inspect-axf1 <path>
@@ -74,7 +74,7 @@ if [[ ${#REGIONS[@]} -eq 0 ]]; then
   REGIONS=("chr1:1000000-1010000" "chr1:1000000-2000000" "chr1:20000000-21000000" "chr1:50000000-51000000")
 fi
 if [[ ${#VARIANTS[@]} -eq 0 ]]; then
-  VARIANTS=("baseline" "smaller_chunks" "denser_chunks" "span_biased")
+  VARIANTS=("baseline" "smaller_chunks" "denser_chunks" "span_biased" "span_tight")
 fi
 
 variant_env() {
@@ -91,6 +91,9 @@ variant_env() {
     span_biased)
       printf "%s" "ALIGNX_AXF1_TARGET_UNCOMPRESSED_BYTES=262144 ALIGNX_AXF1_MAX_UNCOMPRESSED_BYTES=524288 ALIGNX_AXF1_MAX_RECORDS=4096 ALIGNX_AXF1_MAX_GENOMIC_SPAN=250000"
       ;;
+    span_tight)
+      printf "%s" "ALIGNX_AXF1_TARGET_UNCOMPRESSED_BYTES=262144 ALIGNX_AXF1_MAX_UNCOMPRESSED_BYTES=524288 ALIGNX_AXF1_MAX_RECORDS=4096 ALIGNX_AXF1_MAX_GENOMIC_SPAN=50000"
+      ;;
     *)
       echo "Unknown variant: $1" >&2
       exit 2
@@ -104,6 +107,7 @@ variant_suffix() {
     smaller_chunks) printf "%s" smaller_chunks ;;
     denser_chunks) printf "%s" denser_chunks ;;
     span_biased) printf "%s" span_biased ;;
+    span_tight) printf "%s" span_tight ;;
     *) echo "Unknown variant: $1" >&2; exit 2 ;;
   esac
 }

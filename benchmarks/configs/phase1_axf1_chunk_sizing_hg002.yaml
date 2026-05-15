@@ -50,6 +50,11 @@ policy_variants:
     max_uncompressed_bytes: 524288
     max_records: 4096
     max_genomic_span: 250000
+  span_tight:
+    target_uncompressed_bytes: 262144
+    max_uncompressed_bytes: 524288
+    max_records: 4096
+    max_genomic_span: 50000
 
 metrics:
   - chunk_count

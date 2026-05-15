@@ -288,6 +288,7 @@ the policy variants:
 | smaller_chunks | 616 | 7 | 30,169 bp | 100,847 bytes | `qual_rle:89, qual_pack:527` |
 | denser_chunks | 167 | 21 | 31,924 bp | 319,609 bytes | `qual_rle:8, qual_pack:159` |
 | span_biased | 324 | 11 | 32,398 bp | 174,145 bytes | `qual_rle:25, qual_pack:299` |
+| span_tight | 324 | 11 | 32,398 bp | 174,145 bytes | `qual_rle:25, qual_pack:299` |
 
 The sweep remained correctness-only: `alignx view` and `samtools view` still
 matched byte-for-byte for every variant. The observed differences show that the
@@ -306,6 +307,23 @@ Additional sparse-region sweeps confirmed the same pattern:
 These sweeps still stayed below the 250 kb span cap used by the
 `span_biased` variant. At the current HG002 coverage pattern, the chunk byte
 budget continues to dominate before the span threshold becomes visible.
+
+### Span-Tight Sweep
+
+To force the span rule to matter, a `span_tight` variant was added with
+`max_genomic_span = 50,000 bp`. On the same HG002 intervals, this variant
+finally split one of the wider chr1 regions differently:
+
+| Region | Variant | Chunk count | Max span | Max chunk length | Quality codec distribution |
+|---|---:|---:|---:|---:|---|
+| `chr1:121000000-142000000` | baseline | 6,878 | 167,372 bp | 193,973 bytes | `qual_rle:1797, qual_pack:5081` |
+| `chr1:121000000-142000000` | span_tight | 6,883 | 49,475 bp | 193,973 bytes | `qual_rle:1797, qual_pack:5086` |
+| `chrY:20000000-21000000` | baseline | 218 | 83,322 bp | 182,454 bytes | `qual_rle:63, qual_pack:155` |
+| `chrY:20000000-21000000` | span_tight | 218 | 38,009 bp | 181,103 bytes | `qual_rle:67, qual_pack:151` |
+
+The important point is not the exact counts; it is that a sufficiently tight
+span cap now produces a visible change on HG002. The earlier `250 kb`
+candidate was simply too loose for the tested regions.
 
 Source identity remains intentionally lightweight in AXF1 v2. `source_path` is
 only an audit hint. Future cache-validation metadata should prefer low-cost

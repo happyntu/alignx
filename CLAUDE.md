@@ -86,7 +86,7 @@ Completed:
 - AXF1 LZ4 compressed payload decision: keep `compression_id=2` reserved but defer implementation until profiling shows a fast-profile need
 - AXF1 QUAL query-impact observation design note: define future benchmark axes for wrapper vs QUAL-specific model
 - AXF1 chunk sizing tuning plan script and hidden env overrides for target/max bytes, record count, and genomic span
-- Remote AXF1 chunk sizing sweeps on missmi-server00 were rerun after refreshing `/mypool/alignx/bin/alignx`; smaller_chunks and denser_chunks materially change chunk shape, while span_biased still matches baseline on chr1:1000000-2000000, chr1:121000000-142000000, and chrY:20000000-21000000, so the 250 kb span cap still is not binding on the tested HG002 intervals
+- Remote AXF1 chunk sizing sweeps on missmi-server00 were rerun after refreshing `/mypool/alignx/bin/alignx`; smaller_chunks and denser_chunks materially change chunk shape, span_biased still matches baseline on chr1:1000000-2000000, chr1:121000000-142000000, and chrY:20000000-21000000, but span_tight at 50 kb finally changes chunk shape on chr1:121000000-142000000 and chrY:20000000-21000000, so the span cap is only visible once tightened further than the earlier 250 kb candidate
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
