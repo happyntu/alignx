@@ -294,6 +294,19 @@ matched byte-for-byte for every variant. The observed differences show that the
 byte-budget knobs are active and materially change chunk shape, while the span
 cap did not bind on this interval.
 
+Additional sparse-region sweeps confirmed the same pattern:
+
+| Region | Variant | Chunk count | Max span | Max chunk length | Quality codec distribution |
+|---|---:|---:|---:|---:|---|
+| `chr1:121000000-142000000` | baseline | 6,878 | 167,372 bp | 193,973 bytes | `qual_rle:1797, qual_pack:5081` |
+| `chr1:121000000-142000000` | span_biased | 6,878 | 167,372 bp | 193,973 bytes | `qual_rle:1797, qual_pack:5081` |
+| `chrY:20000000-21000000` | baseline | 218 | 83,322 bp | 182,454 bytes | `qual_rle:63, qual_pack:155` |
+| `chrY:20000000-21000000` | span_biased | 218 | 83,322 bp | 182,454 bytes | `qual_rle:63, qual_pack:155` |
+
+These sweeps still stayed below the 250 kb span cap used by the
+`span_biased` variant. At the current HG002 coverage pattern, the chunk byte
+budget continues to dominate before the span threshold becomes visible.
+
 Source identity remains intentionally lightweight in AXF1 v2. `source_path` is
 only an audit hint. Future cache-validation metadata should prefer low-cost
 fields such as file size, mtime, and BAM header SHA-256 before considering any

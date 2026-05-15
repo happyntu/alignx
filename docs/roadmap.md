@@ -105,6 +105,7 @@ and region-query correctness.
 - [x] Production AXF1 chunk sizing policy design: byte budget, genomic span, record count hybrid
 - [x] Implement production AXF1 hybrid chunk sizing in converter
 - [ ] Tune AXF1 chunk sizing thresholds on HG002-style data
+  - Current sweeps on chr1 and chrY still do not make the 250 kb span cap bind; byte-budget knobs remain the only ones that materially change chunk shape so far.
 - [ ] Round-trip fidelity: BAM → AXF → BAM → diff
 - [ ] Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
 
