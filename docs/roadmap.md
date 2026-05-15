@@ -98,6 +98,7 @@ and region-query correctness.
 - [x] Reusable AXF1 codec smoke script supports zstd quality compression option
 - [x] Scripted AXF1 zstd quality writer smoke on HG002 chr1 small region
 - [x] AXF1 LZ4 compressed payload decision: reserve id 2, defer implementation pending profiling evidence
+- [x] AXF1 QUAL query-impact observation design note: define future benchmark axes for wrapper vs QUAL-specific model
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec design: SEQ reference-delta with reference identity metadata
