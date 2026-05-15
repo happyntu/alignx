@@ -88,14 +88,15 @@ Completed:
 - AXF1 chunk sizing tuning plan script and hidden env overrides for target/max bytes, record count, and genomic span
 - Remote AXF1 chunk sizing sweeps on missmi-server00 were rerun after refreshing `/mypool/alignx/bin/alignx`; smaller_chunks and denser_chunks materially change chunk shape, span_biased still matches baseline on chr1:1000000-2000000, chr1:121000000-142000000, and chrY:20000000-21000000, but span_tight at 50 kb finally changes chunk shape on chr1:121000000-142000000 and chrY:20000000-21000000, so 50 kb is the first span-sensitive candidate worth keeping and 250 kb should be treated as a loose experiment only
 - Remote benchmark preflight for the final AXF1 chunk-sizing comparison passed on missmi-server00 for chr1:1000000-2000000, chr1:121000000-142000000, and chrY:20000000-21000000; the ready-to-run comparison is baseline (`max_genomic_span=1,000,000`) versus span_tight (`max_genomic_span=50,000`), but timed repeats still require explicit user confirmation
-- Timed AXF1 chunk-sizing benchmarks completed on missmi-server00 for baseline vs span_tight across chr1:1000000-2000000, chr1:121000000-142000000, and chrY:20000000-21000000; span_tight was faster only on chr1:121000000-142000000 and slower on the other two regions, so it is not a clear default replacement for the conservative byte-budget policy
+- Timed AXF1 chunk-sizing benchmarks completed on missmi-server00 for baseline vs span_tight across chr1:1000000-2000000, chr1:121000000-142000000, and chrY:20000000-21000000; span_tight was faster only on chr1:121000000-142000000 and slower on the other two regions, so it is not a clear default replacement for the conservative byte-budget policy. Final recommendation: keep the current hybrid default (256 KiB target / 512 KiB max / 4096 records / 1,000,000 bp span) and do not promote span_tight
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
 - Remote HG002 chr1:1M-2M engineering benchmark completed for `alignx view` vs `samtools view`
 
 Remaining implementation targets:
-- Tune AXF1 hybrid chunk sizing thresholds with correctness smoke checks and confirmed benchmarks
+- Round-trip fidelity: BAM → AXF → BAM → diff
+- Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
 
 ## Build & Test Commands
 

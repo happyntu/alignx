@@ -380,6 +380,24 @@ chrY. On the current HG002 sample, the conservative byte-budget policy remains
 the safer default; `span_tight` is better treated as an exploratory option than
 as the immediate production default.
 
+## Final Recommendation
+
+Close the chunk-sizing tuning loop with the current hybrid default:
+
+- keep `target_uncompressed_bytes = 256 KiB`
+- keep `max_uncompressed_bytes = 512 KiB`
+- keep `max_records = 4096`
+- keep `max_genomic_span = 1,000,000 bp`
+
+Do not promote `span_tight` to the production default. It is a useful
+exploration point because it proves the span cap can matter, but it is not a
+stable winner across the tested HG002 regions. The data support the conservative
+byte-budget-led hybrid policy as the default, with span kept as a guardrail
+rather than the primary tuning knob.
+
+With this, the chunk-sizing research slice is complete enough to stop
+adjustment work unless a new dataset or workload changes the tradeoff.
+
 Source identity remains intentionally lightweight in AXF1 v2. `source_path` is
 only an audit hint. Future cache-validation metadata should prefer low-cost
 fields such as file size, mtime, and BAM header SHA-256 before considering any
