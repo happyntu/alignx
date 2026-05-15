@@ -277,20 +277,22 @@ benchmark or throughput claim.
 
 ### Remote Variant Sweep Status
 
-The planned remote HG002 variant sweep on `chr1:1000000-2000000` was executed
-against the current server binary at `/mypool/alignx/bin/alignx`. That binary
-does not yet contain the chunk-policy env override hook added in
-`3a621a7`, so the `baseline`, `smaller_chunks`, `denser_chunks`, and
-`span_biased` runs all produced identical chunk metadata:
+The refreshed `missmi-server00` binary at `/mypool/alignx/bin/alignx` now
+contains the chunk-policy env override hook added in `3a621a7`. A remote
+correctness sweep on `chr1:1000000-2000000` produced distinct metadata across
+the policy variants:
 
-- `chunk_count = 324`
-- `total_records = 3143`
-- `max_chunk_length = 174145`
-- `quality = qual_rle:25, qual_pack:299`
+| Variant | Chunk count | Max records/chunk | Max span | Max chunk length | Quality codec distribution |
+|---|---:|---:|---:|---:|---|
+| baseline | 324 | 11 | 32,398 bp | 174,145 bytes | `qual_rle:25, qual_pack:299` |
+| smaller_chunks | 616 | 7 | 30,169 bp | 100,847 bytes | `qual_rle:89, qual_pack:527` |
+| denser_chunks | 167 | 21 | 31,924 bp | 319,609 bytes | `qual_rle:8, qual_pack:159` |
+| span_biased | 324 | 11 | 32,398 bp | 174,145 bytes | `qual_rle:25, qual_pack:299` |
 
-This means the remote sweep is a correctness parity check only. It is not a
-usable chunk-sizing comparison until the refreshed binary is deployed to
-`missmi-server00`.
+The sweep remained correctness-only: `alignx view` and `samtools view` still
+matched byte-for-byte for every variant. The observed differences show that the
+byte-budget knobs are active and materially change chunk shape, while the span
+cap did not bind on this interval.
 
 Source identity remains intentionally lightweight in AXF1 v2. `source_path` is
 only an audit hint. Future cache-validation metadata should prefer low-cost
