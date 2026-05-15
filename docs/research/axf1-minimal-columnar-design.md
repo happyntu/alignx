@@ -215,6 +215,13 @@ The QUAL column uses a lossless chunk-local byte RLE codec with raw fallback for
 remains out of scope unless a future explicit lossy profile is designed.
 This is a correctness scaffold, not a benchmark claim.
 
+AXF1 round-trip smoke coverage now also uses
+`scripts/smoke_axf_roundtrip.sh --format AXF1` on the toy BAM fixture. The
+script compares BAM-backed `alignx view` against `alignx view` on the generated
+AXF1 file for the same region, so the round-trip definition remains lossless
+SAM parity without a separate export path yet. On the toy fixture, the AXF1
+roundtrip smoke passed with 2 records and byte-identical stdout.
+
 The AXF1 converter now emits deterministic chunks using the first
 production-oriented hybrid policy documented in
 `docs/research/axf1-chunk-sizing-policy.md`: byte budget, genomic span, record

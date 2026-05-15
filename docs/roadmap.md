@@ -110,6 +110,7 @@ and region-query correctness.
   - Timed benchmark results show span_tight is not a universal win: it is slightly faster on chr1:121000000-142000000 but slower on chr1:1000000-2000000 and chrY:20000000-21000000, so keep the current conservative byte-budget default.
   - Final recommendation: keep the hybrid default at 256 KiB target / 512 KiB max / 4096 records / 1,000,000 bp span, and do not promote span_tight.
 - [ ] Round-trip fidelity: BAM → AXF → BAM → diff
+  - AXF1 round-trip smoke now uses `scripts/smoke_axf_roundtrip.sh --format AXF1`; the remaining gap is a true AXF export path if/when we decide the round-trip target must emit BAM directly.
 - [ ] Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
 
 **SIMD option (off by default):**

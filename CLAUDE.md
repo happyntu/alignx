@@ -96,6 +96,8 @@ Completed:
 
 Remaining implementation targets:
 - Round-trip fidelity: BAM → AXF → BAM → diff
+  - AXF1 round-trip smoke now supports `scripts/smoke_axf_roundtrip.sh --format AXF1`; a direct AXF export path is still not implemented
+  - Toy AXF1 roundtrip smoke passed with `scripts/smoke_axf_roundtrip.sh --format AXF1` on `tests/toy_data/toy_alignment.sorted.bam`
 - Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
 
 ## Build & Test Commands

@@ -122,6 +122,20 @@ writes an AXF file plus BAM/AXF SAM outputs for the requested region. For large
 datasets, prefer running the smoke on `missmi-server00` under `/mypool/alignx/`
 rather than growing the local WSL VHDX.
 
+AXF1 round-trip fidelity uses the same script with `--format AXF1`. The current
+round-trip definition remains SAM parity between `alignx view` on the source
+BAM and `alignx view` on the generated AXF file; this keeps the fidelity check
+lossless without requiring a separate export path yet.
+
+```bash
+scripts/smoke_axf_roundtrip.sh \
+  --alignx build/wsl-release/alignx \
+  --input tests/toy_data/toy_alignment.sorted.bam \
+  --region chrToy:1-250 \
+  --work-dir /tmp/alignx_axf1_roundtrip \
+  --format AXF1
+```
+
 ## AXF1 codec correctness smoke
 
 Use `scripts/smoke_axf1_codecs.sh` to verify AXF1 conversion, AXF1 view output,
