@@ -207,6 +207,54 @@ AXF1 v2 metadata corruption coverage rejects invalid subset flags, truncated
 source/conversion-region strings, and metadata/index overlap in both C++ reader
 paths. The Python metadata inspector was checked against the same corruptions.
 
+## Tuning Plan
+
+Before any benchmark or profiling run, freeze a small comparison matrix so the
+results stay interpretable:
+
+### Fixed Query Set
+
+- `chr1:1000000-1010000`
+  Already verified as a correctness smoke and useful as the baseline region.
+- one larger chr1 interval
+  Use a broader interval to see whether chunk counts or read amplification
+  change with more records.
+- one QUAL-heavy interval
+  Use a region where `quality` still dominates payload bytes.
+- one sparse interval
+  Use a region where genomic span is likely to dominate flush behavior.
+
+### Candidate Policy Variants
+
+Treat the current defaults as the baseline:
+
+| Variant | target bytes | max bytes | max records | max span |
+|---|---:|---:|---:|---:|
+| baseline | 256 KiB | 512 KiB | 4096 | 1,000,000 bp |
+| smaller chunks | 128 KiB | 256 KiB | 2048 | 500,000 bp |
+| denser chunks | 512 KiB | 1 MiB | 8192 | 1,000,000 bp |
+| span-biased | 256 KiB | 512 KiB | 4096 | 250,000 bp |
+
+The goal is not to search a huge parameter space. The goal is to determine
+whether the current defaults are already close enough, or whether a single
+adjustment direction clearly improves query behavior.
+
+### Metrics To Capture
+
+- chunk count;
+- average and max chunk size;
+- average and max chunk span;
+- `alignx view` wall time;
+- stdout parity against `samtools view`;
+- codec distribution for POS / CIGAR / SEQ / QUAL;
+- selected-column decode behavior when QUAL is wrapped.
+
+### Execution Rule
+
+Do not run the benchmark/profiling step until the user has explicitly
+confirmed that the machine is available. The config below is only a planning
+artifact.
+
 Source identity remains intentionally lightweight in AXF1 v2. `source_path` is
 only an audit hint. Future cache-validation metadata should prefer low-cost
 fields such as file size, mtime, and BAM header SHA-256 before considering any

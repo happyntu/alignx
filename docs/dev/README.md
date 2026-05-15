@@ -279,6 +279,10 @@ AXF1 chunks currently use a deliberately tiny MVP max-record split to force
 multi-chunk correctness coverage on toy fixtures. Do not treat that threshold as
 a performance policy. Production chunk sizing still needs a byte budget,
 genomic span, record count, or hybrid policy.
+The current tuning plan is documented in
+`docs/research/axf1-chunk-sizing-policy.md`, and the benchmark-config skeleton
+for later HG002 comparison runs lives in
+`benchmarks/configs/phase1_axf1_chunk_sizing_hg002.yaml`.
 
 Before running benchmarks, repeated timing, profiling, or real-data performance
 work, notify the user and wait for confirmation. Lightweight builds, unit tests,

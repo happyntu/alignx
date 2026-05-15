@@ -1,0 +1,76 @@
+name: phase1_axf1_chunk_sizing_hg002
+phase: v0.3
+description: Plan for comparing AXF1 hybrid chunk sizing variants on HG002-style data before tuning thresholds.
+
+dataset:
+  bam: /mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam
+  bai: /mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam.bai
+  reference: chr1
+  policy:
+    - Use this as a planning config only until benchmark confirmation is given.
+    - Prefer missmi-server00 and /mypool storage for large-data runs.
+    - Keep large raw outputs out of the repository.
+
+query:
+  regions:
+    - chr1:1000000-1010000
+    - chr1:1000000-2000000
+    - chr1:20000000-21000000
+    - chr1:50000000-51000000
+
+tools:
+  alignx:
+    binary: /mypool/alignx/bin/alignx
+    remote_ld_library_path: /home/happyntu/miniconda3/envs/hg002sv/lib
+    commands:
+      - index
+      - view
+  samtools:
+    binary: /home/happyntu/miniconda3/envs/hg002sv/bin/samtools
+    command: view
+
+policy_variants:
+  baseline:
+    target_uncompressed_bytes: 262144
+    max_uncompressed_bytes: 524288
+    max_records: 4096
+    max_genomic_span: 1000000
+  smaller_chunks:
+    target_uncompressed_bytes: 131072
+    max_uncompressed_bytes: 262144
+    max_records: 2048
+    max_genomic_span: 500000
+  denser_chunks:
+    target_uncompressed_bytes: 524288
+    max_uncompressed_bytes: 1048576
+    max_records: 8192
+    max_genomic_span: 1000000
+  span_biased:
+    target_uncompressed_bytes: 262144
+    max_uncompressed_bytes: 524288
+    max_records: 4096
+    max_genomic_span: 250000
+
+metrics:
+  - chunk_count
+  - min_records_per_chunk
+  - max_records_per_chunk
+  - average_chunk_span_bp
+  - max_chunk_span_bp
+  - average_chunk_bytes
+  - max_chunk_bytes
+  - stdout_sha256
+  - stdout_diff_vs_samtools
+  - wall_time_ms
+  - peak_rss_mb
+
+outputs:
+  remote_work_dir: /mypool/alignx/tmp/axf1_chunk_sizing_hg002
+  remote_results_dir: /mypool/alignx/results/
+  notes: |
+    This config is a planning artifact. Do not start timing until the user confirms the machine is available.
+
+notes:
+  - Freeze the region set before timing so runs stay comparable.
+  - Compare only a small number of policy variants first.
+  - Record codec distribution alongside timing to see whether chunk sizing shifts QUAL-heavy payloads.
