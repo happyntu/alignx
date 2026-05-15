@@ -1,0 +1,61 @@
+name: phase1_axf1_view_chr1_hg002
+phase: v0.3
+description: Compare AXF1 columnar region view against BAM-backed alignx view on HG002 chr1 intervals.
+
+dataset:
+  bam: /mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam
+  bai: /mypool/biotools-benchmark-data/hg002_downloads/HG002.SequelII.merged_15kb_20kb.pbmm2.GRCh38.haplotag.10x.bam.bai
+  reference: chr1
+  policy:
+    - Use missmi-server00 and /mypool storage for the real-data run.
+    - Keep raw benchmark outputs out of the repository.
+    - Do not start timed repeats until the user has confirmed the machine is available.
+
+query:
+  regions:
+    - chr1:1000000-2000000
+    - chr1:121000000-142000000
+    - chrY:20000000-21000000
+
+tools:
+  alignx:
+    binary: /mypool/alignx/bin/alignx
+    remote_ld_library_path: /home/happyntu/miniconda3/envs/hg002sv/lib
+    commands:
+      - view
+      - convert
+      - index
+  samtools:
+    binary: /home/happyntu/miniconda3/envs/hg002sv/bin/samtools
+    command: view
+
+benchmark_scope:
+  candidate_inputs:
+    - bam_view: BAM-backed alignx view
+    - axf1_view: AXF1 columnar view generated from the same BAM region
+  decision_rule:
+    - Prefer the AXF1 path only if it is consistently faster across the fixed region set.
+    - Keep the BAM path as the correctness parity baseline.
+
+metrics:
+  - tool
+  - runs
+  - avg_ms
+  - median_ms
+  - p95_ms
+  - min_ms
+  - max_ms
+  - stdout_bytes_min
+  - stdout_bytes_max
+  - stdout_diff_vs_bam
+
+outputs:
+  remote_results_dir: /mypool/alignx/results/axf1_view_chr1_hg002_20260515
+  notes: |
+    This config is a planning artifact for the AXF1 columnar view benchmark.
+    The actual run times AXF1 view against BAM-backed alignx view and uses samtools only as a parity reference if needed.
+
+notes:
+  - The benchmark compares the current AXF1 region-query path, not a future AXF pileup path.
+  - Use the existing hybrid AXF1 writer defaults.
+  - Keep the region set fixed across all runs so the results remain comparable.

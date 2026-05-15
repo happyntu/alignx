@@ -112,6 +112,7 @@ and region-query correctness.
 - [ ] Round-trip fidelity: BAM → AXF → BAM → diff
   - AXF1 round-trip smoke now uses `scripts/smoke_axf_roundtrip.sh --format AXF1`; the remaining gap is a true AXF export path if/when we decide the round-trip target must emit BAM directly.
 - [ ] Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
+  - Timed benchmark completed on missmi-server00 for chr1:1000000-2000000, chr1:121000000-142000000, and chrY:20000000-21000000; AXF1 view was correct but slower than BAM-backed view on all tested regions. See `docs/research/phase1-axf1-view-benchmark-results.md`.
 
 **SIMD option (off by default):**
 - AVX2 delta decode of POS stream
