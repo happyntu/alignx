@@ -14,8 +14,19 @@ SCRIPT = Path(sys.argv[1]) if len(sys.argv) > 1 else None
 
 
 def write_executable(path: Path, content: str) -> None:
-    path.write_text(textwrap.dedent(content), encoding="utf-8")
+    path.write_text(textwrap.dedent(content), encoding="utf-8", newline="\n")
     path.chmod(0o755)
+
+
+def shell_path(path: Path) -> str:
+    resolved = path.resolve()
+    if os.name != "nt":
+        return str(resolved)
+
+    drive = resolved.drive
+    if len(drive) != 2 or drive[1] != ":":
+        return str(resolved)
+    return f"/mnt/{drive[0].lower()}{resolved.as_posix()[2:]}"
 
 
 class SmokeAxf1CodecsScriptTest(unittest.TestCase):
@@ -38,7 +49,7 @@ class SmokeAxf1CodecsScriptTest(unittest.TestCase):
             f"""\
             #!/usr/bin/env bash
             set -euo pipefail
-            echo "$@" >> "{log}"
+            echo "$@" >> "{shell_path(log)}"
             if [[ "$1" == "convert" ]]; then
               output=""
               while [[ $# -gt 0 ]]; do
@@ -87,22 +98,24 @@ class SmokeAxf1CodecsScriptTest(unittest.TestCase):
         return subprocess.run(
             [
                 "bash",
-                str(self.script),
+                shell_path(self.script),
                 "--alignx",
-                str(alignx),
+                shell_path(alignx),
                 "--samtools",
-                str(samtools),
+                shell_path(samtools),
                 "--inspector",
-                str(inspector),
+                shell_path(inspector),
                 "--input",
-                str(input_bam),
+                shell_path(input_bam),
                 "--region",
                 "chrToy:1-10",
                 "--work-dir",
-                str(work_dir),
+                shell_path(work_dir),
                 *extra_args,
             ],
             text=True,
+            encoding="utf-8",
+            errors="replace",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env={**os.environ, "LC_ALL": "C"},

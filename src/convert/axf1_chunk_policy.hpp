@@ -15,6 +15,13 @@ struct Axf1ChunkPolicy {
     std::int32_t max_genomic_span = 1'000'000;
 };
 
+struct Axf1ChunkPolicyOverride {
+    std::optional<std::size_t> target_uncompressed_bytes;
+    std::optional<std::size_t> max_uncompressed_bytes;
+    std::optional<std::size_t> max_records;
+    std::optional<std::int32_t> max_genomic_span;
+};
+
 struct Axf1RecordChunkMetrics {
     std::int32_t start_pos = -1;
     std::int32_t end_pos = -1;
@@ -31,6 +38,10 @@ struct Axf1ChunkState {
 
 [[nodiscard]] std::size_t
 estimate_axf1_record_uncompressed_bytes(const format::Axf1Record& record) noexcept;
+
+[[nodiscard]] std::expected<Axf1ChunkPolicy, std::string>
+apply_axf1_chunk_policy_override(const Axf1ChunkPolicy& base,
+                                 const Axf1ChunkPolicyOverride& policy_override) noexcept;
 
 [[nodiscard]] bool
 should_flush_axf1_chunk_before_append(const Axf1ChunkPolicy& policy, const Axf1ChunkState& chunk,

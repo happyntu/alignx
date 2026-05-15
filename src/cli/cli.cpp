@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cctype>
 #include <chrono>
 #include <cstddef>
@@ -9,7 +10,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <expected>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -53,28 +56,104 @@ struct ViewProfile {
     Clock::duration write_time{};
 };
 
-bool view_profile_enabled() {
-#ifdef _WIN32
-    std::size_t required_size = 0;
-    getenv_s(&required_size, nullptr, 0, "ALIGNX_PROFILE_VIEW");
-    if (required_size == 0) {
-        return false;
-    }
+std::optional<std::string> get_env_value(const char* name);
 
-    std::string value(required_size, '\0');
-    getenv_s(&required_size, value.data(), value.size(), "ALIGNX_PROFILE_VIEW");
-    if (!value.empty() && value.back() == '\0') {
-        value.pop_back();
-    }
-    return !value.empty() && value != "0";
-#else
-    const char* value = std::getenv("ALIGNX_PROFILE_VIEW");
-    return value != nullptr && value[0] != '\0' && std::string_view(value) != "0";
-#endif
+bool view_profile_enabled() {
+    const auto value = get_env_value("ALIGNX_PROFILE_VIEW");
+    return value.has_value() && !value->empty() && *value != "0";
 }
 
 double milliseconds(Clock::duration duration) {
     return std::chrono::duration<double, std::milli>(duration).count();
+}
+
+std::optional<std::string> get_env_value(const char* name) {
+#ifdef _WIN32
+    std::size_t required_size = 0;
+    getenv_s(&required_size, nullptr, 0, name);
+    if (required_size == 0) {
+        return std::nullopt;
+    }
+
+    std::string value(required_size, '\0');
+    getenv_s(&required_size, value.data(), value.size(), name);
+    if (!value.empty() && value.back() == '\0') {
+        value.pop_back();
+    }
+    if (value.empty()) {
+        return std::nullopt;
+    }
+    return value;
+#else
+    const char* value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return std::nullopt;
+    }
+    return std::string(value);
+#endif
+}
+
+template <typename Int>
+std::expected<std::optional<Int>, std::string> read_positive_integer_env(const char* name) {
+    const auto raw_value = get_env_value(name);
+    if (!raw_value.has_value()) {
+        return std::optional<Int>{};
+    }
+
+    const std::string_view text(*raw_value);
+    std::uint64_t parsed = 0;
+    const auto* first = text.data();
+    const auto* last = text.data() + text.size();
+    const auto result = std::from_chars(first, last, parsed);
+    if (result.ec != std::errc{} || result.ptr != last || parsed == 0 ||
+        parsed > static_cast<std::uint64_t>(std::numeric_limits<Int>::max())) {
+        return std::unexpected(std::string("alignx convert: environment variable ") + name +
+                               " must be a positive integer");
+    }
+
+    return static_cast<Int>(parsed);
+}
+
+std::expected<convert::Axf1ChunkPolicyOverride, std::string>
+read_axf1_chunk_policy_override_from_env() {
+    convert::Axf1ChunkPolicyOverride policy_override;
+
+    auto target_bytes =
+        read_positive_integer_env<std::size_t>("ALIGNX_AXF1_TARGET_UNCOMPRESSED_BYTES");
+    if (!target_bytes) {
+        return std::unexpected(target_bytes.error());
+    }
+    policy_override.target_uncompressed_bytes = *target_bytes;
+
+    auto max_bytes =
+        read_positive_integer_env<std::size_t>("ALIGNX_AXF1_MAX_UNCOMPRESSED_BYTES");
+    if (!max_bytes) {
+        return std::unexpected(max_bytes.error());
+    }
+    policy_override.max_uncompressed_bytes = *max_bytes;
+
+    auto max_records =
+        read_positive_integer_env<std::size_t>("ALIGNX_AXF1_MAX_RECORDS");
+    if (!max_records) {
+        return std::unexpected(max_records.error());
+    }
+    policy_override.max_records = *max_records;
+
+    auto max_span =
+        read_positive_integer_env<std::int32_t>("ALIGNX_AXF1_MAX_GENOMIC_SPAN");
+    if (!max_span) {
+        return std::unexpected(max_span.error());
+    }
+    policy_override.max_genomic_span = *max_span;
+
+    return policy_override;
+}
+
+bool has_axf1_chunk_policy_env_override() {
+    return get_env_value("ALIGNX_AXF1_TARGET_UNCOMPRESSED_BYTES").has_value() ||
+           get_env_value("ALIGNX_AXF1_MAX_UNCOMPRESSED_BYTES").has_value() ||
+           get_env_value("ALIGNX_AXF1_MAX_RECORDS").has_value() ||
+           get_env_value("ALIGNX_AXF1_MAX_GENOMIC_SPAN").has_value();
 }
 
 void write_view_profile(const ViewProfile& profile, Clock::duration total_time, std::ostream& err) {
@@ -276,13 +355,29 @@ int run_convert(const std::filesystem::path& input, const std::filesystem::path&
         return 1;
     }
 
+    convert::Axf1ChunkPolicy chunk_policy;
+    if (has_axf1_chunk_policy_env_override()) {
+        auto override_or_error = read_axf1_chunk_policy_override_from_env();
+        if (!override_or_error) {
+            err << override_or_error.error() << '\n';
+            return 1;
+        }
+        auto merged = convert::apply_axf1_chunk_policy_override(chunk_policy, *override_or_error);
+        if (!merged) {
+            err << "alignx convert: " << merged.error() << '\n';
+            return 1;
+        }
+        chunk_policy = *merged;
+    }
+
     format::Axf1WriteOptions axf1_options;
     if (normalized_quality_compression == "zstd") {
         axf1_options.quality_compression = format::Axf1Compression::zstd;
     }
 
     auto conversion = normalized_format == "AXF1"
-                          ? convert::convert_bam_to_axf1_mvp(input, output, region, axf1_options)
+                          ? convert::convert_bam_to_axf1_mvp(input, output, region, axf1_options,
+                                                             chunk_policy)
                           : convert::convert_bam_to_axf_mvp(input, output, region);
     if (!conversion) {
         err << "alignx convert: " << conversion.error() << '\n';

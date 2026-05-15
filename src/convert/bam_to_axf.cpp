@@ -259,13 +259,23 @@ std::expected<void, std::string> convert_bam_to_axf_mvp(const std::filesystem::p
 std::expected<void, std::string> convert_bam_to_axf1_mvp(const std::filesystem::path& input_bam,
                                                          const std::filesystem::path& output_axf,
                                                          const std::optional<std::string>& region) {
-    return convert_bam_to_axf1_mvp(input_bam, output_axf, region, format::Axf1WriteOptions{});
+    return convert_bam_to_axf1_mvp(input_bam, output_axf, region, format::Axf1WriteOptions{},
+                                   kAxf1ProductionChunkPolicy);
 }
 
 std::expected<void, std::string> convert_bam_to_axf1_mvp(const std::filesystem::path& input_bam,
                                                          const std::filesystem::path& output_axf,
                                                          const std::optional<std::string>& region,
                                                          const format::Axf1WriteOptions& options) {
+    return convert_bam_to_axf1_mvp(input_bam, output_axf, region, options,
+                                   kAxf1ProductionChunkPolicy);
+}
+
+std::expected<void, std::string> convert_bam_to_axf1_mvp(const std::filesystem::path& input_bam,
+                                                         const std::filesystem::path& output_axf,
+                                                         const std::optional<std::string>& region,
+                                                         const format::Axf1WriteOptions& options,
+                                                         const Axf1ChunkPolicy& chunk_policy) {
     std::optional<query::SamRegion> parsed_region;
     if (region.has_value()) {
         auto parsed = query::parse_sam_region(*region);
@@ -346,13 +356,13 @@ std::expected<void, std::string> convert_bam_to_axf1_mvp(const std::filesystem::
             .start_pos = view.record.position,
             .end_pos = view.record.end_position,
             .estimated_uncompressed_bytes = estimate_axf1_record_uncompressed_bytes(*axf1_record)};
-        if (should_flush_axf1_chunk_before_append(kAxf1ProductionChunkPolicy, pending_chunk.state,
+        if (should_flush_axf1_chunk_before_append(chunk_policy, pending_chunk.state,
                                                   next_record)) {
             flush_axf1_chunk(file, current_ref_id, pending_chunk);
         }
 
         append_axf1_record(pending_chunk, std::move(*axf1_record), next_record);
-        if (should_flush_axf1_chunk_after_append(kAxf1ProductionChunkPolicy, pending_chunk.state)) {
+        if (should_flush_axf1_chunk_after_append(chunk_policy, pending_chunk.state)) {
             flush_axf1_chunk(file, current_ref_id, pending_chunk);
             pending_ref_id.reset();
         }

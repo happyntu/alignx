@@ -102,3 +102,33 @@ TEST(Axf1ChunkPolicy, FlushesAfterAppendAtTargetByteBudget) {
 
     EXPECT_TRUE(alignx::convert::should_flush_axf1_chunk_after_append(policy, chunk));
 }
+
+TEST(Axf1ChunkPolicy, AppliesOverrideToBasePolicy) {
+    const alignx::convert::Axf1ChunkPolicy base{};
+    const alignx::convert::Axf1ChunkPolicyOverride policy_override{
+        .target_uncompressed_bytes = 128 * 1024,
+        .max_uncompressed_bytes = 256 * 1024,
+        .max_records = 2048,
+        .max_genomic_span = 500'000};
+
+    const auto merged = alignx::convert::apply_axf1_chunk_policy_override(base, policy_override);
+    ASSERT_TRUE(merged.has_value());
+    EXPECT_EQ(merged->target_uncompressed_bytes, 128 * 1024);
+    EXPECT_EQ(merged->max_uncompressed_bytes, 256 * 1024);
+    EXPECT_EQ(merged->max_records, 2048);
+    EXPECT_EQ(merged->max_genomic_span, 500'000);
+}
+
+TEST(Axf1ChunkPolicy, RejectsInvalidOverrideOrdering) {
+    const alignx::convert::Axf1ChunkPolicyOverride policy_override{
+        .target_uncompressed_bytes = 512 * 1024,
+        .max_uncompressed_bytes = 256 * 1024,
+        .max_records = 2048,
+        .max_genomic_span = 500'000};
+
+    const auto merged = alignx::convert::apply_axf1_chunk_policy_override(
+        alignx::convert::Axf1ChunkPolicy{}, policy_override);
+    ASSERT_FALSE(merged.has_value());
+    EXPECT_NE(merged.error().find("target_uncompressed_bytes must not exceed max_uncompressed_bytes"),
+              std::string::npos);
+}

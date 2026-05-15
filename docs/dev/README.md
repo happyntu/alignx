@@ -283,6 +283,12 @@ The current tuning plan is documented in
 `docs/research/axf1-chunk-sizing-policy.md`, and the benchmark-config skeleton
 for later HG002 comparison runs lives in
 `benchmarks/configs/phase1_axf1_chunk_sizing_hg002.yaml`.
+The planning-only command matrix helper is
+`scripts/plan_axf1_chunk_sizing.sh`; it can also emit metadata-only inspection
+commands for an existing AXF1 file. Hidden env overrides for the converter are
+`ALIGNX_AXF1_TARGET_UNCOMPRESSED_BYTES`,
+`ALIGNX_AXF1_MAX_UNCOMPRESSED_BYTES`,
+`ALIGNX_AXF1_MAX_RECORDS`, and `ALIGNX_AXF1_MAX_GENOMIC_SPAN`.
 
 Before running benchmarks, repeated timing, profiling, or real-data performance
 work, notify the user and wait for confirmation. Lightweight builds, unit tests,
