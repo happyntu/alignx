@@ -275,6 +275,23 @@ chunk policy were unchanged. The payload shape changed because the zstd-wrapped
 quality column shrank substantially. This is a metadata observation, not a
 benchmark or throughput claim.
 
+### Remote Variant Sweep Status
+
+The planned remote HG002 variant sweep on `chr1:1000000-2000000` was executed
+against the current server binary at `/mypool/alignx/bin/alignx`. That binary
+does not yet contain the chunk-policy env override hook added in
+`3a621a7`, so the `baseline`, `smaller_chunks`, `denser_chunks`, and
+`span_biased` runs all produced identical chunk metadata:
+
+- `chunk_count = 324`
+- `total_records = 3143`
+- `max_chunk_length = 174145`
+- `quality = qual_rle:25, qual_pack:299`
+
+This means the remote sweep is a correctness parity check only. It is not a
+usable chunk-sizing comparison until the refreshed binary is deployed to
+`missmi-server00`.
+
 Source identity remains intentionally lightweight in AXF1 v2. `source_path` is
 only an audit hint. Future cache-validation metadata should prefer low-cost
 fields such as file size, mtime, and BAM header SHA-256 before considering any
