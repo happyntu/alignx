@@ -18,6 +18,19 @@ query:
     - chr1:20000000-21000000
     - chr1:50000000-51000000
 
+benchmark_scope:
+  note: Use only after explicit user confirmation for timed repeats.
+  candidate_variants:
+    - baseline
+    - span_tight
+  candidate_regions:
+    - chr1:1000000-2000000
+    - chr1:121000000-142000000
+    - chrY:20000000-21000000
+  decision_rule:
+    - Prefer the smallest span cap that still produces a visible chunk-shape change without a large chunk-count explosion.
+    - Keep byte-budget thresholds unchanged until span sensitivity is settled.
+
 tools:
   alignx:
     binary: /mypool/alignx/bin/alignx

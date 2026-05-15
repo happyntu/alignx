@@ -341,6 +341,24 @@ Practical conclusion:
 - leave `250 kb` as a loose upper-bound experiment only if we need a less
   aggressive fallback later.
 
+### Benchmark Prep
+
+The remote preflight for the final benchmark regions has passed on
+`missmi-server00` with the current `/mypool/alignx/bin/alignx` binary:
+
+- `chr1:1000000-2000000`
+- `chr1:121000000-142000000`
+- `chrY:20000000-21000000`
+
+The prepared benchmark comparison scope is now:
+
+- baseline: `max_genomic_span = 1,000,000 bp`
+- span_tight: `max_genomic_span = 50,000 bp`
+
+Do not start timed repeats until the user explicitly confirms the machine is
+available. The next step is a benchmark/profiling run, not another correctness
+sweep.
+
 Source identity remains intentionally lightweight in AXF1 v2. `source_path` is
 only an audit hint. Future cache-validation metadata should prefer low-cost
 fields such as file size, mtime, and BAM header SHA-256 before considering any

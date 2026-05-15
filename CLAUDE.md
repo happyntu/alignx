@@ -87,6 +87,7 @@ Completed:
 - AXF1 QUAL query-impact observation design note: define future benchmark axes for wrapper vs QUAL-specific model
 - AXF1 chunk sizing tuning plan script and hidden env overrides for target/max bytes, record count, and genomic span
 - Remote AXF1 chunk sizing sweeps on missmi-server00 were rerun after refreshing `/mypool/alignx/bin/alignx`; smaller_chunks and denser_chunks materially change chunk shape, span_biased still matches baseline on chr1:1000000-2000000, chr1:121000000-142000000, and chrY:20000000-21000000, but span_tight at 50 kb finally changes chunk shape on chr1:121000000-142000000 and chrY:20000000-21000000, so 50 kb is the first span-sensitive candidate worth keeping and 250 kb should be treated as a loose experiment only
+- Remote benchmark preflight for the final AXF1 chunk-sizing comparison passed on missmi-server00 for chr1:1000000-2000000, chr1:121000000-142000000, and chrY:20000000-21000000; the ready-to-run comparison is baseline (`max_genomic_span=1,000,000`) versus span_tight (`max_genomic_span=50,000`), but timed repeats still require explicit user confirmation
 - Benchmark scripts validate BAM input, `alignx index` preflight, and `alignx view` vs `samtools view` stdout parity
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
