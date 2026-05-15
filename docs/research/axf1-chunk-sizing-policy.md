@@ -255,6 +255,26 @@ Do not run the benchmark/profiling step until the user has explicitly
 confirmed that the machine is available. The config below is only a planning
 artifact.
 
+### Metadata-Only Snapshot
+
+The current planning matrix was generated with
+`scripts/plan_axf1_chunk_sizing.sh --manifest-out benchmarks/results/axf1_chunk_sizing_plan.tsv`.
+That manifest stays in the repo as a command matrix, not as a benchmark
+result.
+
+Metadata-only comparison of two existing HG002 chr1:1000000-1010000 AXF1 files
+shows the expected shape change without any timing claim:
+
+| File | Version | Chunk count | Max chunk length | Quality codec | Quality bytes |
+|---|---:|---:|---:|---|---:|
+| `hybrid.axf1` | 1 | 7 | 294,520 | `raw` | 907,624 |
+| `zstd.axf1` | 2 | 7 | 127,168 | `qual_pack_compressed` | 533,367 |
+
+The chunk count and span stayed the same because the input region and hybrid
+chunk policy were unchanged. The payload shape changed because the zstd-wrapped
+quality column shrank substantially. This is a metadata observation, not a
+benchmark or throughput claim.
+
 Source identity remains intentionally lightweight in AXF1 v2. `source_path` is
 only an audit hint. Future cache-validation metadata should prefer low-cost
 fields such as file size, mtime, and BAM header SHA-256 before considering any
