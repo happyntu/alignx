@@ -359,6 +359,27 @@ Do not start timed repeats until the user explicitly confirms the machine is
 available. The next step is a benchmark/profiling run, not another correctness
 sweep.
 
+### Benchmark Results
+
+Timed repeats were run on `missmi-server00` for the prepared comparison scope
+using `bench_region_query.sh --warmup 1 --repeats 5`:
+
+| Region | Variant | alignx median ms | samtools median ms | alignx vs baseline |
+|---|---|---:|---:|---:|
+| `chr1:1000000-2000000` | baseline | 326.856 | 456.248 | - |
+| `chr1:1000000-2000000` | span_tight | 411.496 | 518.124 | +25.9% |
+| `chr1:121000000-142000000` | baseline | 6778.471 | 5893.745 | - |
+| `chr1:121000000-142000000` | span_tight | 6664.563 | 7383.082 | -1.7% |
+| `chrY:20000000-21000000` | baseline | 285.619 | 367.129 | - |
+| `chrY:20000000-21000000` | span_tight | 295.872 | 360.677 | +3.6% |
+
+All runs preserved stdout parity against `samtools view`. The span-tight
+variant is not a clear universal win: it helps one large sparse-ish region a
+little, but it is slower on the smaller chr1 interval and slightly slower on
+chrY. On the current HG002 sample, the conservative byte-budget policy remains
+the safer default; `span_tight` is better treated as an exploratory option than
+as the immediate production default.
+
 Source identity remains intentionally lightweight in AXF1 v2. `source_path` is
 only an audit hint. Future cache-validation metadata should prefer low-cost
 fields such as file size, mtime, and BAM header SHA-256 before considering any

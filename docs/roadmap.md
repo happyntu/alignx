@@ -107,6 +107,7 @@ and region-query correctness.
 - [ ] Tune AXF1 chunk sizing thresholds on HG002-style data
   - Current sweeps show the 250 kb span cap still does not bind on the tested HG002 intervals, but a 50 kb span cap finally changes chunk shape on chr1:121000000-142000000 and chrY:20000000-21000000. Keep 50 kb as the active span-sensitive candidate; treat 250 kb as a loose fallback experiment only.
   - Remote benchmark preflight passed for the final comparison regions; ready-to-run candidates are baseline vs span_tight, but timed repeats still need explicit confirmation.
+  - Timed benchmark results show span_tight is not a universal win: it is slightly faster on chr1:121000000-142000000 but slower on chr1:1000000-2000000 and chrY:20000000-21000000, so keep the current conservative byte-budget default.
 - [ ] Round-trip fidelity: BAM → AXF → BAM → diff
 - [ ] Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
 
