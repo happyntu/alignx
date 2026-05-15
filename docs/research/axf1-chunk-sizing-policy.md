@@ -325,6 +325,22 @@ The important point is not the exact counts; it is that a sufficiently tight
 span cap now produces a visible change on HG002. The earlier `250 kb`
 candidate was simply too loose for the tested regions.
 
+### Recommendation
+
+For the current HG002-style data we have exercised, `50 kb` is the first span
+setting that consistently moves chunk shape without causing a dramatic chunk
+count explosion. The `250 kb` candidate is still effectively inert on the
+tested regions, so it should not be treated as the preferred span-sensitive
+default candidate.
+
+Practical conclusion:
+
+- keep the hybrid byte-budget and record-count thresholds as the primary
+  controls;
+- treat `50 kb` as the active span-sensitive comparison point;
+- leave `250 kb` as a loose upper-bound experiment only if we need a less
+  aggressive fallback later.
+
 Source identity remains intentionally lightweight in AXF1 v2. `source_path` is
 only an audit hint. Future cache-validation metadata should prefer low-cost
 fields such as file size, mtime, and BAM header SHA-256 before considering any
