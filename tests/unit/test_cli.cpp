@@ -639,6 +639,57 @@ TEST(Cli, ViewProfileWritesOnlyToStderr) {
     EXPECT_NE(err.str().find("\t130\n"), std::string::npos);
 }
 
+TEST(Cli, Axf1ViewProfileWritesOnlyToStderr) {
+    const auto temp_dir = make_temp_dir("alignx_cli_view_axf1_profile");
+    const auto input = temp_dir / "toy.axf1";
+    alignx::format::Axf1File file{.references = {{.name = "chrToy", .length = 1000}},
+                                  .chunks = {{.ref_id = 0,
+                                              .start_pos = 100,
+                                              .end_pos = 310,
+                                              .records = {{.qname = "read001",
+                                                           .flag = 0,
+                                                           .pos = 100,
+                                                           .mapq = 60,
+                                                           .cigar = "10M",
+                                                           .mate_reference = "*",
+                                                           .mate_pos = 0,
+                                                           .template_length = 0,
+                                                           .sequence = "ACGTACGTAA",
+                                                           .quality = "FFFFFFFFFF",
+                                                           .tags = "NM:i:0"},
+                                                          {.qname = "read002",
+                                                           .flag = 16,
+                                                           .pos = 300,
+                                                           .mapq = 50,
+                                                           .cigar = "10M",
+                                                           .mate_reference = "*",
+                                                           .mate_pos = 0,
+                                                           .template_length = 0,
+                                                           .sequence = "TTTTACGGGA",
+                                                           .quality = "FFFFFFFFFF",
+                                                           .tags = "NM:i:1"}}}}};
+    auto write = alignx::format::write_axf1_file(file, input);
+    ASSERT_TRUE(write) << write.error();
+
+    set_env_var("ALIGNX_PROFILE_AXF1", "1");
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "view", input.string(), "chrToy:101-110"}, out, err);
+
+    unset_env_var("ALIGNX_PROFILE_AXF1");
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(out.str(),
+              "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n");
+    EXPECT_NE(err.str().find("profile\tchunks_selected\tchunks_with_matches"), std::string::npos);
+    EXPECT_NE(err.str().find("axf1_view\t1\t1\t2\t1\t1\t"), std::string::npos);
+    EXPECT_NE(err.str().find(std::string("\t") + std::to_string(out.str().size()) + "\n"),
+              std::string::npos);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
 TEST(Cli, ViewAcceptsHtsThreadsOption) {
     std::ostringstream out;
     std::ostringstream err;

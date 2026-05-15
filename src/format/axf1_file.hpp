@@ -98,6 +98,14 @@ struct Axf1ChunkIndexEntry {
     [[nodiscard]] bool overlaps(std::int32_t query_start, std::int32_t query_end) const noexcept;
 };
 
+struct Axf1ChunkReadProfile {
+    std::uint64_t bytes_read = 0;
+    std::uint64_t total_payload_bytes = 0;
+    std::uint64_t selected_payload_bytes = 0;
+    std::uint16_t total_columns = 0;
+    std::uint16_t selected_columns = 0;
+};
+
 struct Axf1FileIndex {
     Axf1FileIndexMetadata metadata;
     std::vector<Axf1Reference> references;
@@ -121,8 +129,16 @@ public:
     read_chunk(const Axf1ChunkIndexEntry& chunk) const;
 
     [[nodiscard]] std::expected<Axf1Chunk, std::string>
+    read_chunk_profiled(const Axf1ChunkIndexEntry& chunk, Axf1ChunkReadProfile& profile) const;
+
+    [[nodiscard]] std::expected<Axf1Chunk, std::string>
     read_chunk_columns(const Axf1ChunkIndexEntry& chunk,
                        const std::vector<Axf1ColumnId>& columns) const;
+
+    [[nodiscard]] std::expected<Axf1Chunk, std::string>
+    read_chunk_columns_profiled(const Axf1ChunkIndexEntry& chunk,
+                                const std::vector<Axf1ColumnId>& columns,
+                                Axf1ChunkReadProfile& profile) const;
 
 private:
     Axf1FileReader(std::filesystem::path path, Axf1FileIndex index);
@@ -148,7 +164,17 @@ read_axf1_index_metadata(const std::filesystem::path& path);
 read_axf1_chunk(const std::filesystem::path& path, const Axf1ChunkIndexEntry& chunk);
 
 [[nodiscard]] std::expected<Axf1Chunk, std::string>
+read_axf1_chunk_profiled(const std::filesystem::path& path, const Axf1ChunkIndexEntry& chunk,
+                         Axf1ChunkReadProfile& profile);
+
+[[nodiscard]] std::expected<Axf1Chunk, std::string>
 read_axf1_chunk_columns(const std::filesystem::path& path, const Axf1ChunkIndexEntry& chunk,
                         const std::vector<Axf1ColumnId>& columns);
+
+[[nodiscard]] std::expected<Axf1Chunk, std::string>
+read_axf1_chunk_columns_profiled(const std::filesystem::path& path,
+                                 const Axf1ChunkIndexEntry& chunk,
+                                 const std::vector<Axf1ColumnId>& columns,
+                                 Axf1ChunkReadProfile& profile);
 
 } // namespace alignx::format

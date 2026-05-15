@@ -1667,7 +1667,8 @@ slice_column_payload(const std::vector<unsigned char>& chunk_payload, const Colu
 std::expected<Axf1Chunk, std::string>
 decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
                    const Axf1ChunkIndexEntry& index_entry,
-                   const std::vector<Axf1ColumnId>& requested_columns) {
+                   const std::vector<Axf1ColumnId>& requested_columns,
+                   Axf1ChunkReadProfile* profile = nullptr) {
     Reader reader(chunk_bytes);
 
     auto ref_id = reader.read_u32();
@@ -1704,6 +1705,21 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
                                  : validate_selected_column_entries(entries, requested_columns);
     if (!column_validation) {
         return std::unexpected(column_validation.error());
+    }
+
+    if (profile != nullptr) {
+        profile->bytes_read = index_entry.chunk_length;
+        profile->total_columns = static_cast<std::uint16_t>(entries.size());
+        profile->selected_columns = 0;
+        profile->total_payload_bytes = 0;
+        profile->selected_payload_bytes = 0;
+        for (const ColumnEntry& entry : entries) {
+            profile->total_payload_bytes += entry.length;
+            if (contains_column(requested_columns, entry.column_id)) {
+                profile->selected_columns += 1;
+                profile->selected_payload_bytes += entry.length;
+            }
+        }
     }
 
     const std::size_t payload_start = static_cast<std::size_t>(reader.offset());
@@ -1909,9 +1925,22 @@ Axf1FileReader::read_chunk(const Axf1ChunkIndexEntry& chunk) const {
 }
 
 std::expected<Axf1Chunk, std::string>
+Axf1FileReader::read_chunk_profiled(const Axf1ChunkIndexEntry& chunk,
+                                    Axf1ChunkReadProfile& profile) const {
+    return read_axf1_chunk_profiled(path_, chunk, profile);
+}
+
+std::expected<Axf1Chunk, std::string>
 Axf1FileReader::read_chunk_columns(const Axf1ChunkIndexEntry& chunk,
                                    const std::vector<Axf1ColumnId>& columns) const {
     return read_axf1_chunk_columns(path_, chunk, columns);
+}
+
+std::expected<Axf1Chunk, std::string>
+Axf1FileReader::read_chunk_columns_profiled(const Axf1ChunkIndexEntry& chunk,
+                                            const std::vector<Axf1ColumnId>& columns,
+                                            Axf1ChunkReadProfile& profile) const {
+    return read_axf1_chunk_columns_profiled(path_, chunk, columns, profile);
 }
 
 std::expected<void, std::string> write_axf1_file(const Axf1File& file,
@@ -2190,13 +2219,30 @@ std::expected<Axf1Chunk, std::string> read_axf1_chunk(const std::filesystem::pat
 }
 
 std::expected<Axf1Chunk, std::string>
+read_axf1_chunk_profiled(const std::filesystem::path& path, const Axf1ChunkIndexEntry& chunk,
+                         Axf1ChunkReadProfile& profile) {
+    return read_axf1_chunk_columns_profiled(
+        path, chunk, std::vector<Axf1ColumnId>(kRequiredColumns.begin(), kRequiredColumns.end()),
+        profile);
+}
+
+std::expected<Axf1Chunk, std::string>
 read_axf1_chunk_columns(const std::filesystem::path& path, const Axf1ChunkIndexEntry& chunk,
                         const std::vector<Axf1ColumnId>& columns) {
+    Axf1ChunkReadProfile unused_profile;
+    return read_axf1_chunk_columns_profiled(path, chunk, columns, unused_profile);
+}
+
+std::expected<Axf1Chunk, std::string>
+read_axf1_chunk_columns_profiled(const std::filesystem::path& path,
+                                 const Axf1ChunkIndexEntry& chunk,
+                                 const std::vector<Axf1ColumnId>& columns,
+                                 Axf1ChunkReadProfile& profile) {
     auto bytes = read_file_range(path, chunk.chunk_offset, chunk.chunk_length);
     if (!bytes) {
         return std::unexpected(bytes.error());
     }
-    return decode_chunk_bytes(*bytes, chunk, columns);
+    return decode_chunk_bytes(*bytes, chunk, columns, &profile);
 }
 
 } // namespace alignx::format

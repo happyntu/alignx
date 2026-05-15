@@ -320,3 +320,28 @@ TEST(Axf1View, ReportsOverlappingMalformedChunkAtomically) {
 
     std::filesystem::remove(path);
 }
+
+TEST(Axf1View, ProfileTracksSelectiveAndFullDecodeWork) {
+    const auto path = temp_path("alignx_axf1_view_profile");
+    write_axf1_or_fail(make_file(), path);
+
+    std::ostringstream out;
+    alignx::query::Axf1ViewProfile profile;
+    auto result = alignx::query::write_axf1_region_sam_profiled(path, "chrToy:101-110", out, profile);
+
+    EXPECT_TRUE(result) << result.error();
+    EXPECT_EQ(out.str(),
+              "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n");
+    EXPECT_EQ(profile.chunks_selected, 1);
+    EXPECT_EQ(profile.chunks_with_matches, 1);
+    EXPECT_EQ(profile.records_scanned, 2);
+    EXPECT_EQ(profile.records_matched, 1);
+    EXPECT_EQ(profile.records_output, 1);
+    EXPECT_GT(profile.selective_bytes_read, 0);
+    EXPECT_GT(profile.full_chunk_bytes_read, 0);
+    EXPECT_GT(profile.selective_payload_bytes, 0);
+    EXPECT_GT(profile.full_payload_bytes, profile.selective_payload_bytes);
+    EXPECT_EQ(profile.stdout_bytes, out.str().size());
+
+    std::filesystem::remove(path);
+}

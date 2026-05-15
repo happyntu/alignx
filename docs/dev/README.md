@@ -247,6 +247,30 @@ using `scripts/smoke_axf1_codecs.sh --axf1-quality-compression zstd
 --expect-codec quality=qual_pack_compressed`. It reported `OK axf1_codecs`,
 `axf1_quality_compression=zstd`, the same stdout SHA-256, and 64 records.
 
+## AXF1 view profiling
+
+Use `ALIGNX_PROFILE_AXF1=1` with `alignx view <input.axf1> <region>` to emit a
+single TSV profile row to stderr while preserving SAM stdout on stdout.
+
+```bash
+ALIGNX_PROFILE_AXF1=1 build/wsl-debug/alignx \
+  view /tmp/sample.axf1 chrToy:1-250 \
+  > /tmp/sample.sam 2> /tmp/sample.axf1.profile.tsv
+```
+
+The profile currently reports:
+
+- chunk selection counts
+- scanned / matched / output record counts
+- open, reference lookup, chunk query, selective decode, filter, full decode,
+  format, and write timings
+- selective and full chunk byte counts
+- selective and full payload byte counts
+- stdout bytes
+
+This is a profiling aid, not a benchmark harness. For large-data profiling on
+HG002-style inputs, prefer `missmi-server00` under `/mypool/alignx/tmp`.
+
 ## AXF1 column payload summary
 
 Use `scripts/summarize_axf1_columns.py` to summarize column payload sizes from

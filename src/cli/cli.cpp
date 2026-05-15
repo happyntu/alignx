@@ -63,6 +63,11 @@ bool view_profile_enabled() {
     return value.has_value() && !value->empty() && *value != "0";
 }
 
+bool axf1_view_profile_enabled() {
+    const auto value = get_env_value("ALIGNX_PROFILE_AXF1");
+    return value.has_value() && !value->empty() && *value != "0";
+}
+
 double milliseconds(Clock::duration duration) {
     return std::chrono::duration<double, std::milli>(duration).count();
 }
@@ -166,6 +171,26 @@ void write_view_profile(const ViewProfile& profile, Clock::duration total_time, 
         << milliseconds(total_time) << '\t' << profile.stdout_bytes << '\n';
 }
 
+void write_axf1_view_profile(const query::Axf1ViewProfile& profile, Clock::duration total_time,
+                             std::ostream& err) {
+    err << "profile\tchunks_selected\tchunks_with_matches\trecords_scanned\trecords_matched"
+           "\trecords_output\topen_ms\tref_lookup_ms\tchunk_query_ms\tselective_decode_ms"
+           "\tfilter_ms\tfull_decode_ms\tformat_ms\twrite_ms\ttotal_ms\tselective_bytes_read"
+           "\tfull_chunk_bytes_read\tselective_payload_bytes\tfull_payload_bytes\tstdout_bytes\n";
+    err << "axf1_view\t" << profile.chunks_selected << '\t' << profile.chunks_with_matches << '\t'
+        << profile.records_scanned << '\t' << profile.records_matched << '\t'
+        << profile.records_output << '\t' << milliseconds(profile.open_time) << '\t'
+        << milliseconds(profile.reference_lookup_time) << '\t'
+        << milliseconds(profile.chunk_query_time) << '\t'
+        << milliseconds(profile.selective_decode_time) << '\t'
+        << milliseconds(profile.filter_time) << '\t' << milliseconds(profile.full_decode_time)
+        << '\t' << milliseconds(profile.format_time) << '\t'
+        << milliseconds(profile.write_time) << '\t' << milliseconds(total_time) << '\t'
+        << profile.selective_bytes_read << '\t' << profile.full_chunk_bytes_read << '\t'
+        << profile.selective_payload_bytes << '\t' << profile.full_payload_bytes << '\t'
+        << profile.stdout_bytes << '\n';
+}
+
 bool is_axf_path(const std::filesystem::path& path) {
     return lower_extension(path) == ".axf";
 }
@@ -209,10 +234,18 @@ int run_axf_view(const std::filesystem::path& input, const std::string& region, 
 
 int run_axf1_view(const std::filesystem::path& input, const std::string& region, std::ostream& out,
                   std::ostream& err) {
-    auto result = query::write_axf1_region_sam(input, region, out);
+    const bool profile_enabled = axf1_view_profile_enabled();
+    const auto total_start = profile_enabled ? Clock::now() : Clock::time_point{};
+
+    query::Axf1ViewProfile profile;
+    auto result = profile_enabled ? query::write_axf1_region_sam_profiled(input, region, out, profile)
+                                  : query::write_axf1_region_sam(input, region, out);
     if (!result) {
         err << "alignx view: " << result.error() << '\n';
         return 1;
+    }
+    if (profile_enabled) {
+        write_axf1_view_profile(profile, Clock::now() - total_start, err);
     }
     return 0;
 }
