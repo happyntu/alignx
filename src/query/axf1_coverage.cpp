@@ -42,14 +42,15 @@ std::expected<bool, std::string> record_overlaps_region(const format::Axf1Record
 } // namespace
 
 std::expected<analysis::CoverageResult, std::string>
-compute_axf1_coverage(const std::filesystem::path& input, const std::string& region) {
+compute_axf1_coverage(const std::filesystem::path& input, const std::string& region,
+                      const RecordFilter& filter) {
     Axf1CoverageProfile unused;
-    return compute_axf1_coverage_profiled(input, region, unused);
+    return compute_axf1_coverage_profiled(input, region, unused, filter);
 }
 
 std::expected<analysis::CoverageResult, std::string>
 compute_axf1_coverage_profiled(const std::filesystem::path& input, const std::string& region,
-                               Axf1CoverageProfile& profile) {
+                               Axf1CoverageProfile& profile, const RecordFilter& filter) {
     auto parsed_region = parse_sam_region(region);
     if (!parsed_region) {
         return std::unexpected(parsed_region.error());
@@ -83,12 +84,18 @@ compute_axf1_coverage_profiled(const std::filesystem::path& input, const std::st
     }
     profile.chunks_selected += hits->size();
 
+    std::vector<format::Axf1ColumnId> filter_columns = {format::Axf1ColumnId::pos,
+                                                        format::Axf1ColumnId::cigar};
+    if (filter.is_active()) {
+        filter_columns.push_back(format::Axf1ColumnId::flag);
+        filter_columns.push_back(format::Axf1ColumnId::mapq);
+    }
+
     for (const format::Axf1ChunkIndexEntry* chunk_entry : *hits) {
         format::Axf1ChunkReadProfile selective_profile;
         const auto selective_decode_start = Clock::now();
-        auto chunk = reader->read_chunk_columns_selective(
-            *chunk_entry, {format::Axf1ColumnId::pos, format::Axf1ColumnId::cigar},
-            selective_profile);
+        auto chunk =
+            reader->read_chunk_columns_selective(*chunk_entry, filter_columns, selective_profile);
         profile.selective_decode_time += Clock::now() - selective_decode_start;
         if (!chunk) {
             return std::unexpected(chunk.error());
@@ -100,14 +107,20 @@ compute_axf1_coverage_profiled(const std::filesystem::path& input, const std::st
         std::vector<std::size_t> matching_indices;
         for (std::size_t i = 0; i < chunk->records.size(); ++i) {
             profile.records_scanned += 1;
-            auto overlaps = record_overlaps_region(chunk->records[i], *parsed_region);
+            const auto& rec = chunk->records[i];
+            auto overlaps = record_overlaps_region(rec, *parsed_region);
             if (!overlaps) {
                 return std::unexpected(overlaps.error());
             }
-            if (*overlaps) {
-                matching_indices.push_back(i);
-                profile.records_matched += 1;
+            if (!*overlaps) {
+                continue;
             }
+            if (filter.is_active() && !passes_filter(filter, rec.flag, rec.mapq)) {
+                profile.records_filtered += 1;
+                continue;
+            }
+            matching_indices.push_back(i);
+            profile.records_matched += 1;
         }
         profile.filter_time += Clock::now() - filter_start;
         if (matching_indices.empty()) {

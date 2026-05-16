@@ -20,11 +20,12 @@ std::filesystem::path temp_path(std::string_view label) {
 }
 
 alignx::format::Axf1Record make_record(std::string qname, std::int32_t pos,
-                                       std::string cigar = "10M") {
+                                       std::string cigar = "10M", std::uint16_t flag = 0,
+                                       std::uint8_t mapq = 60) {
     return alignx::format::Axf1Record{.qname = std::move(qname),
-                                      .flag = 0,
+                                      .flag = flag,
                                       .pos = pos,
-                                      .mapq = 60,
+                                      .mapq = mapq,
                                       .cigar = std::move(cigar),
                                       .mate_reference = "*",
                                       .mate_pos = 0,
@@ -259,6 +260,76 @@ TEST(Axf1Coverage, MultiChunkCoverage) {
     EXPECT_EQ(result->depth[10], 1);
     EXPECT_EQ(result->depth[14], 1);
     EXPECT_EQ(result->depth[15], 0);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1Coverage, FlagExcludeFiltersRecords) {
+    const auto path = temp_path("alignx_axf1_coverage_flag_filter");
+    alignx::format::Axf1File file{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .chunks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 210,
+                    .records = {make_record("read001", 100, "10M", 0, 60),
+                                make_record("read002", 105, "10M", 16, 50)}}}};
+    write_axf1_or_fail(file, path);
+
+    alignx::query::RecordFilter filter{.flag_exclude = 16};
+    auto result = alignx::query::compute_axf1_coverage(path, "chrToy:101-116", filter);
+
+    ASSERT_TRUE(result) << result.error();
+    EXPECT_EQ(result->records_counted, 1);
+    EXPECT_EQ(result->depth[0], 1);
+    EXPECT_EQ(result->depth[5], 1);
+    EXPECT_EQ(result->depth[10], 0);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1Coverage, MinMapqFiltersRecords) {
+    const auto path = temp_path("alignx_axf1_coverage_mapq_filter");
+    alignx::format::Axf1File file{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .chunks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 210,
+                    .records = {make_record("read001", 100, "10M", 0, 60),
+                                make_record("read002", 105, "10M", 0, 20)}}}};
+    write_axf1_or_fail(file, path);
+
+    alignx::query::RecordFilter filter{.min_mapq = 30};
+    auto result = alignx::query::compute_axf1_coverage(path, "chrToy:101-116", filter);
+
+    ASSERT_TRUE(result) << result.error();
+    EXPECT_EQ(result->records_counted, 1);
+    EXPECT_EQ(result->depth[0], 1);
+    EXPECT_EQ(result->depth[5], 1);
+    EXPECT_EQ(result->depth[10], 0);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1Coverage, FilterProfileShowsFilteredCount) {
+    const auto path = temp_path("alignx_axf1_coverage_filter_profile");
+    alignx::format::Axf1File file{
+        .references = {{.name = "chrToy", .length = 1000}},
+        .chunks = {{.ref_id = 0,
+                    .start_pos = 100,
+                    .end_pos = 210,
+                    .records = {make_record("read001", 100, "10M", 0, 60),
+                                make_record("read002", 105, "10M", 16, 50)}}}};
+    write_axf1_or_fail(file, path);
+
+    alignx::query::Axf1CoverageProfile profile;
+    alignx::query::RecordFilter filter{.flag_exclude = 16};
+    auto result =
+        alignx::query::compute_axf1_coverage_profiled(path, "chrToy:101-116", profile, filter);
+
+    ASSERT_TRUE(result) << result.error();
+    EXPECT_EQ(profile.records_scanned, 2);
+    EXPECT_EQ(profile.records_matched, 1);
+    EXPECT_EQ(profile.records_filtered, 1);
 
     std::filesystem::remove(path);
 }

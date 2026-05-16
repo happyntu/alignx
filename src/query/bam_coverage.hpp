@@ -8,12 +8,14 @@
 #include <string>
 
 #include "analysis/coverage.hpp"
+#include "query/record_filter.hpp"
 
 namespace alignx::query {
 
 struct BamCoverageProfile {
     std::uint64_t records_scanned = 0;
     std::uint64_t records_matched = 0;
+    std::uint64_t records_filtered = 0;
     std::chrono::steady_clock::duration open_time{};
     std::chrono::steady_clock::duration fetch_time{};
     std::chrono::steady_clock::duration read_time{};
@@ -22,11 +24,11 @@ struct BamCoverageProfile {
 
 [[nodiscard]] std::expected<analysis::CoverageResult, std::string>
 compute_bam_coverage(const std::filesystem::path& input, const std::string& region,
-                     std::optional<int> hts_threads = std::nullopt);
+                     const RecordFilter& filter = {}, std::optional<int> hts_threads = std::nullopt);
 
 [[nodiscard]] std::expected<analysis::CoverageResult, std::string>
 compute_bam_coverage_profiled(const std::filesystem::path& input, const std::string& region,
-                              BamCoverageProfile& profile,
+                              BamCoverageProfile& profile, const RecordFilter& filter = {},
                               std::optional<int> hts_threads = std::nullopt);
 
 } // namespace alignx::query

@@ -7,6 +7,8 @@
 #include <iosfwd>
 #include <string>
 
+#include "query/record_filter.hpp"
+
 namespace alignx::query {
 
 struct Axf1ViewProfile {
@@ -14,6 +16,7 @@ struct Axf1ViewProfile {
     std::uint64_t chunks_with_matches = 0;
     std::uint64_t records_scanned = 0;
     std::uint64_t records_matched = 0;
+    std::uint64_t records_filtered = 0;
     std::uint64_t records_output = 0;
     std::uint64_t stdout_bytes = 0;
     std::uint64_t selective_bytes_read = 0;
@@ -32,10 +35,11 @@ struct Axf1ViewProfile {
 
 [[nodiscard]] std::expected<void, std::string>
 write_axf1_region_sam(const std::filesystem::path& input, const std::string& region,
-                      std::ostream& out);
+                      std::ostream& out, const RecordFilter& filter = {});
 
 [[nodiscard]] std::expected<void, std::string>
 write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::string& region,
-                               std::ostream& out, Axf1ViewProfile& profile);
+                               std::ostream& out, Axf1ViewProfile& profile,
+                               const RecordFilter& filter = {});
 
 } // namespace alignx::query

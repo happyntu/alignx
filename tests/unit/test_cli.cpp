@@ -683,11 +683,32 @@ TEST(Cli, Axf1ViewProfileWritesOnlyToStderr) {
     EXPECT_EQ(out.str(),
               "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n");
     EXPECT_NE(err.str().find("profile\tchunks_selected\tchunks_with_matches"), std::string::npos);
-    EXPECT_NE(err.str().find("axf1_view\t1\t1\t2\t1\t1\t"), std::string::npos);
+    EXPECT_NE(err.str().find("axf1_view\t1\t1\t2\t1\t0\t1\t"), std::string::npos);
     EXPECT_NE(err.str().find(std::string("\t") + std::to_string(out.str().size()) + "\n"),
               std::string::npos);
 
     std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ViewFlagExcludeFiltersRecords) {
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli(
+        {"alignx", "view", "--flag-exclude", "16", toy_bam_path().string(), "chrToy:1-250"}, out,
+        err);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(out.str(),
+              "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n");
+}
+
+TEST(Cli, ViewMinMapqFiltersRecords) {
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli(
+        {"alignx", "view", "--min-mapq", "55", toy_bam_path().string(), "chrToy:1-250"}, out, err);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(out.str(),
+              "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n");
 }
 
 TEST(Cli, ViewAcceptsHtsThreadsOption) {
@@ -721,6 +742,33 @@ TEST(Cli, StatsOutputsToyBamSummary) {
                          "flag.0\t1\n"
                          "flag.4\t1\n"
                          "flag.16\t1\n");
+}
+
+TEST(Cli, PileupOutputsTsv) {
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code =
+        run_cli({"alignx", "pileup", toy_bam_path().string(), "chrToy:101-111"}, out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    const std::string expected = "chrToy\t101\t1\nchrToy\t102\t1\nchrToy\t103\t1\nchrToy\t104\t1\n"
+                                 "chrToy\t105\t1\nchrToy\t106\t1\nchrToy\t107\t1\nchrToy\t108\t1\n"
+                                 "chrToy\t109\t1\nchrToy\t110\t1\nchrToy\t111\t0\n";
+    EXPECT_EQ(out.str(), expected);
+}
+
+TEST(Cli, PileupFlagExcludeFiltersRecords) {
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli(
+        {"alignx", "pileup", "--flag-exclude", "16", toy_bam_path().string(), "chrToy:101-111"},
+        out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    const std::string expected = "chrToy\t101\t1\nchrToy\t102\t1\nchrToy\t103\t1\nchrToy\t104\t1\n"
+                                 "chrToy\t105\t1\nchrToy\t106\t1\nchrToy\t107\t1\nchrToy\t108\t1\n"
+                                 "chrToy\t109\t1\nchrToy\t110\t1\nchrToy\t111\t0\n";
+    EXPECT_EQ(out.str(), expected);
 }
 
 #else

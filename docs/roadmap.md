@@ -35,8 +35,10 @@ and produce correct output before the next version starts.
 
 **Deliverables:**
 
-- [ ] `alignx pileup <bam> <region>` — per-base coverage
-- [ ] Read filter: `--flag-exclude`, `--min-mapq`, `--tag`
+- [x] `alignx pileup <bam|axf1> <region>` — per-base coverage TSV output
+- [x] Read filter: `--flag-exclude`, `--min-mapq` for view, coverage, pileup subcommands
+  - `--tag` deferred to v0.4 (requires full-record decode)
+  - AXF1 path adds FLAG+MAPQ to selective column list only when filter is active
 - [ ] Benchmark: vs `samtools depth`, `mosdepth` on chr1
 - [ ] Integration test: coverage array matches samtools depth output exactly
 
@@ -99,7 +101,7 @@ and region-query correctness.
 - [x] Scripted AXF1 zstd quality writer smoke on HG002 chr1 small region
 - [x] AXF1 LZ4 compressed payload decision: reserve id 2, defer implementation pending profiling evidence
 - [x] AXF1 QUAL query-impact observation design note: define future benchmark axes for wrapper vs QUAL-specific model
-- [x] AXF1 lazy output-column decode for matched records
+- [x] AXF1 lazy output-column decode for matched records (now uses selective I/O for both filter and output passes)
 - [x] `alignx coverage` subcommand: POS-only AXF1 selective column decode for per-base coverage, with BAM full-record baseline and profiling hook
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read

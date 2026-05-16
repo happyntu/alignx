@@ -34,14 +34,15 @@ std::string extract_cigar_from_sam(std::string_view sam_line) {
 
 std::expected<analysis::CoverageResult, std::string>
 compute_bam_coverage(const std::filesystem::path& input, const std::string& region,
-                     std::optional<int> hts_threads) {
+                     const RecordFilter& filter, std::optional<int> hts_threads) {
     BamCoverageProfile unused;
-    return compute_bam_coverage_profiled(input, region, unused, hts_threads);
+    return compute_bam_coverage_profiled(input, region, unused, filter, hts_threads);
 }
 
 std::expected<analysis::CoverageResult, std::string>
 compute_bam_coverage_profiled(const std::filesystem::path& input, const std::string& region,
-                              BamCoverageProfile& profile, std::optional<int> hts_threads) {
+                              BamCoverageProfile& profile, const RecordFilter& filter,
+                              std::optional<int> hts_threads) {
     auto parsed_region = parse_sam_region(region);
     if (!parsed_region) {
         return std::unexpected(parsed_region.error());
@@ -85,6 +86,10 @@ compute_bam_coverage_profiled(const std::filesystem::path& input, const std::str
         }
         if (!half_open_intervals_overlap(rec.record.position, rec.record.end_position,
                                          parsed_region->start, parsed_region->end)) {
+            continue;
+        }
+        if (filter.is_active() && !passes_filter(filter, rec.record.flag, rec.record.mapq)) {
+            profile.records_filtered += 1;
             continue;
         }
         profile.records_matched += 1;

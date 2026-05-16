@@ -7,6 +7,7 @@
 #include <string>
 
 #include "analysis/coverage.hpp"
+#include "query/record_filter.hpp"
 
 namespace alignx::query {
 
@@ -15,6 +16,7 @@ struct Axf1CoverageProfile {
     std::uint64_t chunks_with_matches = 0;
     std::uint64_t records_scanned = 0;
     std::uint64_t records_matched = 0;
+    std::uint64_t records_filtered = 0;
     std::uint64_t selective_bytes_read = 0;
     std::uint64_t selective_payload_bytes = 0;
     std::chrono::steady_clock::duration open_time{};
@@ -26,10 +28,11 @@ struct Axf1CoverageProfile {
 };
 
 [[nodiscard]] std::expected<analysis::CoverageResult, std::string>
-compute_axf1_coverage(const std::filesystem::path& input, const std::string& region);
+compute_axf1_coverage(const std::filesystem::path& input, const std::string& region,
+                      const RecordFilter& filter = {});
 
 [[nodiscard]] std::expected<analysis::CoverageResult, std::string>
 compute_axf1_coverage_profiled(const std::filesystem::path& input, const std::string& region,
-                               Axf1CoverageProfile& profile);
+                               Axf1CoverageProfile& profile, const RecordFilter& filter = {});
 
 } // namespace alignx::query

@@ -31,6 +31,7 @@
 #include "query/axf1_view.hpp"
 #include "query/axf_view.hpp"
 #include "query/bam_coverage.hpp"
+#include "query/record_filter.hpp"
 
 namespace alignx::cli {
 namespace {
@@ -176,12 +177,13 @@ void write_view_profile(const ViewProfile& profile, Clock::duration total_time, 
 void write_axf1_view_profile(const query::Axf1ViewProfile& profile, Clock::duration total_time,
                              std::ostream& err) {
     err << "profile\tchunks_selected\tchunks_with_matches\trecords_scanned\trecords_matched"
-           "\trecords_output\topen_ms\tref_lookup_ms\tchunk_query_ms\tselective_decode_ms"
-           "\tfilter_ms\toutput_decode_ms\tformat_ms\twrite_ms\ttotal_ms\tselective_bytes_read"
-           "\toutput_bytes_read\tselective_payload_bytes\toutput_payload_bytes\tstdout_bytes\n";
+           "\trecords_filtered\trecords_output\topen_ms\tref_lookup_ms\tchunk_query_ms"
+           "\tselective_decode_ms\tfilter_ms\toutput_decode_ms\tformat_ms\twrite_ms\ttotal_ms"
+           "\tselective_bytes_read\toutput_bytes_read\tselective_payload_bytes"
+           "\toutput_payload_bytes\tstdout_bytes\n";
     err << "axf1_view\t" << profile.chunks_selected << '\t' << profile.chunks_with_matches << '\t'
         << profile.records_scanned << '\t' << profile.records_matched << '\t'
-        << profile.records_output << '\t' << milliseconds(profile.open_time) << '\t'
+        << profile.records_filtered << '\t' << profile.records_output << '\t' << milliseconds(profile.open_time) << '\t'
         << milliseconds(profile.reference_lookup_time) << '\t'
         << milliseconds(profile.chunk_query_time) << '\t'
         << milliseconds(profile.selective_decode_time) << '\t'
@@ -234,14 +236,16 @@ int run_axf_view(const std::filesystem::path& input, const std::string& region, 
     return 0;
 }
 
-int run_axf1_view(const std::filesystem::path& input, const std::string& region, std::ostream& out,
-                  std::ostream& err) {
+int run_axf1_view(const std::filesystem::path& input, const std::string& region,
+                  const query::RecordFilter& filter, std::ostream& out, std::ostream& err) {
     const bool profile_enabled = axf1_view_profile_enabled();
     const auto total_start = profile_enabled ? Clock::now() : Clock::time_point{};
 
     query::Axf1ViewProfile profile;
-    auto result = profile_enabled ? query::write_axf1_region_sam_profiled(input, region, out, profile)
-                                  : query::write_axf1_region_sam(input, region, out);
+    auto result =
+        profile_enabled
+            ? query::write_axf1_region_sam_profiled(input, region, out, profile, filter)
+            : query::write_axf1_region_sam(input, region, out, filter);
     if (!result) {
         err << "alignx view: " << result.error() << '\n';
         return 1;
@@ -253,12 +257,13 @@ int run_axf1_view(const std::filesystem::path& input, const std::string& region,
 }
 
 int run_view(const std::filesystem::path& input, const std::string& region,
-             std::optional<int> hts_threads, std::ostream& out, std::ostream& err) {
+             std::optional<int> hts_threads, const query::RecordFilter& filter, std::ostream& out,
+             std::ostream& err) {
     switch (detect_view_input_format(input)) {
     case ViewInputFormat::axf0:
         return run_axf_view(input, region, out, err);
     case ViewInputFormat::axf1:
-        return run_axf1_view(input, region, out, err);
+        return run_axf1_view(input, region, filter, out, err);
     case ViewInputFormat::unsupported_axf:
         err << "alignx view: unsupported AXF file magic\n";
         return 1;
@@ -288,7 +293,7 @@ int run_view(const std::filesystem::path& input, const std::string& region,
         return 1;
     }
 
-    if (!profile_enabled) {
+    if (!profile_enabled && !filter.is_active()) {
         for (;;) {
             auto line = reader->next_sam_line_view();
             if (!line) {
@@ -309,31 +314,40 @@ int run_view(const std::filesystem::path& input, const std::string& region,
     }
 
     for (;;) {
-        io::SamLineProfile line_profile;
-        auto line = reader->next_sam_line_view_profiled(line_profile);
-        profile.read_time += line_profile.read_time;
-        profile.format_time += line_profile.format_time;
+        const auto read_start = Clock::now();
+        auto record_view = reader->next_record_view();
+        if (profile_enabled) {
+            profile.read_time += Clock::now() - read_start;
+        }
 
-        if (!line) {
-            err << "alignx view: " << line.error() << '\n';
+        if (!record_view) {
+            err << "alignx view: " << record_view.error() << '\n';
             return 1;
         }
-        if (!line->has_value()) {
+        if (!record_view->has_value()) {
             break;
         }
 
+        const auto& rec = record_view->value();
+        if (filter.is_active() &&
+            !passes_filter(filter, rec.record.flag, rec.record.mapq)) {
+            continue;
+        }
+
         const auto write_start = Clock::now();
-        out.write(line->value().data(), static_cast<std::streamsize>(line->value().size()));
-        if (line->value().empty() || line->value().back() != '\n') {
+        out.write(rec.sam_line.data(), static_cast<std::streamsize>(rec.sam_line.size()));
+        if (rec.sam_line.empty() || rec.sam_line.back() != '\n') {
             out.put('\n');
         }
         const auto write_end = Clock::now();
 
-        profile.write_time += write_end - write_start;
-        profile.records += 1;
-        profile.stdout_bytes += line->value().size();
-        if (line->value().empty() || line->value().back() != '\n') {
-            profile.stdout_bytes += 1;
+        if (profile_enabled) {
+            profile.write_time += write_end - write_start;
+            profile.records += 1;
+            profile.stdout_bytes += rec.sam_line.size();
+            if (rec.sam_line.empty() || rec.sam_line.back() != '\n') {
+                profile.stdout_bytes += 1;
+            }
         }
     }
 
@@ -547,11 +561,12 @@ bool coverage_profile_enabled() {
 void write_axf1_coverage_profile(const query::Axf1CoverageProfile& profile,
                                  Clock::duration total_time, std::ostream& err) {
     err << "profile\tchunks_selected\tchunks_with_matches\trecords_scanned\trecords_matched"
-           "\topen_ms\tref_lookup_ms\tchunk_query_ms\tselective_decode_ms"
+           "\trecords_filtered\topen_ms\tref_lookup_ms\tchunk_query_ms\tselective_decode_ms"
            "\tfilter_ms\tcoverage_ms\ttotal_ms\tselective_bytes_read"
            "\tselective_payload_bytes\n";
     err << "axf1_coverage\t" << profile.chunks_selected << '\t' << profile.chunks_with_matches
         << '\t' << profile.records_scanned << '\t' << profile.records_matched << '\t'
+        << profile.records_filtered << '\t'
         << milliseconds(profile.open_time) << '\t' << milliseconds(profile.reference_lookup_time)
         << '\t' << milliseconds(profile.chunk_query_time) << '\t'
         << milliseconds(profile.selective_decode_time) << '\t' << milliseconds(profile.filter_time)
@@ -561,9 +576,10 @@ void write_axf1_coverage_profile(const query::Axf1CoverageProfile& profile,
 
 void write_bam_coverage_profile(const query::BamCoverageProfile& profile,
                                 Clock::duration total_time, std::ostream& err) {
-    err << "profile\trecords_scanned\trecords_matched\topen_ms\tfetch_ms\tread_ms"
-           "\tcoverage_ms\ttotal_ms\n";
+    err << "profile\trecords_scanned\trecords_matched\trecords_filtered\topen_ms\tfetch_ms"
+           "\tread_ms\tcoverage_ms\ttotal_ms\n";
     err << "bam_coverage\t" << profile.records_scanned << '\t' << profile.records_matched << '\t'
+        << profile.records_filtered << '\t'
         << milliseconds(profile.open_time) << '\t' << milliseconds(profile.fetch_time) << '\t'
         << milliseconds(profile.read_time) << '\t' << milliseconds(profile.coverage_time) << '\t'
         << milliseconds(total_time) << '\n';
@@ -600,8 +616,8 @@ void write_coverage_summary(const analysis::CoverageResult& result, std::ostream
 }
 
 int run_coverage(const std::filesystem::path& input, const std::string& region,
-                 std::string_view output_mode, std::optional<int> hts_threads, std::ostream& out,
-                 std::ostream& err) {
+                 std::string_view output_mode, std::optional<int> hts_threads,
+                 const query::RecordFilter& filter, std::ostream& out, std::ostream& err) {
     const bool profile_enabled = coverage_profile_enabled();
     const auto total_start = profile_enabled ? Clock::now() : Clock::time_point{};
 
@@ -609,8 +625,8 @@ int run_coverage(const std::filesystem::path& input, const std::string& region,
     if (format == ViewInputFormat::axf1) {
         query::Axf1CoverageProfile profile;
         auto result = profile_enabled
-                          ? query::compute_axf1_coverage_profiled(input, region, profile)
-                          : query::compute_axf1_coverage(input, region);
+                          ? query::compute_axf1_coverage_profiled(input, region, profile, filter)
+                          : query::compute_axf1_coverage(input, region, filter);
         if (!result) {
             err << "alignx coverage: " << result.error() << '\n';
             return 1;
@@ -632,9 +648,10 @@ int run_coverage(const std::filesystem::path& input, const std::string& region,
     }
 
     query::BamCoverageProfile profile;
-    auto result = profile_enabled
-                      ? query::compute_bam_coverage_profiled(input, region, profile, hts_threads)
-                      : query::compute_bam_coverage(input, region, hts_threads);
+    auto result =
+        profile_enabled
+            ? query::compute_bam_coverage_profiled(input, region, profile, filter, hts_threads)
+            : query::compute_bam_coverage(input, region, filter, hts_threads);
     if (!result) {
         err << "alignx coverage: " << result.error() << '\n';
         return 1;
@@ -659,6 +676,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     std::filesystem::path view_input;
     std::string view_region;
     int view_hts_threads = -1;
+    std::uint16_t view_flag_exclude = 0;
+    std::uint8_t view_min_mapq = 0;
 
     auto* view = app.add_subcommand("view", "Output SAM records for a BAM or AXF region");
     view->add_option("input", view_input, "Input BAM or AXF file")
@@ -667,6 +686,9 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     view->add_option("region", view_region, "Genomic region, for example chr1:1-1000")->required();
     view->add_option("--hts-threads", view_hts_threads,
                      "HTSlib worker threads for BAM/CRAM I/O; overrides ALIGNX_HTS_THREADS");
+    view->add_option("--flag-exclude", view_flag_exclude,
+                     "Exclude records with any of these FLAG bits set");
+    view->add_option("--min-mapq", view_min_mapq, "Exclude records below this MAPQ value");
 
     std::filesystem::path stats_input;
     auto* stats = app.add_subcommand("stats", "Output basic BAM statistics as TSV");
@@ -694,6 +716,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     std::string coverage_region;
     std::string coverage_output_mode = "summary";
     int coverage_hts_threads = -1;
+    std::uint16_t coverage_flag_exclude = 0;
+    std::uint8_t coverage_min_mapq = 0;
     auto* coverage_cmd =
         app.add_subcommand("coverage", "Compute per-base coverage for a BAM or AXF1 region");
     coverage_cmd->add_option("input", coverage_input, "Input BAM or AXF1 file")
@@ -705,6 +729,29 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
                              "Output format: summary or tsv");
     coverage_cmd->add_option("--hts-threads", coverage_hts_threads,
                              "HTSlib worker threads for BAM I/O");
+    coverage_cmd->add_option("--flag-exclude", coverage_flag_exclude,
+                             "Exclude records with any of these FLAG bits set");
+    coverage_cmd->add_option("--min-mapq", coverage_min_mapq,
+                             "Exclude records below this MAPQ value");
+
+    std::filesystem::path pileup_input;
+    std::string pileup_region;
+    int pileup_hts_threads = -1;
+    std::uint16_t pileup_flag_exclude = 0;
+    std::uint8_t pileup_min_mapq = 0;
+    auto* pileup_cmd =
+        app.add_subcommand("pileup", "Compute per-base pileup depth for a BAM or AXF1 region");
+    pileup_cmd->add_option("input", pileup_input, "Input BAM or AXF1 file")
+        ->required()
+        ->check(::CLI::ExistingFile);
+    pileup_cmd->add_option("region", pileup_region, "Genomic region, for example chr1:1-1000")
+        ->required();
+    pileup_cmd->add_option("--hts-threads", pileup_hts_threads,
+                           "HTSlib worker threads for BAM I/O");
+    pileup_cmd->add_option("--flag-exclude", pileup_flag_exclude,
+                           "Exclude records with any of these FLAG bits set");
+    pileup_cmd->add_option("--min-mapq", pileup_min_mapq,
+                           "Exclude records below this MAPQ value");
 
     std::filesystem::path index_input;
     std::filesystem::path index_output;
@@ -727,7 +774,9 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
         }
         const auto hts_threads =
             view_hts_threads >= 0 ? std::optional<int>{view_hts_threads} : std::nullopt;
-        return run_view(view_input, view_region, hts_threads, out, err);
+        const query::RecordFilter view_filter{.flag_exclude = view_flag_exclude,
+                                              .min_mapq = view_min_mapq};
+        return run_view(view_input, view_region, hts_threads, view_filter, out, err);
     }
     if (*stats) {
         return run_stats(stats_input, out, err);
@@ -747,7 +796,21 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
         }
         const auto hts_threads =
             coverage_hts_threads >= 0 ? std::optional<int>{coverage_hts_threads} : std::nullopt;
-        return run_coverage(coverage_input, coverage_region, coverage_output_mode, hts_threads, out,
+        const query::RecordFilter coverage_filter{.flag_exclude = coverage_flag_exclude,
+                                                  .min_mapq = coverage_min_mapq};
+        return run_coverage(coverage_input, coverage_region, coverage_output_mode, hts_threads,
+                            coverage_filter, out, err);
+    }
+    if (*pileup_cmd) {
+        if (pileup_hts_threads < -1) {
+            err << "alignx pileup: --hts-threads must be a non-negative integer\n";
+            return 1;
+        }
+        const auto hts_threads =
+            pileup_hts_threads >= 0 ? std::optional<int>{pileup_hts_threads} : std::nullopt;
+        const query::RecordFilter pileup_filter{.flag_exclude = pileup_flag_exclude,
+                                                .min_mapq = pileup_min_mapq};
+        return run_coverage(pileup_input, pileup_region, "tsv", hts_threads, pileup_filter, out,
                             err);
     }
     if (*index_cmd) {
