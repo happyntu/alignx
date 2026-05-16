@@ -28,6 +28,10 @@ std::filesystem::path toy_bam_path() {
     return std::filesystem::path(TEST_DATA_DIR) / "toy_alignment.sorted.bam";
 }
 
+std::filesystem::path toy_cram_path() {
+    return std::filesystem::path(TEST_DATA_DIR) / "toy_alignment.sorted.cram";
+}
+
 alignx::format::Axf1Record make_record(std::string qname, std::int32_t pos,
                                         std::string cigar = "10M", std::uint16_t flag = 0,
                                         std::uint8_t mapq = 60, std::string seq = "ACGTACGTAA",
@@ -169,6 +173,61 @@ TEST(ExportAxf1ToBam, ExportToyBamRoundtripSamDiff) {
 
     for (std::size_t i = 0; i < original_lines.size(); ++i) {
         EXPECT_EQ(original_lines[i], exported_lines[i]) << "SAM line " << i << " differs";
+    }
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST(ExportAxf1ToBam, ExportCramRoundtripSamDiff) {
+    const auto dir = temp_dir("alignx_export_cram_roundtrip");
+    const auto axf1_path = dir / "cram_origin.axf1";
+    const auto exported_bam_path = dir / "exported.bam";
+
+    auto convert_result = alignx::convert::convert_bam_to_axf1_mvp(toy_cram_path(), axf1_path);
+    ASSERT_TRUE(convert_result) << convert_result.error();
+
+    auto export_result = alignx::convert::convert_axf1_to_bam(axf1_path, exported_bam_path);
+    ASSERT_TRUE(export_result) << export_result.error();
+
+    // Collect SAM lines from CRAM (mapped records only)
+    auto cram_reader = alignx::io::BamReader::open(toy_cram_path());
+    ASSERT_TRUE(cram_reader) << cram_reader.error();
+
+    std::vector<std::string> cram_lines;
+    for (;;) {
+        auto line = cram_reader->next_sam_line();
+        ASSERT_TRUE(line) << line.error();
+        if (!line->has_value()) break;
+        cram_lines.push_back(line->value());
+    }
+    std::erase_if(cram_lines, [](const std::string& line) {
+        auto tab1 = line.find('\t');
+        if (tab1 == std::string::npos) return false;
+        auto tab2 = line.find('\t', tab1 + 1);
+        if (tab2 == std::string::npos) return false;
+        auto flag_str = line.substr(tab1 + 1, tab2 - tab1 - 1);
+        auto flag = static_cast<std::uint16_t>(std::stoi(flag_str));
+        return (flag & 0x4U) != 0;
+    });
+
+    // Collect SAM lines from exported BAM
+    auto exported_reader = alignx::io::BamReader::open(exported_bam_path);
+    ASSERT_TRUE(exported_reader) << exported_reader.error();
+
+    std::vector<std::string> exported_lines;
+    for (;;) {
+        auto line = exported_reader->next_sam_line();
+        ASSERT_TRUE(line) << line.error();
+        if (!line->has_value()) break;
+        exported_lines.push_back(line->value());
+    }
+
+    ASSERT_EQ(cram_lines.size(), exported_lines.size())
+        << "Record count mismatch: CRAM " << cram_lines.size() << " vs exported "
+        << exported_lines.size();
+
+    for (std::size_t i = 0; i < cram_lines.size(); ++i) {
+        EXPECT_EQ(cram_lines[i], exported_lines[i]) << "SAM line " << i << " differs";
     }
 
     std::filesystem::remove_all(dir);

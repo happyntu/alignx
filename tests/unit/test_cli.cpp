@@ -20,6 +20,10 @@ std::filesystem::path toy_bam_path() {
     return std::filesystem::path(TEST_DATA_DIR) / "toy_alignment.sorted.bam";
 }
 
+std::filesystem::path toy_cram_path() {
+    return std::filesystem::path(TEST_DATA_DIR) / "toy_alignment.sorted.cram";
+}
+
 std::filesystem::path toy_bai_path() {
     return std::filesystem::path(TEST_DATA_DIR) / "toy_alignment.sorted.bam.bai";
 }
@@ -903,6 +907,31 @@ TEST(Cli, ExportRejectsNonAxf1Input) {
 
     EXPECT_NE(code, 0);
     EXPECT_NE(err.str().find("input must be an AXF1 file"), std::string::npos);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ConvertCramToAxf1) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_cram");
+    const auto axf1_path = temp_dir / "cram_origin.axf1";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "convert", toy_cram_path().string(), "-o",
+                              axf1_path.string(), "--format", "AXF1"},
+                             out, err);
+
+    EXPECT_EQ(code, 0) << "stderr: " << err.str();
+    EXPECT_TRUE(std::filesystem::is_regular_file(axf1_path));
+    EXPECT_GT(std::filesystem::file_size(axf1_path), 0);
+
+    // Verify AXF1 view produces SAM output
+    std::ostringstream view_out;
+    std::ostringstream view_err;
+    const int view_code =
+        run_cli({"alignx", "view", axf1_path.string(), "chrToy:1-250"}, view_out, view_err);
+    EXPECT_EQ(view_code, 0) << "view stderr: " << view_err.str();
+    EXPECT_FALSE(view_out.str().empty());
 
     std::filesystem::remove_all(temp_dir);
 }

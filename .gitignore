@@ -28,6 +28,10 @@ benchmarks/plots/
 !tests/toy_data/*.bai
 !tests/toy_data/*.csi
 !tests/toy_data/*.sam
+!tests/toy_data/*.cram
+!tests/toy_data/*.cram.crai
+!tests/toy_data/*.fa
+!tests/toy_data/*.fa.fai
 *.fa.gz
 *.fq.gz
 *.axf

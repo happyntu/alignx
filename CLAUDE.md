@@ -113,6 +113,13 @@ Completed:
 - `scripts/smoke_axf_roundtrip.sh --roundtrip-bam` extends smoke to verify BAM→AXF1→BAM→SAM parity
 - Export unit tests: `ExportToyAxf1ToBam`, `ExportEmptyAxf1ProducesValidBam`, `ExportToyBamRoundtripSamDiff` in `tests/unit/test_axf_to_bam.cpp`
 - Export CLI tests: `Cli.ExportToyAxf1OutputsBam`, `Cli.ExportRejectsNonAxf1Input` in `tests/unit/test_cli.cpp`
+- CRAM reading via HTSlib format-agnostic API: `BamReader::open()` auto-detects CRAM; zero production code changes needed. See ADR-006.
+- CRAM test fixtures: `tests/toy_data/toy_ref.fa` (1000bp chrToy reference), `toy_alignment.sorted.cram` (embedded reference via `embed_ref=1`), `.cram.crai` index
+- CRAM adds `MD:Z` tag computed from reference; original `NM:i` tags preserved when reference matches alignment
+- CRAM reader tests: `CramReader_OpensToyAndLoadsIndex`, `CramReader_StreamsAllToyRecords`, `CramReader_FetchesRegionFromToyCram`, `CramReader_FormatsSamLineForToyRegion` in `tests/unit/test_bam_reader.cpp`
+- CRAM round-trip: `ExportCramRoundtripSamDiff` (CRAM → AXF1 → BAM → SAM diff) in `tests/unit/test_axf_to_bam.cpp`
+- CRAM CLI: `Cli.ConvertCramToAxf1` (CRAM → AXF1 conversion + view) in `tests/unit/test_cli.cpp`
+- AXF1 cloud-ready index assessment: format already uses file-absolute byte offsets, contiguous chunks, index-at-EOF. HTTP client transport deferred to Phase 2+. See `docs/research/axf1-cloud-ready-index-assessment.md`.
 
 ## Build & Test Commands
 

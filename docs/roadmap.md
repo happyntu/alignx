@@ -143,13 +143,23 @@ and region-query correctness.
 
 **Deliverables:**
 
-- [ ] CRAM reader via HTSlib
+- [x] CRAM reader via HTSlib
+  - `BamReader` uses format-agnostic HTSlib calls; `sam_open("r")` auto-detects CRAM
+  - Zero production code changes; see ADR-006
+  - CRAM test fixture uses `embed_ref=1` for portable reference embedding
 - [x] `alignx export <axf> -o <bam|cram>`
   - AXF1→BAM path implemented via `BamWriter` (HTSlib `sam_parse1` + `sam_write1`)
   - `format_axf1_sam_record()` promoted to shared function in `format/axf1_file.hpp/.cpp`
-  - CRAM output deferred until CRAM reader is available
-- [ ] AXF index: HTTP-range-friendly chunk map (contiguous offsets, no random seeks)
-- [ ] Integration test: CRAM → AXF → BAM fidelity
+  - CRAM output deferred until reference management policy is designed
+- [x] AXF index: HTTP-range-friendly chunk map (contiguous offsets, no random seeks)
+  - AXF1 format already uses file-absolute byte offsets, contiguous chunks, index-at-EOF
+  - `read_chunk_columns_selective()` computes precise sub-chunk column byte ranges
+  - HTTP client transport layer deferred to Phase 2+
+  - See `docs/research/axf1-cloud-ready-index-assessment.md`
+- [x] Integration test: CRAM → AXF → BAM fidelity
+  - `CramReader_*` tests: open, stream, fetch, SAM format on toy CRAM fixture
+  - `ExportCramRoundtripSamDiff`: CRAM → AXF1 → BAM → SAM diff verified
+  - `Cli.ConvertCramToAxf1`: CLI path verifies CRAM → AXF1 conversion + view
 
 ---
 
