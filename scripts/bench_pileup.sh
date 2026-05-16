@@ -232,7 +232,7 @@ alignx_axf1_stderr="$tmp_dir/alignx_axf1.err"
 if [[ "$SKIP_CORRECTNESS" -eq 0 ]]; then
   echo "Correctness preflight: samtools depth vs alignx pileup..." >&2
 
-  "$SAMTOOLS" depth -r "$REGION" "$INPUT_BAM" >"$samtools_stdout" 2>"$samtools_stderr"
+  "$SAMTOOLS" depth -a -r "$REGION" "$INPUT_BAM" >"$samtools_stdout" 2>"$samtools_stderr"
   if [[ -s "$samtools_stderr" ]]; then
     sed 's/^/samtools depth stderr: /' "$samtools_stderr" >&2
   fi
@@ -293,7 +293,7 @@ run_triple() {
 
   local samtools_result alignx_bam_result alignx_axf1_result
 
-  samtools_result="$(run_timed "$run_id" samtools_depth "$SAMTOOLS" "$samtools_stdout" "$samtools_stderr" depth -r "$REGION" "$INPUT_BAM")"
+  samtools_result="$(run_timed "$run_id" samtools_depth "$SAMTOOLS" "$samtools_stdout" "$samtools_stderr" depth -a -r "$REGION" "$INPUT_BAM")"
 
   local alignx_bam_args=(pileup)
   if [[ -n "$ALIGNX_HTS_THREADS" ]]; then

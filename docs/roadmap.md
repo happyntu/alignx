@@ -39,9 +39,11 @@ and produce correct output before the next version starts.
 - [x] Read filter: `--flag-exclude`, `--min-mapq` for view, coverage, pileup subcommands
   - `--tag` deferred to v0.4 (requires full-record decode)
   - AXF1 path adds FLAG+MAPQ to selective column list only when filter is active
-- [ ] Benchmark: vs `samtools depth`, `mosdepth` on chr1
-  - `scripts/bench_pileup.sh` harness ready: compares `samtools depth`, `alignx pileup <bam>`, `alignx pileup <axf1>` with correctness preflight + warmup + repeats + summary stats
-  - Awaiting timed runs on missmi-server00 with HG002 chr1 regions
+- [x] Benchmark: vs `samtools depth`, `mosdepth` on chr1
+  - `scripts/bench_pileup.sh` harness: `samtools depth -a` / `alignx pileup <bam>` / `alignx pileup <axf1>` with correctness preflight + warmup + repeats + summary stats
+  - HG002 results: AXF1 **1.47x faster** on chr1:1M-2M, **1.11x faster** on chrY:20M-21M vs samtools depth; **0.82x** (slower) on chr1:121M-142M centromeric region
+  - AXF1 consistently **1.28x–2.07x faster** than BAM full-record parse across all three regions
+  - See `docs/research/phase2-pileup-benchmark-results.md`
 - [x] Integration test: coverage array matches samtools depth output exactly
   - `PileupFullRangeFidelity`: hardcoded expected depth for chrToy:101-160, both reads' full extent
   - `PileupAxf1MatchesBamPileup`: BAM → AXF1 → pileup byte-identical to BAM pileup

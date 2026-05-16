@@ -103,6 +103,7 @@ Completed:
 - `alignx pileup <bam|axf1> <region>` subcommand: outputs per-base depth in TSV format compatible with `samtools depth`; internally routes to the coverage engine with `--output-mode tsv`
 - `scripts/bench_pileup.sh` pileup benchmark harness: compares `samtools depth`, `alignx pileup <bam>`, `alignx pileup <axf1>` with SHA-based correctness preflight, warmup, repeats, and median/p95/outlier summary TSV
 - Pileup integration tests: `PileupFullRangeFidelity` (hardcoded expected depth for chrToy:101-160), `PileupAxf1MatchesBamPileup` (BAM→AXF1→pileup byte-identical), `PileupAxf1FilterMatchesBamFilter` (`--flag-exclude 16` parity across BAM and AXF1 paths)
+- Remote HG002 pileup benchmark: AXF1 1.47x faster (chr1:1M-2M), 1.11x faster (chrY:20M-21M), 0.82x (chr1:121M-142M centromeric) vs samtools depth; AXF1 1.28x–2.07x faster than BAM full-record parse. See `docs/research/phase2-pileup-benchmark-results.md`.
 
 Remaining implementation targets:
 - Round-trip fidelity: BAM → AXF → BAM → diff
