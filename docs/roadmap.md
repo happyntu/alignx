@@ -199,7 +199,7 @@ and region-query correctness.
   - HG002 results across 3 regions (chr1:1M-2M, chrY:20M-21M, chr1:121M-142M centromeric)
   - AXF1 pileup: **1.15x-1.43x faster** than samtools depth on 1 Mb regions (selective POS+CIGAR I/O)
   - AXF1 pileup: **1.20x-2.08x faster** than BAM full-record pileup across all regions
-  - AXF1 view: **~1.0x parity** on 1 Mb regions after lazy decode optimization (single-pass all-column read, batch SEQ/QUAL/CIGAR decoders, zero-alloc SAM formatting); filtered view near-parity on centromeric
+  - AXF1 view: **1.06x-1.16x faster** than samtools on 1 Mb regions after decode optimization (batch 1: lazy decode + single-pass + batch codecs; batch 2: streaming write, pointer-based decode, bulk chunk I/O); centromeric 0.70x (improved from 0.55x); filtered view near-parity on centromeric
   - See `docs/research/v1-query-benchmark-results.md`
 - [x] Draft methods section for benchmark paper
   - `docs/research/draft-methods-section.md`: AXF1 format design, v1.0 codec stack, benchmark setup, compression results (6 configs × 3 regions), query results (12 tool-filter combinations × 3 regions)

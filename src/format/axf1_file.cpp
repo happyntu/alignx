@@ -107,14 +107,17 @@ void append_metadata_string(std::vector<unsigned char>& bytes, std::string_view 
 
 class Reader {
 public:
-    explicit Reader(const std::vector<unsigned char>& bytes) : bytes_(bytes) {}
+    explicit Reader(const std::vector<unsigned char>& bytes)
+        : data_(bytes.data()), size_(bytes.size()) {}
+
+    Reader(const unsigned char* data, std::size_t size) : data_(data), size_(size) {}
 
     [[nodiscard]] std::expected<void, std::string> expect_magic() {
         if (remaining() < kMagic.size()) {
             return std::unexpected("truncated AXF1 file");
         }
         for (std::size_t index = 0; index < kMagic.size(); ++index) {
-            if (bytes_.at(index) != kMagic.at(index)) {
+            if (data_[index] != kMagic.at(index)) {
                 return std::unexpected("invalid AXF1 magic");
             }
         }
@@ -126,7 +129,7 @@ public:
         if (remaining() < 1) {
             return std::unexpected("truncated AXF1 file");
         }
-        return bytes_.at(offset_++);
+        return data_[offset_++];
     }
 
     [[nodiscard]] std::expected<std::uint16_t, std::string> read_u16() {
@@ -153,23 +156,26 @@ public:
         if (remaining() < size) {
             return std::unexpected("truncated AXF1 file");
         }
-        std::string value(reinterpret_cast<const char*>(bytes_.data() + offset_), size);
+        std::string value(reinterpret_cast<const char*>(data_ + offset_), size);
         offset_ += size;
         return value;
     }
 
     [[nodiscard]] std::expected<std::uint64_t, std::string> read_varint_u64() {
+        const unsigned char* ptr = data_ + offset_;
+        const unsigned char* end = data_ + size_;
         std::uint64_t value = 0;
         for (std::size_t byte_index = 0; byte_index < 10; ++byte_index) {
-            auto byte = read_u8();
-            if (!byte) {
+            if (ptr >= end) {
                 return std::unexpected("truncated AXF1 varint");
             }
-            if (byte_index == 9 && (*byte & 0xFEU) != 0) {
+            const unsigned char b = *ptr++;
+            if (byte_index == 9 && (b & 0xFEU) != 0) {
                 return std::unexpected("AXF1 varint overflow");
             }
-            value |= static_cast<std::uint64_t>(*byte & 0x7FU) << (byte_index * 7U);
-            if ((*byte & 0x80U) == 0) {
+            value |= static_cast<std::uint64_t>(b & 0x7FU) << (byte_index * 7U);
+            if ((b & 0x80U) == 0) {
+                offset_ = static_cast<std::uint64_t>(ptr - data_);
                 return value;
             }
         }
@@ -186,7 +192,7 @@ public:
     }
 
     [[nodiscard]] std::expected<void, std::string> seek(std::uint64_t offset) {
-        if (offset > bytes_.size()) {
+        if (offset > size_) {
             return std::unexpected("AXF1 offset points outside file");
         }
         offset_ = static_cast<std::size_t>(offset);
@@ -194,11 +200,23 @@ public:
     }
 
     [[nodiscard]] std::uint64_t offset() const noexcept { return offset_; }
-    [[nodiscard]] std::uint64_t size() const noexcept { return bytes_.size(); }
+    [[nodiscard]] std::uint64_t size() const noexcept { return size_; }
+
+    [[nodiscard]] const unsigned char* current_ptr() const noexcept {
+        return data_ + offset_;
+    }
+
+    [[nodiscard]] std::expected<void, std::string> advance(std::size_t n) {
+        if (remaining() < n) {
+            return std::unexpected("truncated AXF1 file");
+        }
+        offset_ += n;
+        return {};
+    }
 
 private:
     [[nodiscard]] std::size_t remaining() const noexcept {
-        return offset_ > bytes_.size() ? 0 : bytes_.size() - offset_;
+        return offset_ > size_ ? 0 : size_ - offset_;
     }
 
     template <typename UInt>
@@ -208,13 +226,14 @@ private:
         }
         UInt value = 0;
         for (std::size_t byte = 0; byte < sizeof(UInt); ++byte) {
-            value |= static_cast<UInt>(bytes_.at(offset_ + byte)) << (byte * 8U);
+            value |= static_cast<UInt>(data_[offset_ + byte]) << (byte * 8U);
         }
         offset_ += sizeof(UInt);
         return value;
     }
 
-    const std::vector<unsigned char>& bytes_;
+    const unsigned char* data_;
+    std::size_t size_;
     std::size_t offset_ = 0;
 };
 
@@ -1568,21 +1587,14 @@ decode_flag_bitpack_column(const std::vector<unsigned char>& bytes, std::uint32_
 
 std::expected<std::uint64_t, std::string>
 read_varint_u64(Reader& reader, std::string_view truncated_error, std::string_view overflow_error) {
-    std::uint64_t value = 0;
-    for (std::size_t byte_index = 0; byte_index < 10; ++byte_index) {
-        auto byte = reader.read_u8();
-        if (!byte) {
+    auto result = reader.read_varint_u64();
+    if (!result) {
+        if (result.error().find("truncated") != std::string::npos) {
             return std::unexpected(std::string(truncated_error));
         }
-        if (byte_index == 9 && (*byte & 0xFEU) != 0) {
-            return std::unexpected(std::string(overflow_error));
-        }
-        value |= static_cast<std::uint64_t>(*byte & 0x7FU) << (byte_index * 7U);
-        if ((*byte & 0x80U) == 0) {
-            return value;
-        }
+        return std::unexpected(std::string(overflow_error));
     }
-    return std::unexpected(std::string(overflow_error));
+    return result;
 }
 
 std::expected<DecodedPayloadEnvelope, std::string>
@@ -1761,11 +1773,11 @@ decode_cigar_token_column(const std::vector<unsigned char>& bytes, std::uint32_t
         }
 
         std::string cigar;
+        cigar.reserve(static_cast<std::size_t>(*op_count) * 6);
         for (std::uint64_t op_index = 0; op_index < *op_count; ++op_index) {
-            auto length = read_varint_u64(reader, "truncated AXF1 CIGAR token length",
-                                          "AXF1 CIGAR token length overflow");
+            auto length = reader.read_varint_u64();
             if (!length) {
-                return std::unexpected(length.error());
+                return std::unexpected("truncated AXF1 CIGAR token length");
             }
             if (*length == 0) {
                 return std::unexpected("AXF1 CIGAR token length is zero");
@@ -1774,14 +1786,13 @@ decode_cigar_token_column(const std::vector<unsigned char>& bytes, std::uint32_t
             if (!op) {
                 return std::unexpected("truncated AXF1 CIGAR token operation");
             }
-            auto decoded_op = decode_cigar_op(*op);
-            if (!decoded_op) {
-                return std::unexpected(decoded_op.error());
+            if (*op >= 9) {
+                return std::unexpected("unknown AXF1 CIGAR token operation");
             }
             char int_buf[20];
             auto [ptr, ec] = std::to_chars(int_buf, int_buf + sizeof(int_buf), *length);
             cigar.append(int_buf, ptr);
-            cigar.push_back(*decoded_op);
+            cigar.push_back(kCigarOpTable[*op]);
         }
         values.push_back(std::move(cigar));
     }
@@ -1894,31 +1905,30 @@ decode_seq_2bit_literal_column(const std::vector<unsigned char>& bytes,
         }
 
         const auto seq_len = static_cast<std::size_t>(*length);
+        const std::size_t full_bytes = seq_len / 4;
+        const std::size_t remaining_bases = seq_len % 4;
+        const std::size_t encoded_bytes = full_bytes + (remaining_bases > 0 ? 1 : 0);
+
+        auto adv = reader.advance(encoded_bytes);
+        if (!adv) {
+            return std::unexpected("truncated AXF1 SEQ 2-bit bases");
+        }
+        const unsigned char* src = reader.current_ptr() - encoded_bytes;
+
         std::string sequence(seq_len, '\0');
         char* dst = sequence.data();
 
-        const std::size_t full_bytes = seq_len / 4;
-        const std::size_t remaining = seq_len % 4;
-
         for (std::size_t i = 0; i < full_bytes; ++i) {
-            auto byte = reader.read_u8();
-            if (!byte) {
-                return std::unexpected("truncated AXF1 SEQ 2-bit bases");
-            }
-            const auto& quad = kSeq2bitLut[*byte];
+            const auto& quad = kSeq2bitLut[src[i]];
             dst[0] = quad.bases[0];
             dst[1] = quad.bases[1];
             dst[2] = quad.bases[2];
             dst[3] = quad.bases[3];
             dst += 4;
         }
-        if (remaining > 0) {
-            auto byte = reader.read_u8();
-            if (!byte) {
-                return std::unexpected("truncated AXF1 SEQ 2-bit bases");
-            }
-            const auto& quad = kSeq2bitLut[*byte];
-            for (std::size_t r = 0; r < remaining; ++r) {
+        if (remaining_bases > 0) {
+            const auto& quad = kSeq2bitLut[src[full_bytes]];
+            for (std::size_t r = 0; r < remaining_bases; ++r) {
                 dst[r] = quad.bases[r];
             }
         }
@@ -2027,17 +2037,22 @@ decode_qual_pack_column(const std::vector<unsigned char>& bytes, std::uint32_t r
             continue;
         }
 
+        const std::size_t total_bits = qual_len * bit_width;
+        const std::size_t encoded_bytes = (total_bits + 7) / 8;
+        auto adv = reader.advance(encoded_bytes);
+        if (!adv) {
+            return std::unexpected("truncated AXF1 QUAL pack codes");
+        }
+        const unsigned char* src = reader.current_ptr() - encoded_bytes;
+
         std::string quality(qual_len, '\0');
         char* dst = quality.data();
         std::uint64_t accumulator = 0;
         int acc_bits = 0;
+        std::size_t src_pos = 0;
         for (std::size_t index = 0; index < qual_len; ++index) {
             while (acc_bits < bit_width) {
-                auto byte = reader.read_u8();
-                if (!byte) {
-                    return std::unexpected("truncated AXF1 QUAL pack codes");
-                }
-                accumulator |= static_cast<std::uint64_t>(*byte) << acc_bits;
+                accumulator |= static_cast<std::uint64_t>(src[src_pos++]) << acc_bits;
                 acc_bits += 8;
             }
             const auto code = static_cast<std::uint8_t>(accumulator & code_mask);
@@ -2637,6 +2652,92 @@ Axf1FileReader::read_chunk_columns_selective(const Axf1ChunkIndexEntry& chunk,
                                              Axf1ChunkReadProfile& profile) {
     constexpr std::uint64_t kChunkFixedHeader = 4 + 4 + 4 + 4 + 2; // 18 bytes
 
+    // Bulk read entire chunk when requesting many columns (>=5); per-column reads otherwise
+    const bool use_bulk_read = columns.size() >= 5;
+
+    if (use_bulk_read) {
+        auto chunk_bytes = read_range(chunk.chunk_offset, chunk.chunk_length);
+        if (!chunk_bytes) {
+            return std::unexpected(chunk_bytes.error());
+        }
+
+        Reader reader(*chunk_bytes);
+        auto ref_id = reader.read_u32();
+        auto start_pos = reader.read_i32();
+        auto end_pos = reader.read_i32();
+        auto record_count = reader.read_u32();
+        auto column_count = reader.read_u16();
+        if (!ref_id || !start_pos || !end_pos || !record_count || !column_count) {
+            return std::unexpected("truncated AXF1 chunk");
+        }
+        if (*ref_id != chunk.ref_id || *start_pos != chunk.start_pos ||
+            *end_pos != chunk.end_pos || *record_count != chunk.record_count) {
+            return std::unexpected("AXF1 chunk metadata does not match index");
+        }
+
+        std::vector<ColumnEntry> entries;
+        entries.reserve(*column_count);
+        for (std::uint16_t col = 0; col < *column_count; ++col) {
+            auto cid = reader.read_u16();
+            auto codec = reader.read_u16();
+            auto offset = reader.read_u64();
+            auto length = reader.read_u64();
+            if (!cid || !codec || !offset || !length) {
+                return std::unexpected("truncated AXF1 column entry");
+            }
+            entries.push_back({.column_id = static_cast<Axf1ColumnId>(*cid),
+                               .codec_id = static_cast<Axf1CodecId>(*codec),
+                               .offset = *offset,
+                               .length = *length});
+        }
+
+        auto column_validation = validate_selected_column_entries(entries, columns);
+        if (!column_validation) {
+            return std::unexpected(column_validation.error());
+        }
+
+        const std::size_t payload_start = static_cast<std::size_t>(reader.offset());
+
+        profile.bytes_read = chunk.chunk_length;
+        profile.total_columns = static_cast<std::uint16_t>(entries.size());
+        profile.selected_columns = 0;
+        profile.total_payload_bytes = 0;
+        profile.selected_payload_bytes = 0;
+        for (const ColumnEntry& entry : entries) {
+            profile.total_payload_bytes += entry.length;
+            if (contains_column(columns, entry.column_id)) {
+                profile.selected_columns += 1;
+                profile.selected_payload_bytes += entry.length;
+            }
+        }
+
+        Axf1Chunk result{.ref_id = *ref_id, .start_pos = *start_pos, .end_pos = *end_pos};
+        result.records.resize(*record_count);
+
+        for (const ColumnEntry& entry : entries) {
+            if (!contains_column(columns, entry.column_id)) {
+                continue;
+            }
+            const std::size_t col_start = payload_start + static_cast<std::size_t>(entry.offset);
+            const std::size_t col_end = col_start + static_cast<std::size_t>(entry.length);
+            if (col_end > chunk_bytes->size()) {
+                return std::unexpected("AXF1 column payload points outside chunk");
+            }
+            std::vector<unsigned char> payload(chunk_bytes->begin() +
+                                                   static_cast<std::ptrdiff_t>(col_start),
+                                               chunk_bytes->begin() +
+                                                   static_cast<std::ptrdiff_t>(col_end));
+
+            auto decode = decode_column_into_chunk(result, *record_count, entry, payload);
+            if (!decode) {
+                return std::unexpected(decode.error());
+            }
+        }
+
+        return result;
+    }
+
+    // Per-column read path for small column sets (filter pass)
     auto header_bytes = read_range(chunk.chunk_offset, kChunkFixedHeader);
     if (!header_bytes) {
         return std::unexpected(header_bytes.error());
@@ -2684,7 +2785,6 @@ Axf1FileReader::read_chunk_columns_selective(const Axf1ChunkIndexEntry& chunk,
     }
 
     const std::uint64_t payload_file_offset = chunk.chunk_offset + kChunkFixedHeader + entries_size;
-    std::uint64_t bytes_actually_read = kChunkFixedHeader + entries_size;
 
     profile.bytes_read = 0;
     profile.total_columns = static_cast<std::uint16_t>(entries.size());
@@ -2702,6 +2802,7 @@ Axf1FileReader::read_chunk_columns_selective(const Axf1ChunkIndexEntry& chunk,
     Axf1Chunk result{.ref_id = *ref_id, .start_pos = *start_pos, .end_pos = *end_pos};
     result.records.resize(*record_count);
 
+    std::uint64_t bytes_actually_read = kChunkFixedHeader + entries_size;
     for (const ColumnEntry& entry : entries) {
         if (!contains_column(columns, entry.column_id)) {
             continue;
@@ -2717,8 +2818,8 @@ Axf1FileReader::read_chunk_columns_selective(const Axf1ChunkIndexEntry& chunk,
             return std::unexpected(decode.error());
         }
     }
-
     profile.bytes_read = bytes_actually_read;
+
     return result;
 }
 

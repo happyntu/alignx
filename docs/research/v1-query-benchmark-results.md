@@ -44,7 +44,9 @@ Note: `samtools depth` uses `-G` for FLAG exclusion and `-Q` for MAPQ, whereas `
 
 ## Results
 
-**Update 2026-05-17:** Rerun after lazy decode optimization (single-pass all-column read for unfiltered view, batch SEQ 2-bit LUT, QUAL pack bit-accumulator, CIGAR LUT + `std::to_chars`, QNAME dict ref-counting, `append_axf1_sam_record` zero-copy formatting). Previous results archived in `v1_query/`; current in `v1_query_opt/`.
+**Update 2026-05-17 (batch 1):** Rerun after lazy decode optimization (single-pass all-column read for unfiltered view, batch SEQ 2-bit LUT, QUAL pack bit-accumulator, CIGAR LUT + `std::to_chars`, QNAME dict ref-counting, `append_axf1_sam_record` zero-copy formatting). Previous results archived in `v1_query/`; current in `v1_query_opt/`.
+
+**Update 2026-05-17 (batch 2):** Additional decode optimizations applied after formal benchmark: per-chunk streaming write (eliminates multi-GB output buffer), pointer-based bulk SEQ/QUAL decode (avoids per-byte bounds check), pointer-based varint reader, bulk chunk I/O (single read per chunk instead of per-column seeks). Manual 5-run timing shows: chr1:1M-2M 259ms vs samtools 275ms (1.06x faster), chrY:20M-21M 171ms vs 199ms (1.16x faster), chr1:121M-142M 5,963ms vs 4,178ms (0.70x, improved from 0.55x). Formal benchmark table below reflects batch 1; batch 2 numbers are from quick manual runs under different system load.
 
 ### chr1:1,000,000-2,000,000 (3,143 records)
 
@@ -101,20 +103,27 @@ Note: `samtools depth` uses `-G` for FLAG exclusion and `-Q` for MAPQ, whereas `
 
 ### View Performance (Post-Optimization)
 
-- **AXF1 view (unfiltered)** achieves **parity with samtools view** on 1 Mb regions: 1.00x on chr1:1M-2M (461 ms vs 459 ms) and 1.03x on chrY:20M-21M (375 ms vs 386 ms). This is a **3-4x improvement** from pre-optimization (1,553 ms → 461 ms on chr1).
-- **AXF1 view (unfiltered)** on the centromeric 21 Mb region is 0.55x of samtools (16,210 ms vs 8,874 ms). The centromeric region is large enough that sequential BAM parsing is well-amortized, and AXF1's columnar reconstruction overhead still dominates. Pre-optimization was 0.18x, so this is a ~3x improvement.
+- **AXF1 view (unfiltered)** is **faster than samtools view** on 1 Mb regions after batch 2 decode optimizations: 1.06x on chr1:1M-2M (259 ms vs 275 ms) and 1.16x on chrY:20M-21M (171 ms vs 199 ms). This represents a **6-7x improvement** from pre-optimization baselines.
+- **AXF1 view (unfiltered)** on the centromeric 21 Mb region is **0.70x** of samtools (5,963 ms vs 4,178 ms), improved from 0.55x (batch 1) and 0.18x (pre-optimization). The remaining gap is structural: columnar codec decode + per-record string reconstruction for PacBio long reads with heavy TAG payloads (~600 MB of TAG data). Profiling shows TAG per-stream decode + output column decode dominate (4,448 ms for 934 MB payload, 210 MB/s). Further improvement requires parallel chunk decode or lighter intermediate representation (Phase 2+).
 - **AXF1 view (filtered)** achieves near-parity across all regions: 1.23x on chr1:1M-2M, 1.01x on chrY:20M-21M, and 0.81x on centromeric. The two-pass selective decode path (FLAG+MAPQ first, then output columns for matched records only) is effective for reducing unnecessary output formatting.
 - **alignx view BAM** is 1.27x-1.49x faster than samtools view on all regions except centromeric filtered (0.81x).
 
 ### Optimization Details
 
-The view path improvements come from:
+**Batch 1** (lazy decode):
 1. **Single-pass all-column read** for unfiltered view (eliminates second I/O pass)
 2. **Batch SEQ 2-bit decode** via consteval 256-entry LUT (4 bases per byte lookup)
 3. **QUAL pack bit-accumulator** via uint64_t mask+shift (replaces per-bit extraction loop)
 4. **CIGAR LUT + `std::to_chars`** (eliminates switch and heap allocation)
 5. **QNAME dict reference counting** (move if ref_count==1, copy otherwise)
 6. **`append_axf1_sam_record`** writes directly to caller's buffer (no temporary string)
+
+**Batch 2** (decode + I/O):
+7. **Per-chunk streaming write**: flush SAM output after each chunk instead of accumulating multi-GB buffer
+8. **Pointer-based SEQ/QUAL decode**: single bounds check + direct pointer access for encoded bytes (eliminates ~800M per-byte `read_u8()` calls for centromeric)
+9. **Pointer-based varint reader**: direct pointer arithmetic eliminates per-byte overhead in all varint paths
+10. **Bulk chunk I/O**: single `read_range()` per chunk for ≥5 columns (eliminates ~75K seekg+read calls for centromeric unfiltered view)
+11. **Reader class refactored** from `std::vector<unsigned char>&` to raw `const unsigned char*` + `size_t` (eliminates `.at()` bounds checks, enables subrange construction)
 
 ### Pileup Performance
 
@@ -132,10 +141,12 @@ The view path improvements come from:
 
 | Workload | AXF1 vs samtools (1 Mb) | AXF1 vs samtools (21 Mb) | AXF1 vs BAM path (all) |
 |:---|:---|:---|:---|
-| View (unfiltered) | **1.00x-1.03x (parity)** | 0.55x (slower) | 0.43x-0.72x |
+| View (unfiltered) | **1.06x-1.16x (faster)** | 0.70x (improving) | 0.43x-0.72x |
 | View (filtered) | **1.01x-1.23x (faster)** | 0.81x (near parity) | 0.72x-1.00x |
 | Pileup (unfiltered) | **1.18x-1.61x (faster)** | 0.69x (slower) | **1.12x-2.15x (faster)** |
 | Pileup (filtered) | **0.92x-1.49x** | 0.58x (slower) | **1.02x-2.06x (faster)** |
+
+Note: View (unfiltered) 1 Mb numbers are from batch 2 manual runs. All other numbers are from batch 1 formal benchmark.
 
 ### Key Insights
 
