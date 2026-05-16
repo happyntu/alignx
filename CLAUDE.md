@@ -172,15 +172,32 @@ can differ from full BAM queries. AXF1 v2 records source path, conversion region
 and subset flag in file metadata; legacy AXF1 v1 files are read as full-input
 caches with empty metadata.
 
-**Remote large-data execution:**
-- For large BAM/CRAM/genome assets and benchmark/profiling workloads, prefer `missmi-server00` storage and execution over this Windows machine or WSL disk.
-- The local Codex session remains the orchestrator and should execute remote commands over SSH; do not require a persistent Git clone on the server.
+**Remote execution on `missmi-server00`:**
+- All benchmark, profiling, smoke test, and large-data workloads **must** run on `missmi-server00`, not on the local Windows machine or WSL disk. This includes compression benchmarks, query benchmarks, pileup benchmarks, codec smoke tests on HG002, and any operation that reads or writes large BAM/CRAM/AXF1 files.
+- The local session is the orchestrator: build binaries locally in WSL, SCP them to the server, launch remote commands over SSH, and collect results back. Do not maintain a persistent Git clone on the server.
 - `missmi-server00` SSH: `ssh -i C:/Users/user/.ssh/missmi_server00 -p 19822 happyntu@140.112.183.210`.
 - `missmi-server00` alignx remote root: `/mypool/alignx/` on the large ZFS `mypool` filesystem.
 - Recommended remote layout: `/mypool/alignx/bin`, `/mypool/alignx/data`, `/mypool/alignx/refs`, `/mypool/alignx/results`, `/mypool/alignx/logs`, `/mypool/alignx/tmp`, and `/mypool/alignx/test_data`.
 - Remote alignx binaries can use the existing server HTSlib environment with `LD_LIBRARY_PATH=/home/happyntu/miniconda3/envs/hg002sv/lib`.
+- GRCh38 reference FASTA (for CRAM): `/mypool/biotools-benchmark-data/references/GRCh38/GCA_000001405.15_GRCh38_no_alt_analysis_set.fasta` (with `.fai` index).
 - `scripts/inspect_axf1_metadata.py` can inspect AXF1 header, v2 source/subset metadata, chunk-index metadata, and per-chunk column codec metadata without decoding payloads; copy it to `/mypool/alignx/bin` for remote smoke checks when needed.
 - If repository scripts or binaries are needed remotely, stream the script, copy the built binary, or create a minimal runtime snapshot from the local working tree over SSH. Keep the authoritative repository and commits on the local Windows workspace.
+
+**Nohup disconnected mode for long-running remote workloads:**
+- The local session's background task timeout is 10 minutes. Any remote workload that may exceed 10 minutes **must** use nohup disconnected mode instead of holding the SSH connection open.
+- Workloads that require nohup: compression benchmarks on large regions (centromeric 21 Mb takes 60+ minutes for 6 configs × warmup + repeats), full-chromosome encode/decode, multi-region sequential benchmark runs.
+- Workloads safe to run inline (SSH held open): single-region smoke tests, small-region benchmarks (1 Mb, ~5 min), binary deployment, result retrieval.
+- Pattern: write a self-contained wrapper script to `/mypool/alignx/tmp/run_<job>.sh`, then launch via:
+  ```
+  nohup bash /mypool/alignx/tmp/run_<job>.sh > /mypool/alignx/logs/<job>.log 2>&1 &
+  ```
+  The SSH session returns immediately. Check progress later:
+  ```
+  tail -30 /mypool/alignx/logs/<job>.log         # progress
+  cat /mypool/alignx/results/<dir>/combined*.tsv  # final results
+  pgrep -f run_<job> -a                           # still running?
+  ```
+- For sequential multi-region runs, chain scripts in one nohup: `nohup bash -c 'script1.sh && script2.sh' > log 2>&1 &`. This avoids concurrent disk contention.
 
 **Note:** Phase 0 includes only a minimal `alignx_lib` scaffold source for test target creation.
 No functional `alignx` executable exists until `src/main.cpp` and Phase 1 sources are added.
