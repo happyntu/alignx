@@ -4,21 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Status
 
-alignx is currently in **Phase 0 — Design, Scaffolding & Data Preparation**.
+alignx has reached **v1.0 — Full format + benchmark paper ready**.
 
-Completed:
-- repository layout scaffold
-- documentation structure (architecture, roadmap, ADRs, research)
-- CMake/vcpkg build scaffold
-- `.clang-format` config
-- basic GoogleTest unit test stub files
-- initial benchmark script and manifest scaffold
-- toy SAM/BAM/BAI fixtures in `tests/toy_data/`
+All v1.0 deliverables are complete: columnar AXF1 format with production codecs (POS delta-varint, FLAG bit-pack, MAPQ RLE, SEQ 2-bit, QUAL alphabet-pack + zstd, CIGAR token/dict, QNAME dict, TAG per-stream), parallel mmap-based region query (3.8x-5.4x faster than samtools view), selective column I/O for pileup/coverage, BAM/CRAM round-trip, and comprehensive benchmarks on HG002 PacBio data.
 
-Phase 0 remaining:
-- none
-
-Phase 1 (v0.1) is in progress.
+Phase 2+ (SIMD AVX2/GPU CUDA decode, cloud range-query, Python bindings) is deferred.
 
 Completed:
 - HTSlib wrapper: `BamReader` with `open`, `fetch(region)`, `next_record`
