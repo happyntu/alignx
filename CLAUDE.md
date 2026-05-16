@@ -97,6 +97,8 @@ Completed:
 - AXF1 profiling preflight completed on missmi-server00 for HG002 `chr1:1000000-1010000`; stdout SHA matched `samtools view`, and the first snapshot shows output-column decode dominating selective decode and formatting time
 - `alignx coverage <bam|axf1> <region>` subcommand: POS-only selective column decode for per-base coverage, with `--output-mode summary|tsv` and `ALIGNX_PROFILE_COVERAGE=1` profiling hook
 - AXF1 coverage path reads only POS+CIGAR columns; BAM coverage path uses HTSlib full-record parse as baseline comparison
+- `Axf1FileReader` persistent ifstream and `read_chunk_columns_selective()` for column-only I/O: reads only chunk header + requested column payloads instead of full chunk byte range
+- AXF1 selective column I/O coverage benchmark on HG002: 2.97x faster (chr1:1M-2M), 1.16x faster (chr1:121M-142M), 2.22x faster (chrY:20M-21M) vs BAM full-record parse
 
 Remaining implementation targets:
 - Round-trip fidelity: BAM → AXF → BAM → diff

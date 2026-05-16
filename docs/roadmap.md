@@ -113,10 +113,10 @@ and region-query correctness.
   - Final recommendation: keep the hybrid default at 256 KiB target / 512 KiB max / 4096 records / 1,000,000 bp span, and do not promote span_tight.
 - [ ] Round-trip fidelity: BAM → AXF → BAM → diff
   - AXF1 round-trip smoke now uses `scripts/smoke_axf_roundtrip.sh --format AXF1`; the remaining gap is a true AXF export path if/when we decide the round-trip target must emit BAM directly.
-- [ ] Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
+- [x] Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
   - Prior `alignx view` benchmark measured full-record decode and was 4.5-5.9x slower than BAM; that comparison exercises output-column decode, not the selective-column advantage.
-  - `alignx coverage` now provides a POS-only query path reading only POS+CIGAR columns from AXF1 while BAM must parse full records. `ALIGNX_PROFILE_COVERAGE=1` confirms zero output-column decode cost.
-  - Remote timed benchmark on HG002 regions is the next step to demonstrate the columnar selective I/O advantage.
+  - `alignx coverage` with `read_chunk_columns_selective` reads only chunk header + POS+CIGAR payloads. Persistent ifstream avoids repeated file open/close.
+  - Remote HG002 benchmark results: AXF1 is **2.97x faster** on chr1:1M-2M, **1.16x faster** on chr1:121M-142M, and **2.22x faster** on chrY:20M-21M vs BAM full-record parse. See `docs/research/phase1-axf1-coverage-benchmark-results.md`.
 
 **SIMD option (off by default):**
 - AVX2 delta decode of POS stream
