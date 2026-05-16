@@ -544,8 +544,49 @@ std::uint64_t interval_count(const index::AxfIndex& axf) {
     return count;
 }
 
+index::AxfIndex convert_axf1_index_to_axf(const format::Axf1FileIndex& file_index) {
+    std::uint32_t max_ref = 0;
+    for (const auto& chunk : file_index.chunks) {
+        if (chunk.ref_id >= max_ref) {
+            max_ref = chunk.ref_id + 1;
+        }
+    }
+    index::AxfIndex axf(max_ref);
+    for (const auto& chunk : file_index.chunks) {
+        axf.add_interval(chunk.ref_id,
+                         {.start = static_cast<std::uint32_t>(chunk.start_pos),
+                          .end = static_cast<std::uint32_t>(chunk.end_pos),
+                          .chunk_offset = chunk.chunk_offset,
+                          .column_index_offset = chunk.chunk_offset + chunk.chunk_length});
+    }
+    return axf;
+}
+
 int run_index(const std::filesystem::path& input, const std::filesystem::path& requested_output,
               std::ostream& out, std::ostream& err) {
+    const auto output = requested_output.empty() ? default_axf_index_path(input) : requested_output;
+
+    if (detect_view_input_format(input) == ViewInputFormat::axf1) {
+        auto file_index = format::read_axf1_index_metadata(input);
+        if (!file_index) {
+            err << "alignx index: " << file_index.error() << '\n';
+            return 1;
+        }
+
+        auto axf = convert_axf1_index_to_axf(*file_index);
+        auto write = index::write_axf_index(axf, output);
+        if (!write) {
+            err << "alignx index: " << write.error() << '\n';
+            return 1;
+        }
+
+        out << "source\t" << input.string() << '\n';
+        out << "output\t" << output.string() << '\n';
+        out << "references\t" << axf.reference_count() << '\n';
+        out << "intervals\t" << interval_count(axf) << '\n';
+        return 0;
+    }
+
     const auto bam_index_path = find_bam_index(input);
     if (!bam_index_path.has_value()) {
         err << "alignx index: no BAI/CSI index found for: " << input.string() << '\n';
@@ -558,7 +599,6 @@ int run_index(const std::filesystem::path& input, const std::filesystem::path& r
         return 1;
     }
 
-    const auto output = requested_output.empty() ? default_axf_index_path(input) : requested_output;
     auto write = index::write_axf_index(*axf, output);
     if (!write) {
         err << "alignx index: " << write.error() << '\n';

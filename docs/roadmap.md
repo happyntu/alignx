@@ -183,7 +183,10 @@ and region-query correctness.
   - `tags_per_stream` codec (ID 10): decomposes per-record tag strings into per-tag-key streams with zigzag varint for integer tags, presence bitmaps for partial tag presence, raw fallback for inconsistent tag order or when per-stream is not smaller
   - Design: `docs/research/axf1-tag-codec-design.md`
   - HG002 chr1:1M-2M smoke: 250/324 chunks (77%) use `tags_per_stream`, 74 chunks fall back to raw; three-way SAM stdout SHA parity confirmed
-- [ ] `alignx index` — rebuild `.axf.idx` from existing `.axf`
+- [x] `alignx index` — rebuild `.axf.idx` from existing `.axf` or `.axf1`
+  - AXF1 path: `read_axf1_index_metadata()` → `convert_axf1_index_to_axf()` → `write_axf_index()`
+  - Detects input format via file magic; BAM path unchanged
+  - CLI tests: `Cli.IndexFromAxf1`, `Cli.IndexFromAxf1DefaultOutput`
 - [x] Compression benchmark: AXF vs BAM vs CRAM (ratio, encode time, decode time)
   - `scripts/bench_compression.sh` harness: 6 format configs (bam, cram, axf1, axf1_zstd, axf1_lossy, axf1_lossy_zstd) with correctness preflight + file size + timed encode/decode
   - HG002 results across 3 regions (chr1:1M-2M, chrY:20M-21M, chr1:121M-142M centromeric)
@@ -196,7 +199,7 @@ and region-query correctness.
   - HG002 results across 3 regions (chr1:1M-2M, chrY:20M-21M, chr1:121M-142M centromeric)
   - AXF1 pileup: **1.15x-1.43x faster** than samtools depth on 1 Mb regions (selective POS+CIGAR I/O)
   - AXF1 pileup: **1.20x-2.08x faster** than BAM full-record pileup across all regions
-  - AXF1 view: 3-5x slower (expected — full-column decode); filtered view near-parity on centromeric (0.81x)
+  - AXF1 view: **~1.0x parity** on 1 Mb regions after lazy decode optimization (single-pass all-column read, batch SEQ/QUAL/CIGAR decoders, zero-alloc SAM formatting); filtered view near-parity on centromeric
   - See `docs/research/v1-query-benchmark-results.md`
 - [x] Draft methods section for benchmark paper
   - `docs/research/draft-methods-section.md`: AXF1 format design, v1.0 codec stack, benchmark setup, compression results (6 configs × 3 regions), query results (12 tool-filter combinations × 3 regions)

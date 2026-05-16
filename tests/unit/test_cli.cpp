@@ -936,6 +936,59 @@ TEST(Cli, ConvertCramToAxf1) {
     std::filesystem::remove_all(temp_dir);
 }
 
+TEST(Cli, IndexFromAxf1) {
+    const auto temp_dir = make_temp_dir("alignx_cli_index_axf1");
+    const auto axf1_path = temp_dir / "toy.axf1";
+    const auto idx_path = temp_dir / "toy.axf.idx";
+
+    std::ostringstream convert_out;
+    std::ostringstream convert_err;
+    const int convert_code = run_cli(
+        {"alignx", "convert", toy_bam_path().string(), "-o", axf1_path.string(), "--format", "AXF1"},
+        convert_out, convert_err);
+    ASSERT_EQ(convert_code, 0) << convert_err.str();
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code =
+        run_cli({"alignx", "index", axf1_path.string(), "-o", idx_path.string()}, out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_TRUE(std::filesystem::exists(idx_path));
+    EXPECT_NE(out.str().find("intervals"), std::string::npos);
+
+    auto idx = alignx::index::read_axf_index(idx_path);
+    ASSERT_TRUE(idx.has_value()) << idx.error();
+    EXPECT_EQ(idx->reference_count(), 1);
+    EXPECT_FALSE(idx->intervals(0).empty());
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, IndexFromAxf1DefaultOutput) {
+    const auto temp_dir = make_temp_dir("alignx_cli_index_axf1_default");
+    const auto axf1_path = temp_dir / "toy.axf1";
+
+    std::ostringstream convert_out;
+    std::ostringstream convert_err;
+    const int convert_code = run_cli(
+        {"alignx", "convert", toy_bam_path().string(), "-o", axf1_path.string(), "--format", "AXF1"},
+        convert_out, convert_err);
+    ASSERT_EQ(convert_code, 0) << convert_err.str();
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "index", axf1_path.string()}, out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+
+    const auto expected_idx = temp_dir / "toy.axf1.axf.idx";
+    EXPECT_TRUE(std::filesystem::exists(expected_idx))
+        << "expected default output at: " << expected_idx.string();
+
+    std::filesystem::remove_all(temp_dir);
+}
+
 #else
 
 TEST(Cli, ConvertReportsMissingHtslib) {

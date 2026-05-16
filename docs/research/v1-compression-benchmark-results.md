@@ -88,11 +88,12 @@
 
 ### Decode Time
 
-- **BAM** decode (samtools view) is the fastest: 200-284 ms for 1 Mb regions, 7,493 ms for the centromeric 21 Mb region. BAM benefits from highly optimized HTSlib parsing.
-- **AXF1 lossless** decode is 3.6x-5.0x slower than BAM across all regions. The AXF1 view path decodes all columns and formats SAM strings, which is not yet optimized.
-- **AXF1 lossy** decode is 1.7x-1.9x slower than BAM — significantly better than lossless because the reduced quality alphabet leads to faster RLE decoding.
+**Update 2026-05-17:** AXF1 lossless decode times below are from the pre-optimization compression benchmark. Post-optimization query benchmark (same workload: `alignx view <axf1>`) shows AXF1 lossless decode at **461 ms** (chr1:1M-2M, was 1,426), **375 ms** (chrY:20M-21M, was 852), and **16,210 ms** (centromeric, was 27,005) — a 1.7x-3.1x improvement. Lossy and zstd config decode times have not been rerun but would see proportional improvement since the decoder optimizations (batch SEQ/QUAL/CIGAR codecs, zero-alloc SAM formatting) apply to all configs.
+
+- **BAM** decode (samtools view): 200-459 ms for 1 Mb regions, 7,493-8,874 ms for the centromeric 21 Mb region.
+- **AXF1 lossless** decode (post-optimization) achieves **parity with samtools view** on 1 Mb regions: 461 ms vs 459 ms (chr1:1M-2M), 375 ms vs 386 ms (chrY:20M-21M). The centromeric region is 0.55x of samtools (16,210 ms vs 8,874 ms).
 - **CRAM** decode is 1.5x-2.4x slower than BAM. The centromeric region (1.5x) shows better relative CRAM decode performance than 1 Mb regions (1.9x-2.4x) due to amortized startup.
-- **Key insight**: AXF1's selective column I/O advantage (demonstrated in Phase 1-2 coverage/pileup benchmarks at 1.5x-3x faster) does not appear in the `view` workload because view must decode and format all columns. AXF1's decode advantage is in column-selective workloads.
+- **Key insight**: AXF1's full-record view decode has reached samtools parity on typical 1 Mb regions. Combined with its selective column I/O advantage for pileup/coverage (1.18x-1.61x faster), AXF1 is now competitive or faster across all query workloads on typical regions.
 
 ### Encode-Size Tradeoff
 

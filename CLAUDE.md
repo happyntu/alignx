@@ -28,7 +28,7 @@ Completed:
 - CSI index reader metadata parser
 - `AXFIndex` v1 sorted interval list with binary read/write and CRC footer
 - BAI/CSI bin projection into `AXFIndex` v1 intervals
-- `alignx index <bam>` builds projected `.axf.idx` files from `.bai` / `.csi`
+- `alignx index <bam|axf1>` builds `.axf.idx` from `.bai`/`.csi` (BAM) or AXF1 chunk index metadata
 - AXF1 raw-column file reader/writer and internal region view helper
 - `convert::convert_bam_to_axf1_mvp()` for toy BAM -> AXF1 correctness work
 - `alignx convert --format AXF1` opt-in path and `.axf1` view routing
@@ -106,6 +106,8 @@ Completed:
 - Remote HG002 pileup benchmark: AXF1 1.47x faster (chr1:1M-2M), 1.11x faster (chrY:20M-21M), 0.82x (chr1:121M-142M centromeric) vs samtools depth; AXF1 1.28x–2.07x faster than BAM full-record parse. See `docs/research/phase2-pileup-benchmark-results.md`.
 - AXF1 selective column I/O coverage benchmark completed on HG002: 2.97x faster (chr1:1M-2M), 1.16x faster (chr1:121M-142M), 2.22x faster (chrY:20M-21M) vs BAM full-record parse. See `docs/research/phase1-axf1-coverage-benchmark-results.md`.
 - `format_axf1_sam_record()` promoted from anonymous namespace in `axf1_view.cpp` to shared function in `format/axf1_file.hpp/.cpp` for reuse by view and export paths
+- AXF1 view lazy decode optimization: single-pass all-column read for unfiltered view, batch SEQ 2-bit consteval LUT, QUAL pack uint64 bit-accumulator, CIGAR op table + `std::to_chars`, QNAME dict ref-counting (move if unique), `append_axf1_sam_record` zero-copy buffer write. Result: AXF1 view at samtools parity on 1 Mb regions (461 ms vs 459 ms chr1:1M-2M)
+- `alignx index <axf1>` rebuilds `.axf.idx` from AXF1 chunk index metadata via `convert_axf1_index_to_axf()`
 - `BamWriter` RAII HTSlib wrapper in `src/io/bam_writer.hpp/.cpp`: `sam_parse1()` + `sam_write1()` approach for Phase 1 correctness
 - `convert_axf1_to_bam()` in `src/convert/axf_to_bam.hpp/.cpp`: reads all AXF1 chunks sequentially, formats SAM lines, writes via BamWriter
 - `alignx export <axf1> -o <bam>` CLI subcommand: detects AXF1 input, calls `convert_axf1_to_bam()`
@@ -286,7 +288,7 @@ alignx export   <input.axf>       -o <output.bam|cram> # AXF → BAM/CRAM
 alignx coverage <input.axf1|bam> <region>               # per-base coverage (POS-only for AXF1)
 alignx pileup   <input.axf1|bam>  <region>             # per-base depth TSV (samtools depth compatible)
 alignx stats    <input.axf|bam>                        # flag/MAPQ/insert stats
-alignx index    <input.bam|axf>  [-o output.axf.idx]    # build/rebuild .axf.idx
+alignx index    <input.bam|axf1>  [-o output.axf.idx]   # build/rebuild .axf.idx
 ```
 
 ## Development Expectations
