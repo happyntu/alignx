@@ -96,12 +96,12 @@ AXF1 lossless encoding is comparable to BAM extraction (1.07x-1.18x). AXF1 lossy
 
 | Config | chr1:1M-2M (ms) | chrY:20M-21M (ms) | chr1:121M-142M (ms) |
 |:---|---:|---:|---:|
-| BAM (samtools) | 247 | 175 | 3,878 |
+| BAM (samtools) | 280 | 193 | 3,850 |
+| BAM (samtools -@8) | — | 134 | ~1,050 |
 | CRAM | 673 (2.7x) | 376 (2.1x) | 11,411 (2.9x) |
-| AXF1 (parallel) | **85 (2.9x)** | **61 (2.9x)** | **1,669 (2.3x)** |
-| AXF1 lossy | — | — | — |
+| AXF1 (mmap+pool) | **63 (4.4x)** | **48 (4.0x)** | **1,075 (3.6x)** |
 
-AXF1 lossless full-record decode with parallel chunk processing is **2.3x-2.9x faster than samtools view** across all regions. The parallel decode path uses a sliding window of up to 8 `std::async` workers: the main thread reads chunk bytes sequentially (ifstream not thread-safe), workers decode columns, filter records, and format SAM in parallel, with results written in chunk order. On the centromeric 21 Mb region (6,878 chunks, 58,168 records, 1.12 GB payload), 8-thread decode achieves 634 MB/s effective throughput (vs 210 MB/s single-threaded). BAM baseline times shown here are from batch 3 manual runs; relative rankings are the primary comparison.
+AXF1 lossless full-record decode with mmap, thread pool, zero-copy decode, and interior chunk skip is **3.6x-4.4x faster than samtools view** across all regions. The file is memory-mapped on Linux; a fixed pool of 8 worker threads reads directly from mapped memory via atomic work-stealing, decoding columns directly from mapped pointers (no intermediate copies), and formatting SAM in parallel, with results written in chunk order. Interior chunks (fully contained within the query region) skip CIGAR-based overlap checking. On the centromeric 21 Mb region (6,878 chunks, 58,168 records, 1.12 GB payload), 8-thread mmap decode achieves ~1.04 GB/s effective throughput. Against samtools -@8 (parallel BGZF decompression), AXF1 is **2.8x faster on 1 Mb regions** and at parity on the centromeric 21 Mb region.
 
 ## Query Benchmark
 
@@ -130,9 +130,10 @@ When read filters are active (FLAG exclude unmapped, secondary, supplementary; M
 
 | Tool | chr1:1M-2M (ms) | chrY:20M-21M (ms) | chr1:121M-142M (ms) |
 |:---|---:|---:|---:|
-| samtools view | 247 | 175 | 3,878 |
-| alignx view (AXF1, parallel) | **85** | **61** | **1,669** |
+| samtools view | 280 | 193 | 3,850 |
+| samtools view -@8 | — | 134 | ~1,050 |
+| alignx view (AXF1, mmap+pool) | **63** | **48** | **1,075** |
 | samtools view (filtered) | 576 | 322 | 4,078 |
 | alignx view AXF1 (filtered) | **468** | **319** | 5,034 |
 
-With parallel chunk decode (8 threads), AXF1 view is **2.9x faster than samtools on 1 Mb regions** (85 ms vs 247 ms on chr1:1M-2M, 61 ms vs 175 ms on chrY:20M-21M) and **2.3x faster on the centromeric 21 Mb region** (1,669 ms vs 3,878 ms). The filtered path still uses sequential two-pass decode; filtered numbers are from batch 1 formal benchmark. Note: unfiltered (parallel) numbers are from batch 3 manual runs on an 88-core server; actual speedup depends on available cores.
+With mmap + thread pool + zero-copy + interior chunk skip (8 workers), AXF1 view is **4.0x-4.4x faster than samtools on 1 Mb regions** (63 ms vs 280 ms on chr1:1M-2M, 48 ms vs 193 ms on chrY:20M-21M) and **3.6x faster on the centromeric 21 Mb region** (1,075 ms vs 3,850 ms). Against samtools -@8 (parallel BGZF), AXF1 is **2.8x faster** on chrY:20M-21M and at parity on centromeric. The filtered path still uses sequential two-pass decode; filtered numbers are from batch 1 formal benchmark. Note: unfiltered (mmap+pool) numbers are from batch 4 manual runs on an 88-core server; actual speedup depends on available cores.

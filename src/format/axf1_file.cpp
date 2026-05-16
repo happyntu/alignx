@@ -9,6 +9,12 @@
 #include <string_view>
 #include <utility>
 
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
+
 #ifdef ALIGNX_HAVE_ZSTD
 #include <zstd.h>
 #endif
@@ -1422,8 +1428,8 @@ write_chunk(const Axf1Chunk& chunk, const Axf1WriteOptions& options) {
 }
 
 std::expected<std::vector<std::string>, std::string>
-decode_string_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
-    Reader reader(bytes);
+decode_string_column(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
+    Reader reader(data, size);
     std::vector<std::string> values;
     values.reserve(record_count);
     for (std::uint32_t index = 0; index < record_count; ++index) {
@@ -1444,8 +1450,8 @@ decode_string_column(const std::vector<unsigned char>& bytes, std::uint32_t reco
 }
 
 std::expected<std::vector<std::string>, std::string>
-decode_qname_dict_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
-    Reader reader(bytes);
+decode_qname_dict_column(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
+    Reader reader(data, size);
 
     auto dict_size_val = reader.read_varint_u64();
     if (!dict_size_val) {
@@ -1530,9 +1536,9 @@ decode_qname_dict_column(const std::vector<unsigned char>& bytes, std::uint32_t 
 
 template <typename Value>
 std::expected<std::vector<Value>, std::string>
-decode_fixed_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count,
+decode_fixed_column(const unsigned char* data, std::size_t size, std::uint32_t record_count,
                     std::expected<Value, std::string> (Reader::*read_value)()) {
-    Reader reader(bytes);
+    Reader reader(data, size);
     std::vector<Value> values;
     values.reserve(record_count);
     for (std::uint32_t index = 0; index < record_count; ++index) {
@@ -1549,22 +1555,23 @@ decode_fixed_column(const std::vector<unsigned char>& bytes, std::uint32_t recor
 }
 
 std::expected<std::vector<std::uint16_t>, std::string>
-decode_flag_bitpack_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
-    if (bytes.empty()) {
+decode_flag_bitpack_column(const unsigned char* data, std::size_t size,
+                           std::uint32_t record_count) {
+    if (size == 0) {
         return std::unexpected("truncated AXF1 FLAG bitpack column");
     }
 
-    const std::uint8_t bit_width = bytes.at(0);
+    const std::uint8_t bit_width = data[0];
     if (bit_width > 16) {
         return std::unexpected("invalid AXF1 FLAG bitpack width");
     }
 
     const std::size_t bit_count = static_cast<std::size_t>(record_count) * bit_width;
     const std::size_t expected_size = 1 + ((bit_count + 7U) / 8U);
-    if (bytes.size() < expected_size) {
+    if (size < expected_size) {
         return std::unexpected("truncated AXF1 FLAG bitpack column");
     }
-    if (bytes.size() > expected_size) {
+    if (size > expected_size) {
         return std::unexpected("AXF1 FLAG bitpack column has trailing bytes");
     }
 
@@ -1574,7 +1581,7 @@ decode_flag_bitpack_column(const std::vector<unsigned char>& bytes, std::uint32_
     for (std::uint32_t index = 0; index < record_count; ++index) {
         std::uint16_t value = 0;
         for (std::uint8_t bit = 0; bit < bit_width; ++bit) {
-            const auto byte = bytes.at(1 + bit_offset / 8U);
+            const auto byte = data[1 + bit_offset / 8U];
             if (((byte >> (bit_offset % 8U)) & 1U) != 0) {
                 value |= static_cast<std::uint16_t>(1U << bit);
             }
@@ -1598,8 +1605,8 @@ read_varint_u64(Reader& reader, std::string_view truncated_error, std::string_vi
 }
 
 std::expected<DecodedPayloadEnvelope, std::string>
-decode_compressed_payload_envelope(const std::vector<unsigned char>& bytes) {
-    Reader reader(bytes);
+decode_compressed_payload_envelope(const unsigned char* data, std::size_t size) {
+    Reader reader(data, size);
     auto base_codec_id = read_varint_u64(reader, "truncated AXF1 compressed payload base codec",
                                          "AXF1 compressed payload base codec overflow");
     if (!base_codec_id) {
@@ -1667,10 +1674,10 @@ decode_compressed_payload_envelope(const std::vector<unsigned char>& bytes) {
 }
 
 std::expected<std::vector<unsigned char>, std::string>
-decode_compressed_base_payload(const std::vector<unsigned char>& bytes,
+decode_compressed_base_payload(const unsigned char* data, std::size_t size,
                                Axf1CodecId expected_base_codec_id,
                                std::string_view unsupported_base_error) {
-    auto envelope = decode_compressed_payload_envelope(bytes);
+    auto envelope = decode_compressed_payload_envelope(data, size);
     if (!envelope) {
         return std::unexpected(envelope.error());
     }
@@ -1681,9 +1688,9 @@ decode_compressed_base_payload(const std::vector<unsigned char>& bytes,
 }
 
 std::expected<std::vector<std::int32_t>, std::string>
-decode_pos_delta_varint_column(const std::vector<unsigned char>& bytes,
+decode_pos_delta_varint_column(const unsigned char* data, std::size_t size,
                                std::uint32_t record_count) {
-    Reader reader(bytes);
+    Reader reader(data, size);
     std::vector<std::int32_t> values;
     values.reserve(record_count);
     std::uint64_t current_pos = 0;
@@ -1714,8 +1721,8 @@ decode_pos_delta_varint_column(const std::vector<unsigned char>& bytes,
 }
 
 std::expected<std::vector<std::uint8_t>, std::string>
-decode_mapq_rle_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
-    Reader reader(bytes);
+decode_mapq_rle_column(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
+    Reader reader(data, size);
     std::vector<std::uint8_t> values;
     values.reserve(record_count);
 
@@ -1754,8 +1761,8 @@ std::expected<char, std::string> decode_cigar_op(std::uint8_t op) {
 }
 
 std::expected<std::vector<std::string>, std::string>
-decode_cigar_token_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
-    Reader reader(bytes);
+decode_cigar_token_column(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
+    Reader reader(data, size);
     std::vector<std::string> values;
     values.reserve(record_count);
 
@@ -1804,8 +1811,8 @@ decode_cigar_token_column(const std::vector<unsigned char>& bytes, std::uint32_t
 }
 
 std::expected<std::vector<std::string>, std::string>
-decode_cigar_dict_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
-    Reader reader(bytes);
+decode_cigar_dict_column(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
+    Reader reader(data, size);
 
     auto dict_size_val = reader.read_varint_u64();
     if (!dict_size_val) {
@@ -1888,9 +1895,9 @@ std::expected<char, std::string> decode_acgt_base_2bit(std::uint8_t value) {
 }
 
 std::expected<std::vector<std::string>, std::string>
-decode_seq_2bit_literal_column(const std::vector<unsigned char>& bytes,
+decode_seq_2bit_literal_column(const unsigned char* data, std::size_t size,
                                std::uint32_t record_count) {
-    Reader reader(bytes);
+    Reader reader(data, size);
     std::vector<std::string> values;
     values.reserve(record_count);
 
@@ -1942,8 +1949,8 @@ decode_seq_2bit_literal_column(const std::vector<unsigned char>& bytes,
 }
 
 std::expected<std::vector<std::string>, std::string>
-decode_qual_rle_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
-    Reader reader(bytes);
+decode_qual_rle_column(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
+    Reader reader(data, size);
     std::vector<std::string> values;
     values.reserve(record_count);
 
@@ -1987,8 +1994,8 @@ decode_qual_rle_column(const std::vector<unsigned char>& bytes, std::uint32_t re
 }
 
 std::expected<std::vector<std::string>, std::string>
-decode_qual_pack_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
-    Reader reader(bytes);
+decode_qual_pack_column(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
+    Reader reader(data, size);
     auto alphabet_count = read_varint_u64(reader, "truncated AXF1 QUAL pack alphabet count",
                                           "AXF1 QUAL pack alphabet count overflow");
     if (!alphabet_count) {
@@ -2073,9 +2080,9 @@ decode_qual_pack_column(const std::vector<unsigned char>& bytes, std::uint32_t r
 }
 
 std::expected<std::vector<std::string>, std::string>
-decode_tags_per_stream_column(const std::vector<unsigned char>& bytes,
+decode_tags_per_stream_column(const unsigned char* data, std::size_t size,
                               std::uint32_t record_count) {
-    Reader reader(bytes);
+    Reader reader(data, size);
 
     auto tag_count_val = reader.read_varint_u64();
     if (!tag_count_val) {
@@ -2288,26 +2295,31 @@ validate_selected_column_entries(const std::vector<ColumnEntry>& entries,
     return {};
 }
 
-std::expected<std::vector<unsigned char>, std::string>
-slice_column_payload(const std::vector<unsigned char>& chunk_payload, const ColumnEntry& entry) {
-    if (entry.offset > chunk_payload.size() ||
-        entry.length > chunk_payload.size() - static_cast<std::size_t>(entry.offset)) {
+struct PayloadSlice {
+    const unsigned char* data;
+    std::size_t size;
+};
+
+std::expected<PayloadSlice, std::string>
+slice_column_payload(const unsigned char* chunk_payload_data, std::size_t chunk_payload_size,
+                     const ColumnEntry& entry) {
+    if (entry.offset > chunk_payload_size ||
+        entry.length > chunk_payload_size - static_cast<std::size_t>(entry.offset)) {
         return std::unexpected("AXF1 column payload points outside chunk");
     }
-    const auto begin = chunk_payload.begin() + static_cast<std::ptrdiff_t>(entry.offset);
-    const auto end = begin + static_cast<std::ptrdiff_t>(entry.length);
-    return std::vector<unsigned char>(begin, end);
+    return PayloadSlice{chunk_payload_data + entry.offset,
+                        static_cast<std::size_t>(entry.length)};
 }
 
 std::expected<void, std::string>
 decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
                          const ColumnEntry& entry,
-                         const std::vector<unsigned char>& payload) {
+                         const unsigned char* payload_data, std::size_t payload_size) {
     switch (entry.column_id) {
     case Axf1ColumnId::qname: {
         auto values = entry.codec_id == Axf1CodecId::qname_dict
-                          ? decode_qname_dict_column(payload, record_count)
-                          : decode_string_column(payload, record_count);
+                          ? decode_qname_dict_column(payload_data, payload_size, record_count)
+                          : decode_string_column(payload_data, payload_size, record_count);
         if (!values) {
             return std::unexpected(values.error());
         }
@@ -2318,9 +2330,9 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
     }
     case Axf1ColumnId::flag: {
         auto values = entry.codec_id == Axf1CodecId::flag_bitpack
-                          ? decode_flag_bitpack_column(payload, record_count)
-                          : decode_fixed_column<std::uint16_t>(payload, record_count,
-                                                               &Reader::read_u16);
+                          ? decode_flag_bitpack_column(payload_data, payload_size, record_count)
+                          : decode_fixed_column<std::uint16_t>(payload_data, payload_size,
+                                                               record_count, &Reader::read_u16);
         if (!values) {
             return std::unexpected(values.error());
         }
@@ -2332,8 +2344,9 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
     case Axf1ColumnId::pos: {
         auto values =
             entry.codec_id == Axf1CodecId::pos_delta_varint
-                ? decode_pos_delta_varint_column(payload, record_count)
-                : decode_fixed_column<std::int32_t>(payload, record_count, &Reader::read_i32);
+                ? decode_pos_delta_varint_column(payload_data, payload_size, record_count)
+                : decode_fixed_column<std::int32_t>(payload_data, payload_size, record_count,
+                                                    &Reader::read_i32);
         if (!values) {
             return std::unexpected(values.error());
         }
@@ -2345,8 +2358,9 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
     case Axf1ColumnId::mapq: {
         auto values =
             entry.codec_id == Axf1CodecId::mapq_rle
-                ? decode_mapq_rle_column(payload, record_count)
-                : decode_fixed_column<std::uint8_t>(payload, record_count, &Reader::read_u8);
+                ? decode_mapq_rle_column(payload_data, payload_size, record_count)
+                : decode_fixed_column<std::uint8_t>(payload_data, payload_size, record_count,
+                                                    &Reader::read_u8);
         if (!values) {
             return std::unexpected(values.error());
         }
@@ -2356,7 +2370,7 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
         break;
     }
     case Axf1ColumnId::mate_reference: {
-        auto values = decode_string_column(payload, record_count);
+        auto values = decode_string_column(payload_data, payload_size, record_count);
         if (!values) {
             return std::unexpected(values.error());
         }
@@ -2367,8 +2381,8 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
     }
     case Axf1ColumnId::tags: {
         auto values = entry.codec_id == Axf1CodecId::tags_per_stream
-                          ? decode_tags_per_stream_column(payload, record_count)
-                          : decode_string_column(payload, record_count);
+                          ? decode_tags_per_stream_column(payload_data, payload_size, record_count)
+                          : decode_string_column(payload_data, payload_size, record_count);
         if (!values) {
             return std::unexpected(values.error());
         }
@@ -2380,11 +2394,11 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
     case Axf1ColumnId::cigar: {
         std::expected<std::vector<std::string>, std::string> values;
         if (entry.codec_id == Axf1CodecId::cigar_dict) {
-            values = decode_cigar_dict_column(payload, record_count);
+            values = decode_cigar_dict_column(payload_data, payload_size, record_count);
         } else if (entry.codec_id == Axf1CodecId::cigar_token) {
-            values = decode_cigar_token_column(payload, record_count);
+            values = decode_cigar_token_column(payload_data, payload_size, record_count);
         } else {
-            values = decode_string_column(payload, record_count);
+            values = decode_string_column(payload_data, payload_size, record_count);
         }
         if (!values) {
             return std::unexpected(values.error());
@@ -2396,8 +2410,8 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
     }
     case Axf1ColumnId::sequence: {
         auto values = entry.codec_id == Axf1CodecId::seq_2bit_literal
-                          ? decode_seq_2bit_literal_column(payload, record_count)
-                          : decode_string_column(payload, record_count);
+                          ? decode_seq_2bit_literal_column(payload_data, payload_size, record_count)
+                          : decode_string_column(payload_data, payload_size, record_count);
         if (!values) {
             return std::unexpected(values.error());
         }
@@ -2410,19 +2424,20 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
         std::expected<std::vector<std::string>, std::string> values =
             std::unexpected("unsupported AXF1 QUAL codec");
         if (entry.codec_id == Axf1CodecId::qual_rle) {
-            values = decode_qual_rle_column(payload, record_count);
+            values = decode_qual_rle_column(payload_data, payload_size, record_count);
         } else if (entry.codec_id == Axf1CodecId::qual_pack) {
-            values = decode_qual_pack_column(payload, record_count);
+            values = decode_qual_pack_column(payload_data, payload_size, record_count);
         } else if (entry.codec_id == Axf1CodecId::qual_pack_compressed) {
             auto base_payload =
-                decode_compressed_base_payload(payload, Axf1CodecId::qual_pack,
+                decode_compressed_base_payload(payload_data, payload_size, Axf1CodecId::qual_pack,
                                                "unsupported AXF1 compressed QUAL base codec");
             if (!base_payload) {
                 return std::unexpected(base_payload.error());
             }
-            values = decode_qual_pack_column(*base_payload, record_count);
+            values = decode_qual_pack_column(base_payload->data(), base_payload->size(),
+                                             record_count);
         } else {
-            values = decode_string_column(payload, record_count);
+            values = decode_string_column(payload_data, payload_size, record_count);
         }
         if (!values) {
             return std::unexpected(values.error());
@@ -2435,7 +2450,8 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
     case Axf1ColumnId::mate_pos:
     case Axf1ColumnId::template_length: {
         auto values =
-            decode_fixed_column<std::int32_t>(payload, record_count, &Reader::read_i32);
+            decode_fixed_column<std::int32_t>(payload_data, payload_size, record_count,
+                                              &Reader::read_i32);
         if (!values) {
             return std::unexpected(values.error());
         }
@@ -2511,8 +2527,8 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
     }
 
     const std::size_t payload_start = static_cast<std::size_t>(reader.offset());
-    const std::vector<unsigned char> chunk_payload(
-        chunk_bytes.begin() + static_cast<std::ptrdiff_t>(payload_start), chunk_bytes.end());
+    const unsigned char* payload_data = chunk_bytes.data() + payload_start;
+    const std::size_t payload_size = chunk_bytes.size() - payload_start;
 
     Axf1Chunk chunk{.ref_id = *ref_id, .start_pos = *start_pos, .end_pos = *end_pos};
     chunk.records.resize(*record_count);
@@ -2521,11 +2537,12 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
         if (!contains_column(requested_columns, entry.column_id)) {
             continue;
         }
-        auto payload = slice_column_payload(chunk_payload, entry);
+        auto payload = slice_column_payload(payload_data, payload_size, entry);
         if (!payload) {
             return std::unexpected(payload.error());
         }
-        auto decode = decode_column_into_chunk(chunk, *record_count, entry, *payload);
+        auto decode = decode_column_into_chunk(chunk, *record_count, entry,
+                                               payload->data, payload->size);
         if (!decode) {
             return std::unexpected(decode.error());
         }
@@ -2560,13 +2577,51 @@ Axf1FileIndex::query_chunks(std::uint32_t ref_id, std::int32_t start, std::int32
 }
 
 Axf1FileReader::Axf1FileReader(std::filesystem::path path, Axf1FileIndex index,
-                               std::unique_ptr<std::ifstream> stream, std::uint64_t file_size)
+                               std::unique_ptr<std::ifstream> stream, std::uint64_t file_size,
+                               const unsigned char* mmap_ptr)
     : path_(std::move(path)), index_(std::move(index)), stream_(std::move(stream)),
-      file_size_(file_size) {}
+      file_size_(file_size), mmap_ptr_(mmap_ptr) {}
 
-Axf1FileReader::Axf1FileReader(Axf1FileReader&&) noexcept = default;
-Axf1FileReader& Axf1FileReader::operator=(Axf1FileReader&&) noexcept = default;
-Axf1FileReader::~Axf1FileReader() = default;
+Axf1FileReader::Axf1FileReader(Axf1FileReader&& other) noexcept
+    : path_(std::move(other.path_)), index_(std::move(other.index_)),
+      stream_(std::move(other.stream_)), file_size_(other.file_size_),
+      mmap_ptr_(other.mmap_ptr_), mmap_fd_(other.mmap_fd_) {
+    other.mmap_ptr_ = nullptr;
+    other.mmap_fd_ = -1;
+}
+
+Axf1FileReader& Axf1FileReader::operator=(Axf1FileReader&& other) noexcept {
+    if (this != &other) {
+#ifndef _WIN32
+        if (mmap_ptr_ != nullptr) {
+            ::munmap(const_cast<unsigned char*>(mmap_ptr_), file_size_);
+        }
+        if (mmap_fd_ >= 0) {
+            ::close(mmap_fd_);
+        }
+#endif
+        path_ = std::move(other.path_);
+        index_ = std::move(other.index_);
+        stream_ = std::move(other.stream_);
+        file_size_ = other.file_size_;
+        mmap_ptr_ = other.mmap_ptr_;
+        mmap_fd_ = other.mmap_fd_;
+        other.mmap_ptr_ = nullptr;
+        other.mmap_fd_ = -1;
+    }
+    return *this;
+}
+
+Axf1FileReader::~Axf1FileReader() {
+#ifndef _WIN32
+    if (mmap_ptr_ != nullptr) {
+        ::munmap(const_cast<unsigned char*>(mmap_ptr_), file_size_);
+    }
+    if (mmap_fd_ >= 0) {
+        ::close(mmap_fd_);
+    }
+#endif
+}
 
 std::expected<Axf1FileReader, std::string> Axf1FileReader::open(std::filesystem::path path) {
     auto index = read_axf1_index_metadata(path);
@@ -2582,8 +2637,30 @@ std::expected<Axf1FileReader, std::string> Axf1FileReader::open(std::filesystem:
     if (size < 0) {
         return std::unexpected("failed to determine AXF1 file size: " + path.string());
     }
+    const auto file_size = static_cast<std::uint64_t>(size);
+
+    const unsigned char* mmap_ptr = nullptr;
+#ifndef _WIN32
+    int fd = ::open(path.c_str(), O_RDONLY);
+    if (fd >= 0) {
+        void* mapped = ::mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        if (mapped != MAP_FAILED) {
+            mmap_ptr = static_cast<const unsigned char*>(mapped);
+            ::madvise(const_cast<void*>(static_cast<const void*>(mmap_ptr)), file_size,
+                      MADV_SEQUENTIAL);
+        } else {
+            ::close(fd);
+            fd = -1;
+        }
+    }
+    auto reader = Axf1FileReader(std::move(path), std::move(*index), std::move(stream),
+                                 file_size, mmap_ptr);
+    reader.mmap_fd_ = fd;
+    return reader;
+#else
     return Axf1FileReader(std::move(path), std::move(*index), std::move(stream),
-                          static_cast<std::uint64_t>(size));
+                          file_size, nullptr);
+#endif
 }
 
 const Axf1FileIndex& Axf1FileReader::index() const noexcept {
@@ -2714,21 +2791,21 @@ Axf1FileReader::read_chunk_columns_selective(const Axf1ChunkIndexEntry& chunk,
         Axf1Chunk result{.ref_id = *ref_id, .start_pos = *start_pos, .end_pos = *end_pos};
         result.records.resize(*record_count);
 
+        const unsigned char* bulk_payload_ptr = chunk_bytes->data() + payload_start;
+        const std::size_t bulk_payload_size = chunk_bytes->size() - payload_start;
+
         for (const ColumnEntry& entry : entries) {
             if (!contains_column(columns, entry.column_id)) {
                 continue;
             }
-            const std::size_t col_start = payload_start + static_cast<std::size_t>(entry.offset);
-            const std::size_t col_end = col_start + static_cast<std::size_t>(entry.length);
-            if (col_end > chunk_bytes->size()) {
+            if (entry.offset + entry.length > bulk_payload_size) {
                 return std::unexpected("AXF1 column payload points outside chunk");
             }
-            std::vector<unsigned char> payload(chunk_bytes->begin() +
-                                                   static_cast<std::ptrdiff_t>(col_start),
-                                               chunk_bytes->begin() +
-                                                   static_cast<std::ptrdiff_t>(col_end));
+            const unsigned char* col_data = bulk_payload_ptr + entry.offset;
+            const std::size_t col_size = static_cast<std::size_t>(entry.length);
 
-            auto decode = decode_column_into_chunk(result, *record_count, entry, payload);
+            auto decode = decode_column_into_chunk(result, *record_count, entry,
+                                                   col_data, col_size);
             if (!decode) {
                 return std::unexpected(decode.error());
             }
@@ -2813,7 +2890,8 @@ Axf1FileReader::read_chunk_columns_selective(const Axf1ChunkIndexEntry& chunk,
         }
         bytes_actually_read += entry.length;
 
-        auto decode = decode_column_into_chunk(result, *record_count, entry, *payload);
+        auto decode = decode_column_into_chunk(result, *record_count, entry,
+                                               payload->data(), payload->size());
         if (!decode) {
             return std::unexpected(decode.error());
         }
@@ -2833,6 +2911,74 @@ Axf1FileReader::decode_chunk_raw(const std::vector<unsigned char>& chunk_bytes,
                                  const Axf1ChunkIndexEntry& chunk,
                                  const std::vector<Axf1ColumnId>& columns) {
     return decode_chunk_bytes(chunk_bytes, chunk, columns);
+}
+
+std::expected<Axf1Chunk, std::string>
+Axf1FileReader::decode_chunk_mapped(const unsigned char* data, std::uint64_t length,
+                                    const Axf1ChunkIndexEntry& chunk,
+                                    const std::vector<Axf1ColumnId>& columns) {
+    const std::size_t size = static_cast<std::size_t>(length);
+    Reader reader(data, size);
+
+    auto ref_id = reader.read_u32();
+    auto start_pos = reader.read_i32();
+    auto end_pos = reader.read_i32();
+    auto record_count = reader.read_u32();
+    auto column_count = reader.read_u16();
+    if (!ref_id || !start_pos || !end_pos || !record_count || !column_count) {
+        return std::unexpected("truncated AXF1 chunk");
+    }
+    if (*ref_id != chunk.ref_id || *start_pos != chunk.start_pos ||
+        *end_pos != chunk.end_pos || *record_count != chunk.record_count) {
+        return std::unexpected("AXF1 chunk metadata does not match index");
+    }
+
+    std::vector<ColumnEntry> entries;
+    entries.reserve(*column_count);
+    for (std::uint16_t index = 0; index < *column_count; ++index) {
+        auto column_id = reader.read_u16();
+        auto codec_id = reader.read_u16();
+        auto offset = reader.read_u64();
+        auto col_length = reader.read_u64();
+        if (!column_id || !codec_id || !offset || !col_length) {
+            return std::unexpected("truncated AXF1 column entry");
+        }
+        entries.push_back({.column_id = static_cast<Axf1ColumnId>(*column_id),
+                           .codec_id = static_cast<Axf1CodecId>(*codec_id),
+                           .offset = *offset,
+                           .length = *col_length});
+    }
+
+    const std::size_t payload_start = static_cast<std::size_t>(reader.offset());
+    const unsigned char* payload_data = data + payload_start;
+    const std::size_t payload_size = size - payload_start;
+
+    Axf1Chunk result{.ref_id = *ref_id, .start_pos = *start_pos, .end_pos = *end_pos};
+    result.records.resize(*record_count);
+
+    for (const ColumnEntry& entry : entries) {
+        if (!contains_column(columns, entry.column_id)) {
+            continue;
+        }
+        auto slice = slice_column_payload(payload_data, payload_size, entry);
+        if (!slice) {
+            return std::unexpected(slice.error());
+        }
+        auto decode = decode_column_into_chunk(result, *record_count, entry,
+                                               slice->data, slice->size);
+        if (!decode) {
+            return std::unexpected(decode.error());
+        }
+    }
+    return result;
+}
+
+const unsigned char* Axf1FileReader::mapped_data() const noexcept {
+    return mmap_ptr_;
+}
+
+std::uint64_t Axf1FileReader::file_size() const noexcept {
+    return file_size_;
 }
 
 std::expected<void, std::string> write_axf1_file(const Axf1File& file,

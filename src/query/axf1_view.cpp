@@ -1,5 +1,6 @@
 #include "query/axf1_view.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <deque>
@@ -123,7 +124,7 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
         !filter.is_active() && hits->size() >= kParallelThreshold;
 
     if (use_parallel) {
-        const std::size_t window_size =
+        const std::size_t num_workers =
             std::min<std::size_t>(std::thread::hardware_concurrency(), 8);
 
         struct ChunkResult {
@@ -134,11 +135,159 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
             std::uint64_t payload_bytes = 0;
         };
 
-        std::deque<std::future<std::expected<ChunkResult, std::string>>> in_flight;
+        const auto decode_start = Clock::now();
+        const bool use_mmap = reader->mapped_data() != nullptr;
 
-        auto drain_one = [&]() -> std::expected<void, std::string> {
-            auto result = in_flight.front().get();
-            in_flight.pop_front();
+        // Pre-allocate result slots for all chunks
+        std::vector<std::expected<ChunkResult, std::string>> results(hits->size());
+
+        // Thread pool with work-stealing via atomic index
+        std::atomic<std::size_t> next_chunk{0};
+        const std::size_t total_chunks = hits->size();
+        const auto& columns_ref = kAllViewColumns;
+
+        auto worker_fn = [&]() {
+            while (true) {
+                const std::size_t idx = next_chunk.fetch_add(1, std::memory_order_relaxed);
+                if (idx >= total_chunks) {
+                    break;
+                }
+                const format::Axf1ChunkIndexEntry* chunk_entry = (*hits)[idx];
+
+                std::expected<ChunkResult, std::string> result;
+                if (use_mmap) {
+                    const unsigned char* chunk_data =
+                        reader->mapped_data() + chunk_entry->chunk_offset;
+                    auto chunk = format::Axf1FileReader::decode_chunk_mapped(
+                        chunk_data, chunk_entry->chunk_length, *chunk_entry, columns_ref);
+                    if (!chunk) {
+                        results[idx] = std::unexpected(chunk.error());
+                        continue;
+                    }
+                    ChunkResult cr;
+                    cr.bytes_read = chunk_entry->chunk_length;
+                    cr.payload_bytes = chunk_entry->chunk_length;
+
+                    const bool is_interior_chunk =
+                        chunk_entry->start_pos >= parsed_region->start &&
+                        chunk_entry->end_pos <= parsed_region->end;
+
+                    if (is_interior_chunk) {
+                        cr.records_scanned = chunk->records.size();
+                        cr.records_matched = chunk->records.size();
+                        for (std::size_t i = 0; i < chunk->records.size(); ++i) {
+                            format::append_axf1_sam_record(cr.output, chunk->records[i], ref_name);
+                        }
+                    } else {
+                        for (std::size_t i = 0; i < chunk->records.size(); ++i) {
+                            cr.records_scanned += 1;
+                            auto overlaps =
+                                record_overlaps_region(chunk->records[i], *parsed_region);
+                            if (!overlaps) {
+                                results[idx] = std::unexpected(overlaps.error());
+                                return;
+                            }
+                            if (!*overlaps) {
+                                continue;
+                            }
+                            cr.records_matched += 1;
+                            format::append_axf1_sam_record(cr.output, chunk->records[i], ref_name);
+                        }
+                    }
+                    results[idx] = std::move(cr);
+                } else {
+                    // Fallback: read_chunk_raw requires ifstream (not thread-safe)
+                    // This path shouldn't be reached in parallel mode on non-mmap systems
+                    // but kept for correctness on Windows
+                    results[idx] = std::unexpected(
+                        std::string("parallel decode requires mmap"));
+                }
+            }
+        };
+
+        if (use_mmap) {
+            std::vector<std::thread> workers;
+            workers.reserve(num_workers);
+            for (std::size_t i = 0; i < num_workers; ++i) {
+                workers.emplace_back(worker_fn);
+            }
+            for (auto& w : workers) {
+                w.join();
+            }
+        } else {
+            // Non-mmap fallback: sliding-window async with sequential main-thread reads
+            std::deque<std::pair<std::size_t, std::future<std::expected<ChunkResult, std::string>>>>
+                in_flight;
+
+            for (std::size_t idx = 0; idx < total_chunks; ++idx) {
+                const format::Axf1ChunkIndexEntry* chunk_entry = (*hits)[idx];
+                auto chunk_bytes = reader->read_chunk_raw(*chunk_entry);
+                if (!chunk_bytes) {
+                    results[idx] = std::unexpected(chunk_bytes.error());
+                    break;
+                }
+
+                auto fut = std::async(
+                    std::launch::async,
+                    [bytes = std::move(*chunk_bytes), entry = *chunk_entry, &columns_ref,
+                     &parsed_region, &ref_name]() -> std::expected<ChunkResult, std::string> {
+                        auto chunk = format::Axf1FileReader::decode_chunk_raw(
+                            bytes, entry, columns_ref);
+                        if (!chunk) {
+                            return std::unexpected(chunk.error());
+                        }
+                        ChunkResult cr;
+                        cr.bytes_read = bytes.size();
+                        cr.payload_bytes = bytes.size();
+
+                        const bool is_interior =
+                            entry.start_pos >= parsed_region->start &&
+                            entry.end_pos <= parsed_region->end;
+
+                        if (is_interior) {
+                            cr.records_scanned = chunk->records.size();
+                            cr.records_matched = chunk->records.size();
+                            for (std::size_t i = 0; i < chunk->records.size(); ++i) {
+                                format::append_axf1_sam_record(
+                                    cr.output, chunk->records[i], ref_name);
+                            }
+                        } else {
+                            for (std::size_t i = 0; i < chunk->records.size(); ++i) {
+                                cr.records_scanned += 1;
+                                auto overlaps =
+                                    record_overlaps_region(chunk->records[i], *parsed_region);
+                                if (!overlaps) {
+                                    return std::unexpected(overlaps.error());
+                                }
+                                if (!*overlaps) {
+                                    continue;
+                                }
+                                cr.records_matched += 1;
+                                format::append_axf1_sam_record(
+                                    cr.output, chunk->records[i], ref_name);
+                            }
+                        }
+                        return cr;
+                    });
+
+                in_flight.emplace_back(idx, std::move(fut));
+
+                while (in_flight.size() >= num_workers) {
+                    auto& [result_idx, front_fut] = in_flight.front();
+                    results[result_idx] = front_fut.get();
+                    in_flight.pop_front();
+                }
+            }
+            while (!in_flight.empty()) {
+                auto& [result_idx, front_fut] = in_flight.front();
+                results[result_idx] = front_fut.get();
+                in_flight.pop_front();
+            }
+        }
+
+        // Drain results in order
+        for (std::size_t idx = 0; idx < total_chunks; ++idx) {
+            auto& result = results[idx];
             if (!result) {
                 return std::unexpected(result.error());
             }
@@ -154,59 +303,6 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
                           static_cast<std::streamsize>(result->output.size()));
                 profile.write_time += Clock::now() - write_start;
                 profile.stdout_bytes += result->output.size();
-            }
-            return {};
-        };
-
-        const auto decode_start = Clock::now();
-        for (const format::Axf1ChunkIndexEntry* chunk_entry : *hits) {
-            auto chunk_bytes = reader->read_chunk_raw(*chunk_entry);
-            if (!chunk_bytes) {
-                return std::unexpected(chunk_bytes.error());
-            }
-
-            const auto& columns_ref = kAllViewColumns;
-            auto fut = std::async(
-                std::launch::async,
-                [bytes = std::move(*chunk_bytes), entry = *chunk_entry, &columns_ref,
-                 &parsed_region, &ref_name]() -> std::expected<ChunkResult, std::string> {
-                    auto chunk = format::Axf1FileReader::decode_chunk_raw(
-                        bytes, entry, columns_ref);
-                    if (!chunk) {
-                        return std::unexpected(chunk.error());
-                    }
-
-                    ChunkResult cr;
-                    cr.bytes_read = bytes.size();
-                    cr.payload_bytes = bytes.size();
-                    for (std::size_t i = 0; i < chunk->records.size(); ++i) {
-                        cr.records_scanned += 1;
-                        auto overlaps = record_overlaps_region(chunk->records[i], *parsed_region);
-                        if (!overlaps) {
-                            return std::unexpected(overlaps.error());
-                        }
-                        if (!*overlaps) {
-                            continue;
-                        }
-                        cr.records_matched += 1;
-                        format::append_axf1_sam_record(cr.output, chunk->records[i], ref_name);
-                    }
-                    return cr;
-                });
-
-            in_flight.push_back(std::move(fut));
-
-            while (in_flight.size() >= window_size) {
-                auto drain = drain_one();
-                if (!drain) {
-                    return std::unexpected(drain.error());
-                }
-            }
-        }
-        while (!in_flight.empty()) {
-            auto drain = drain_one();
-            if (!drain) {
-                return std::unexpected(drain.error());
             }
         }
         profile.output_decode_time += Clock::now() - decode_start;

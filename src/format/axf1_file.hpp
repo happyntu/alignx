@@ -168,9 +168,18 @@ public:
                      const Axf1ChunkIndexEntry& chunk,
                      const std::vector<Axf1ColumnId>& columns);
 
+    [[nodiscard]] static std::expected<Axf1Chunk, std::string>
+    decode_chunk_mapped(const unsigned char* data, std::uint64_t length,
+                        const Axf1ChunkIndexEntry& chunk,
+                        const std::vector<Axf1ColumnId>& columns);
+
+    [[nodiscard]] const unsigned char* mapped_data() const noexcept;
+    [[nodiscard]] std::uint64_t file_size() const noexcept;
+
 private:
     Axf1FileReader(std::filesystem::path path, Axf1FileIndex index,
-                   std::unique_ptr<std::ifstream> stream, std::uint64_t file_size);
+                   std::unique_ptr<std::ifstream> stream, std::uint64_t file_size,
+                   const unsigned char* mmap_ptr);
 
     [[nodiscard]] std::expected<std::vector<unsigned char>, std::string>
     read_range(std::uint64_t offset, std::uint64_t length);
@@ -179,6 +188,8 @@ private:
     Axf1FileIndex index_;
     std::unique_ptr<std::ifstream> stream_;
     std::uint64_t file_size_ = 0;
+    const unsigned char* mmap_ptr_ = nullptr;
+    int mmap_fd_ = -1;
 };
 
 [[nodiscard]] std::expected<void, std::string> write_axf1_file(const Axf1File& file,
