@@ -40,7 +40,12 @@ and produce correct output before the next version starts.
   - `--tag` deferred to v0.4 (requires full-record decode)
   - AXF1 path adds FLAG+MAPQ to selective column list only when filter is active
 - [ ] Benchmark: vs `samtools depth`, `mosdepth` on chr1
-- [ ] Integration test: coverage array matches samtools depth output exactly
+  - `scripts/bench_pileup.sh` harness ready: compares `samtools depth`, `alignx pileup <bam>`, `alignx pileup <axf1>` with correctness preflight + warmup + repeats + summary stats
+  - Awaiting timed runs on missmi-server00 with HG002 chr1 regions
+- [x] Integration test: coverage array matches samtools depth output exactly
+  - `PileupFullRangeFidelity`: hardcoded expected depth for chrToy:101-160, both reads' full extent
+  - `PileupAxf1MatchesBamPileup`: BAM → AXF1 → pileup byte-identical to BAM pileup
+  - `PileupAxf1FilterMatchesBamFilter`: `--flag-exclude 16` produces identical filtered output on both paths
 
 ---
 

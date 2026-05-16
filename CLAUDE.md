@@ -101,6 +101,8 @@ Completed:
 - AXF1 selective column I/O coverage benchmark on HG002: 2.97x faster (chr1:1M-2M), 1.16x faster (chr1:121M-142M), 2.22x faster (chrY:20M-21M) vs BAM full-record parse
 - Read filter support: `--flag-exclude` and `--min-mapq` for view, coverage, and pileup subcommands; AXF1 path adds FLAG+MAPQ to selective filter column list only when filter is active
 - `alignx pileup <bam|axf1> <region>` subcommand: outputs per-base depth in TSV format compatible with `samtools depth`; internally routes to the coverage engine with `--output-mode tsv`
+- `scripts/bench_pileup.sh` pileup benchmark harness: compares `samtools depth`, `alignx pileup <bam>`, `alignx pileup <axf1>` with SHA-based correctness preflight, warmup, repeats, and median/p95/outlier summary TSV
+- Pileup integration tests: `PileupFullRangeFidelity` (hardcoded expected depth for chrToy:101-160), `PileupAxf1MatchesBamPileup` (BAM→AXF1→pileup byte-identical), `PileupAxf1FilterMatchesBamFilter` (`--flag-exclude 16` parity across BAM and AXF1 paths)
 
 Remaining implementation targets:
 - Round-trip fidelity: BAM → AXF → BAM → diff

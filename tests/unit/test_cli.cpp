@@ -771,6 +771,102 @@ TEST(Cli, PileupFlagExcludeFiltersRecords) {
     EXPECT_EQ(out.str(), expected);
 }
 
+TEST(Cli, PileupFullRangeFidelity) {
+    // Toy BAM records:
+    //   read001: pos 100 (0-based), 10M  → covers [100,110) → 1-based 101-110
+    //   read002: pos 150 (0-based), 5M1I4M → covers [150,155)+[155,159) → 1-based 151-159
+    //   read003: unmapped, excluded
+    // Query chrToy:101-160 spans both reads' full extent.
+    // Expected depth matches samtools depth baseline for this toy BAM.
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code =
+        run_cli({"alignx", "pileup", toy_bam_path().string(), "chrToy:101-160"}, out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+
+    std::string expected;
+    // read001: depth 1 at positions 101-110
+    for (int p = 101; p <= 110; ++p) {
+        expected += "chrToy\t" + std::to_string(p) + "\t1\n";
+    }
+    // gap: depth 0 at positions 111-150
+    for (int p = 111; p <= 150; ++p) {
+        expected += "chrToy\t" + std::to_string(p) + "\t0\n";
+    }
+    // read002: 5M1I4M → depth 1 at positions 151-159
+    for (int p = 151; p <= 159; ++p) {
+        expected += "chrToy\t" + std::to_string(p) + "\t1\n";
+    }
+    // depth 0 at position 160
+    expected += "chrToy\t160\t0\n";
+
+    EXPECT_EQ(out.str(), expected);
+}
+
+TEST(Cli, PileupAxf1MatchesBamPileup) {
+    const auto temp_dir = make_temp_dir("alignx_cli_pileup_axf1_fidelity");
+    const auto axf1_path = temp_dir / "toy.axf1";
+
+    std::ostringstream convert_out;
+    std::ostringstream convert_err;
+    const int convert_code = run_cli(
+        {"alignx", "convert", toy_bam_path().string(), "-o", axf1_path.string(), "--format", "AXF1"},
+        convert_out, convert_err);
+    ASSERT_EQ(convert_code, 0) << convert_err.str();
+
+    std::ostringstream bam_out;
+    std::ostringstream bam_err;
+    const int bam_code =
+        run_cli({"alignx", "pileup", toy_bam_path().string(), "chrToy:101-160"}, bam_out, bam_err);
+    ASSERT_EQ(bam_code, 0) << bam_err.str();
+
+    std::ostringstream axf1_out;
+    std::ostringstream axf1_err;
+    const int axf1_code =
+        run_cli({"alignx", "pileup", axf1_path.string(), "chrToy:101-160"}, axf1_out, axf1_err);
+
+    EXPECT_EQ(axf1_code, 0) << axf1_err.str();
+    EXPECT_EQ(axf1_out.str(), bam_out.str());
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, PileupAxf1FilterMatchesBamFilter) {
+    const auto temp_dir = make_temp_dir("alignx_cli_pileup_axf1_filter");
+    const auto axf1_path = temp_dir / "toy.axf1";
+
+    std::ostringstream convert_out;
+    std::ostringstream convert_err;
+    const int convert_code = run_cli(
+        {"alignx", "convert", toy_bam_path().string(), "-o", axf1_path.string(), "--format", "AXF1"},
+        convert_out, convert_err);
+    ASSERT_EQ(convert_code, 0) << convert_err.str();
+
+    // --flag-exclude 16 removes read002 (reverse strand), leaving only read001
+    std::ostringstream bam_out;
+    std::ostringstream bam_err;
+    const int bam_code = run_cli(
+        {"alignx", "pileup", "--flag-exclude", "16", toy_bam_path().string(), "chrToy:101-160"},
+        bam_out, bam_err);
+    ASSERT_EQ(bam_code, 0) << bam_err.str();
+
+    std::ostringstream axf1_out;
+    std::ostringstream axf1_err;
+    const int axf1_code = run_cli(
+        {"alignx", "pileup", "--flag-exclude", "16", axf1_path.string(), "chrToy:101-160"},
+        axf1_out, axf1_err);
+
+    EXPECT_EQ(axf1_code, 0) << axf1_err.str();
+    EXPECT_EQ(axf1_out.str(), bam_out.str());
+
+    // Verify read002's positions are now depth 0
+    EXPECT_NE(axf1_out.str().find("chrToy\t151\t0"), std::string::npos);
+    EXPECT_NE(axf1_out.str().find("chrToy\t155\t0"), std::string::npos);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
 #else
 
 TEST(Cli, ConvertReportsMissingHtslib) {
