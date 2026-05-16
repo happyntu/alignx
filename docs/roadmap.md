@@ -171,7 +171,9 @@ and region-query correctness.
 
 - [ ] QUAL codec: stronger lossless model or compressed wrapper; lossy binning only under explicit lossy profile
 - [ ] CIGAR delta + op dictionary encoding
-- [ ] QNAME dictionary encoding
+- [x] QNAME dictionary encoding
+  - `qname_dict` codec (ID 9): sorted unique dictionary with front compression + per-record varint indices; raw fallback when dict is not smaller
+  - Design: `docs/research/axf1-qname-codec-design.md`
 - [ ] TAG per-stream encoding
 - [ ] `alignx index` — rebuild `.axf.idx` from existing `.axf`
 - [ ] Compression benchmark: AXF vs BAM vs CRAM (ratio, encode time, decode time)

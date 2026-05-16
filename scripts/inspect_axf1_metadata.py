@@ -42,6 +42,7 @@ CODEC_NAMES = {
     6: "qual_rle",
     7: "qual_pack",
     8: "qual_pack_compressed",
+    9: "qname_dict",
 }
 
 

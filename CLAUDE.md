@@ -120,6 +120,7 @@ Completed:
 - CRAM round-trip: `ExportCramRoundtripSamDiff` (CRAM → AXF1 → BAM → SAM diff) in `tests/unit/test_axf_to_bam.cpp`
 - CRAM CLI: `Cli.ConvertCramToAxf1` (CRAM → AXF1 conversion + view) in `tests/unit/test_cli.cpp`
 - AXF1 cloud-ready index assessment: format already uses file-absolute byte offsets, contiguous chunks, index-at-EOF. HTTP client transport deferred to Phase 2+. See `docs/research/axf1-cloud-ready-index-assessment.md`.
+- AXF1 QNAME delta-dictionary codec (`qname_dict`, codec ID 9): sorted unique dictionary with front compression + per-record varint indices; raw fallback when dict is not smaller. Design: `docs/research/axf1-qname-codec-design.md`
 
 ## Build & Test Commands
 

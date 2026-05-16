@@ -4,6 +4,7 @@
 #include <array>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <string_view>
 #include <utility>
 
@@ -148,6 +149,24 @@ public:
         std::string value(reinterpret_cast<const char*>(bytes_.data() + offset_), size);
         offset_ += size;
         return value;
+    }
+
+    [[nodiscard]] std::expected<std::uint64_t, std::string> read_varint_u64() {
+        std::uint64_t value = 0;
+        for (std::size_t byte_index = 0; byte_index < 10; ++byte_index) {
+            auto byte = read_u8();
+            if (!byte) {
+                return std::unexpected("truncated AXF1 varint");
+            }
+            if (byte_index == 9 && (*byte & 0xFEU) != 0) {
+                return std::unexpected("AXF1 varint overflow");
+            }
+            value |= static_cast<std::uint64_t>(*byte & 0x7FU) << (byte_index * 7U);
+            if ((*byte & 0x80U) == 0) {
+                return value;
+            }
+        }
+        return std::unexpected("AXF1 varint overflow");
     }
 
     [[nodiscard]] std::expected<void, std::string> seek(std::uint64_t offset) {
@@ -500,6 +519,70 @@ std::vector<unsigned char> encode_strings(const std::vector<Axf1Record>& records
         append_string(bytes, record.*field);
     }
     return bytes;
+}
+
+std::size_t common_prefix_length(std::string_view a, std::string_view b) {
+    const auto limit = std::min(a.size(), b.size());
+    for (std::size_t i = 0; i < limit; ++i) {
+        if (a[i] != b[i]) return i;
+    }
+    return limit;
+}
+
+std::expected<std::vector<unsigned char>, std::string>
+encode_qname_dict_payload(const std::vector<Axf1Record>& records) {
+    if (records.empty()) {
+        return std::vector<unsigned char>{};
+    }
+
+    std::map<std::string_view, std::uint32_t> unique_map;
+    for (const auto& record : records) {
+        unique_map.try_emplace(std::string_view{record.qname}, 0);
+    }
+    std::uint32_t sorted_index = 0;
+    for (auto& [key, idx] : unique_map) {
+        idx = sorted_index++;
+    }
+
+    std::vector<std::string_view> sorted_keys;
+    sorted_keys.reserve(unique_map.size());
+    for (const auto& [key, idx] : unique_map) {
+        sorted_keys.push_back(key);
+    }
+
+    std::vector<unsigned char> bytes;
+    append_varint_u64(bytes, sorted_keys.size());
+
+    append_varint_u64(bytes, sorted_keys[0].size());
+    bytes.insert(bytes.end(), sorted_keys[0].begin(), sorted_keys[0].end());
+
+    for (std::size_t i = 1; i < sorted_keys.size(); ++i) {
+        const auto shared = common_prefix_length(sorted_keys[i - 1], sorted_keys[i]);
+        const auto suffix_len = sorted_keys[i].size() - shared;
+        append_varint_u64(bytes, shared);
+        append_varint_u64(bytes, suffix_len);
+        bytes.insert(bytes.end(), sorted_keys[i].begin() + static_cast<std::ptrdiff_t>(shared),
+                     sorted_keys[i].end());
+    }
+
+    for (const auto& record : records) {
+        append_varint_u64(bytes, unique_map.at(std::string_view{record.qname}));
+    }
+
+    return bytes;
+}
+
+EncodedColumn encode_qname_column(const std::vector<Axf1Record>& records) {
+    auto raw = encode_strings(records, &Axf1Record::qname);
+    auto dict = encode_qname_dict_payload(records);
+    if (dict && dict->size() < raw.size()) {
+        return {.column_id = Axf1ColumnId::qname,
+                .codec_id = Axf1CodecId::qname_dict,
+                .payload = std::move(*dict)};
+    }
+    return {.column_id = Axf1ColumnId::qname,
+            .codec_id = Axf1CodecId::raw,
+            .payload = std::move(raw)};
 }
 
 std::vector<unsigned char> encode_u16(const std::vector<Axf1Record>& records,
@@ -1009,9 +1092,7 @@ encode_columns(const Axf1Chunk& chunk, const Axf1WriteOptions& options) {
         return std::unexpected(quality_column.error());
     }
     return std::vector<EncodedColumn>{
-        {.column_id = Axf1ColumnId::qname,
-         .codec_id = Axf1CodecId::raw,
-         .payload = encode_strings(chunk.records, &Axf1Record::qname)},
+        encode_qname_column(chunk.records),
         std::move(flag_column),
         encode_pos_column(chunk.records),
         std::move(mapq_column),
@@ -1086,6 +1167,75 @@ decode_string_column(const std::vector<unsigned char>& bytes, std::uint32_t reco
     }
     if (reader.offset() != reader.size()) {
         return std::unexpected("AXF1 string column has trailing bytes");
+    }
+    return values;
+}
+
+std::expected<std::vector<std::string>, std::string>
+decode_qname_dict_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
+    Reader reader(bytes);
+
+    auto dict_size_val = reader.read_varint_u64();
+    if (!dict_size_val) {
+        return std::unexpected("AXF1 QNAME dict: truncated dict_size");
+    }
+    const auto dict_size = static_cast<std::uint32_t>(*dict_size_val);
+    if (dict_size == 0) {
+        return std::unexpected("AXF1 QNAME dict has zero entries");
+    }
+    if (dict_size > record_count) {
+        return std::unexpected("AXF1 QNAME dict size exceeds record count");
+    }
+
+    std::vector<std::string> dictionary;
+    dictionary.reserve(dict_size);
+
+    auto first_len = reader.read_varint_u64();
+    if (!first_len) {
+        return std::unexpected("AXF1 QNAME dict: truncated first entry length");
+    }
+    auto first_str = reader.read_string(static_cast<std::uint32_t>(*first_len));
+    if (!first_str) {
+        return std::unexpected("AXF1 QNAME dict: truncated first entry");
+    }
+    dictionary.push_back(std::move(*first_str));
+
+    for (std::uint32_t i = 1; i < dict_size; ++i) {
+        auto shared_len = reader.read_varint_u64();
+        if (!shared_len) {
+            return std::unexpected("AXF1 QNAME dict: truncated shared prefix length");
+        }
+        if (*shared_len > dictionary[i - 1].size()) {
+            return std::unexpected("AXF1 QNAME dict shared prefix exceeds previous entry");
+        }
+        auto suffix_len = reader.read_varint_u64();
+        if (!suffix_len) {
+            return std::unexpected("AXF1 QNAME dict: truncated suffix length");
+        }
+        auto suffix = reader.read_string(static_cast<std::uint32_t>(*suffix_len));
+        if (!suffix) {
+            return std::unexpected("AXF1 QNAME dict: truncated suffix");
+        }
+        std::string entry = dictionary[i - 1].substr(0, static_cast<std::size_t>(*shared_len));
+        entry += *suffix;
+        dictionary.push_back(std::move(entry));
+    }
+
+    std::vector<std::string> values;
+    values.reserve(record_count);
+    for (std::uint32_t j = 0; j < record_count; ++j) {
+        auto idx = reader.read_varint_u64();
+        if (!idx) {
+            return std::unexpected("AXF1 QNAME dict: truncated index");
+        }
+        if (*idx >= dict_size) {
+            return std::unexpected("AXF1 QNAME dict index out of range");
+        }
+        values.push_back(dictionary[static_cast<std::size_t>(*idx)]);
+    }
+
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 QNAME dict column has trailing bytes");
     }
     return values;
 }
@@ -1587,7 +1737,8 @@ bool is_supported_column_codec(Axf1ColumnId column_id, Axf1CodecId codec_id) {
     if (codec_id == Axf1CodecId::raw) {
         return true;
     }
-    return (column_id == Axf1ColumnId::pos && codec_id == Axf1CodecId::pos_delta_varint) ||
+    return (column_id == Axf1ColumnId::qname && codec_id == Axf1CodecId::qname_dict) ||
+           (column_id == Axf1ColumnId::pos && codec_id == Axf1CodecId::pos_delta_varint) ||
            (column_id == Axf1ColumnId::flag && codec_id == Axf1CodecId::flag_bitpack) ||
            (column_id == Axf1ColumnId::mapq && codec_id == Axf1CodecId::mapq_rle) ||
            (column_id == Axf1ColumnId::cigar && codec_id == Axf1CodecId::cigar_token) ||
@@ -1670,7 +1821,9 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
                          const std::vector<unsigned char>& payload) {
     switch (entry.column_id) {
     case Axf1ColumnId::qname: {
-        auto values = decode_string_column(payload, record_count);
+        auto values = entry.codec_id == Axf1CodecId::qname_dict
+                          ? decode_qname_dict_column(payload, record_count)
+                          : decode_string_column(payload, record_count);
         if (!values) {
             return std::unexpected(values.error());
         }

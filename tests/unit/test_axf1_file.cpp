@@ -36,6 +36,7 @@ constexpr std::size_t kColumnCodecOffset = 2;
 constexpr std::size_t kColumnPayloadOffsetOffset = 4;
 constexpr std::size_t kColumnLengthOffset = 12;
 constexpr std::size_t kIndexChunkLengthOffset = 24;
+constexpr std::size_t kQnameColumnIndex = 0;
 constexpr std::size_t kFlagColumnIndex = 1;
 constexpr std::size_t kPosColumnIndex = 2;
 constexpr std::size_t kMapqColumnIndex = 3;
@@ -1335,6 +1336,8 @@ TEST(Axf1File, RejectsMissingRequiredColumn) {
     auto data = read_bytes(path);
     write_u16_at(data, column_entry_offset(data, 0) + kColumnIdOffset,
                  static_cast<std::uint16_t>(alignx::format::Axf1ColumnId::mapq));
+    write_u16_at(data, column_entry_offset(data, 0) + kColumnCodecOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::raw));
     write_bytes(path, data);
 
     auto read = alignx::format::read_axf1_file(path);
@@ -2010,7 +2013,9 @@ TEST(Axf1File, RejectsColumnValueCountMismatch) {
 
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
-    EXPECT_NE(read.error().find("column value count mismatch"), std::string::npos);
+    EXPECT_TRUE(read.error().find("column value count mismatch") != std::string::npos ||
+                read.error().find("QNAME dict") != std::string::npos)
+        << read.error();
 
     std::filesystem::remove(path);
 }
@@ -2028,7 +2033,9 @@ TEST(Axf1File, RejectsColumnTrailingBytes) {
 
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
-    EXPECT_NE(read.error().find("string column has trailing bytes"), std::string::npos);
+    EXPECT_TRUE(read.error().find("trailing bytes") != std::string::npos ||
+                read.error().find("truncated") != std::string::npos)
+        << read.error();
 
     std::filesystem::remove(path);
 }
@@ -2047,6 +2054,156 @@ TEST(Axf1File, RejectsChunkPayloadOutsideFile) {
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
     EXPECT_NE(read.error().find("chunk points outside file"), std::string::npos);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, WritesQnamesAsDictWhenSmallerThanRaw) {
+    const auto path = temp_path("alignx_axf1_qname_dict");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kQnameColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qname_dict));
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].qname, "read001");
+    EXPECT_EQ(read->chunks[0].records[1].qname, "read002");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, QnameDictRoundTripsSingleRecord) {
+    const auto path = temp_path("alignx_axf1_qname_single");
+    auto file = make_file();
+    file.chunks[0].end_pos = 110;
+    file.chunks[0].records.resize(1);
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto codec = read_u16_at(data,
+        column_entry_offset(data, kQnameColumnIndex) + kColumnCodecOffset);
+    EXPECT_TRUE(codec == static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qname_dict) ||
+                codec == static_cast<std::uint16_t>(alignx::format::Axf1CodecId::raw));
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks[0].records.size(), 1);
+    EXPECT_EQ(read->chunks[0].records[0].qname, "read001");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, QnameDictHandlesDuplicateQnames) {
+    const auto path = temp_path("alignx_axf1_qname_dict_dup");
+    auto file = make_file();
+    file.chunks[0].records[1].qname = file.chunks[0].records[0].qname;
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].qname, "read001");
+    EXPECT_EQ(read->chunks[0].records[1].qname, "read001");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, QnameDictHandlesLongSharedPrefix) {
+    const auto path = temp_path("alignx_axf1_qname_dict_prefix");
+    auto file = make_file();
+    file.chunks[0].records.clear();
+    for (int index = 0; index < 16; ++index) {
+        file.chunks[0].records.push_back(
+            {.qname = "m64011_190830_220126/" + std::to_string(index) + "/ccs",
+             .flag = 0,
+             .pos = static_cast<std::int32_t>(100 + index),
+             .mapq = 60,
+             .cigar = "10M",
+             .mate_reference = "*",
+             .mate_pos = 0,
+             .template_length = 0,
+             .sequence = "ACGTACGTAA",
+             .quality = "FFFFFFFFFF",
+             .tags = "NM:i:0"});
+    }
+    file.chunks[0].end_pos = 126;
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kQnameColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qname_dict));
+
+    const auto dict_payload_length =
+        read_u64_at(data, column_entry_offset(data, kQnameColumnIndex) + kColumnLengthOffset);
+    std::uint64_t raw_total = 0;
+    for (const auto& record : file.chunks[0].records) {
+        raw_total += sizeof(std::uint32_t) + record.qname.size();
+    }
+    EXPECT_LT(dict_payload_length, raw_total);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks[0].records.size(), 16);
+    for (int index = 0; index < 16; ++index) {
+        EXPECT_EQ(read->chunks[0].records[static_cast<std::size_t>(index)].qname,
+                  "m64011_190830_220126/" + std::to_string(index) + "/ccs");
+    }
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedQnameDict) {
+    const auto path = temp_path("alignx_axf1_truncated_qname_dict");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kQnameColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qname_dict));
+    write_u64_at(data, column_entry_offset(data, kQnameColumnIndex) + kColumnLengthOffset, 1);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("QNAME dict"), std::string::npos) << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsQnameDictIndexOutOfRange) {
+    const auto path = temp_path("alignx_axf1_qname_dict_bad_index");
+    const auto file = make_file();
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kQnameColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::qname_dict));
+
+    const auto payload_offset = column_payload_offset(data, kQnameColumnIndex);
+    const auto payload_length = static_cast<std::size_t>(
+        read_u64_at(data, column_entry_offset(data, kQnameColumnIndex) + kColumnLengthOffset));
+    data.at(payload_offset + payload_length - 1) = 0xFF;
+    data.at(payload_offset + payload_length - 2) = 0xFF;
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("QNAME dict"), std::string::npos) << read.error();
 
     std::filesystem::remove(path);
 }

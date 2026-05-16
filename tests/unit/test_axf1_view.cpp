@@ -315,7 +315,9 @@ TEST(Axf1View, ReportsOverlappingMalformedChunkAtomically) {
     auto result = alignx::query::write_axf1_region_sam(path, "chrToy:101-510", out);
 
     ASSERT_FALSE(result);
-    EXPECT_NE(result.error().find("string column has trailing bytes"), std::string::npos);
+    EXPECT_TRUE(result.error().find("trailing bytes") != std::string::npos ||
+                result.error().find("truncated") != std::string::npos)
+        << result.error();
     EXPECT_EQ(out.str(), "");
 
     std::filesystem::remove(path);
