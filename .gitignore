@@ -36,5 +36,7 @@ benchmarks/plots/
 *.fq.gz
 *.axf
 *.axf.idx
+__pycache__/
+tmp_*.sh
 .DS_Store
 Thumbs.db
