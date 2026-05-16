@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <map>
 #include <string_view>
 #include <utility>
+
+#include "query/sam_utils.hpp"
 
 #ifndef _WIN32
 #include <fcntl.h>
@@ -1894,6 +1897,14 @@ std::expected<char, std::string> decode_acgt_base_2bit(std::uint8_t value) {
     }
 }
 
+struct FlatColumn {
+    std::vector<char> data;
+    std::vector<std::uint32_t> offsets;
+    [[nodiscard]] std::string_view at(std::size_t i) const noexcept {
+        return {data.data() + offsets[i], offsets[i + 1] - offsets[i]};
+    }
+};
+
 std::expected<std::vector<std::string>, std::string>
 decode_seq_2bit_literal_column(const unsigned char* data, std::size_t size,
                                std::uint32_t record_count) {
@@ -1946,6 +1957,54 @@ decode_seq_2bit_literal_column(const unsigned char* data, std::size_t size,
         return std::unexpected("AXF1 SEQ 2-bit column has trailing bytes");
     }
     return values;
+}
+
+std::expected<FlatColumn, std::string>
+decode_seq_2bit_literal_flat(const unsigned char* data, std::size_t size,
+                             std::uint32_t record_count) {
+    Reader reader(data, size);
+    FlatColumn col;
+    col.offsets.reserve(record_count + 1);
+    col.data.reserve(size * 4);
+
+    for (std::uint32_t index = 0; index < record_count; ++index) {
+        auto length = read_varint_u64(reader, "truncated AXF1 SEQ 2-bit length",
+                                      "AXF1 SEQ 2-bit length overflow");
+        if (!length) return std::unexpected(length.error());
+        const auto seq_len = static_cast<std::size_t>(*length);
+        const std::size_t full_bytes = seq_len / 4;
+        const std::size_t remaining_bases = seq_len % 4;
+        const std::size_t encoded_bytes = full_bytes + (remaining_bases > 0 ? 1 : 0);
+
+        auto adv = reader.advance(encoded_bytes);
+        if (!adv) return std::unexpected("truncated AXF1 SEQ 2-bit bases");
+        const unsigned char* src = reader.current_ptr() - encoded_bytes;
+
+        col.offsets.push_back(static_cast<std::uint32_t>(col.data.size()));
+        col.data.resize(col.data.size() + seq_len);
+        char* dst = col.data.data() + col.offsets.back();
+
+        for (std::size_t i = 0; i < full_bytes; ++i) {
+            const auto& quad = kSeq2bitLut[src[i]];
+            dst[0] = quad.bases[0];
+            dst[1] = quad.bases[1];
+            dst[2] = quad.bases[2];
+            dst[3] = quad.bases[3];
+            dst += 4;
+        }
+        if (remaining_bases > 0) {
+            const auto& quad = kSeq2bitLut[src[full_bytes]];
+            for (std::size_t r = 0; r < remaining_bases; ++r) {
+                dst[r] = quad.bases[r];
+            }
+        }
+    }
+    col.offsets.push_back(static_cast<std::uint32_t>(col.data.size()));
+
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 SEQ 2-bit column has trailing bytes");
+    }
+    return col;
 }
 
 std::expected<std::vector<std::string>, std::string>
@@ -2054,21 +2113,62 @@ decode_qual_pack_column(const unsigned char* data, std::size_t size, std::uint32
 
         std::string quality(qual_len, '\0');
         char* dst = quality.data();
-        std::uint64_t accumulator = 0;
-        int acc_bits = 0;
-        std::size_t src_pos = 0;
-        for (std::size_t index = 0; index < qual_len; ++index) {
-            while (acc_bits < bit_width) {
-                accumulator |= static_cast<std::uint64_t>(src[src_pos++]) << acc_bits;
-                acc_bits += 8;
+
+        if (encoded_bytes >= 8) {
+            std::size_t bit_pos = 0;
+            // uint64 load at byte_pos reads 8 bytes; ensure we stay within encoded buffer
+            const std::size_t safe_len = std::min(
+                qual_len, ((encoded_bytes - 8) * 8) / static_cast<std::size_t>(bit_width));
+            std::size_t index = 0;
+            for (; index < safe_len; ++index) {
+                std::uint64_t word;
+                std::memcpy(&word, src + (bit_pos >> 3), sizeof(word));
+                const auto code = static_cast<std::uint8_t>((word >> (bit_pos & 7)) & code_mask);
+                if (code >= alphabet.size()) {
+                    return std::unexpected("AXF1 QUAL pack code is outside alphabet");
+                }
+                dst[index] = static_cast<char>(alphabet[code]);
+                bit_pos += bit_width;
             }
-            const auto code = static_cast<std::uint8_t>(accumulator & code_mask);
-            accumulator >>= bit_width;
-            acc_bits -= bit_width;
-            if (code >= alphabet.size()) {
-                return std::unexpected("AXF1 QUAL pack code is outside alphabet");
+            // Tail: accumulator-based for bounds safety
+            std::size_t tail_pos = bit_pos >> 3;
+            std::uint64_t tail_acc = 0;
+            int tail_bits = 0;
+            int skip = static_cast<int>(bit_pos & 7);
+            if (skip > 0 && tail_pos < encoded_bytes) {
+                tail_acc = static_cast<std::uint64_t>(src[tail_pos++]) >> skip;
+                tail_bits = 8 - skip;
             }
-            dst[index] = static_cast<char>(alphabet[code]);
+            for (; index < qual_len; ++index) {
+                while (tail_bits < bit_width && tail_pos < encoded_bytes) {
+                    tail_acc |= static_cast<std::uint64_t>(src[tail_pos++]) << tail_bits;
+                    tail_bits += 8;
+                }
+                const auto code = static_cast<std::uint8_t>(tail_acc & code_mask);
+                tail_acc >>= bit_width;
+                tail_bits -= bit_width;
+                if (code >= alphabet.size()) {
+                    return std::unexpected("AXF1 QUAL pack code is outside alphabet");
+                }
+                dst[index] = static_cast<char>(alphabet[code]);
+            }
+        } else {
+            std::uint64_t accumulator = 0;
+            int acc_bits = 0;
+            std::size_t src_pos = 0;
+            for (std::size_t index = 0; index < qual_len; ++index) {
+                while (acc_bits < bit_width) {
+                    accumulator |= static_cast<std::uint64_t>(src[src_pos++]) << acc_bits;
+                    acc_bits += 8;
+                }
+                const auto code = static_cast<std::uint8_t>(accumulator & code_mask);
+                accumulator >>= bit_width;
+                acc_bits -= bit_width;
+                if (code >= alphabet.size()) {
+                    return std::unexpected("AXF1 QUAL pack code is outside alphabet");
+                }
+                dst[index] = static_cast<char>(alphabet[code]);
+            }
         }
         values.push_back(std::move(quality));
     }
@@ -2077,6 +2177,121 @@ decode_qual_pack_column(const unsigned char* data, std::size_t size, std::uint32
         return std::unexpected("AXF1 QUAL pack column has trailing bytes");
     }
     return values;
+}
+
+std::expected<FlatColumn, std::string>
+decode_qual_pack_flat(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
+    Reader reader(data, size);
+    auto alphabet_count = read_varint_u64(reader, "truncated AXF1 QUAL pack alphabet count",
+                                          "AXF1 QUAL pack alphabet count overflow");
+    if (!alphabet_count) return std::unexpected(alphabet_count.error());
+    if (*alphabet_count == 0) return std::unexpected("AXF1 QUAL pack alphabet is empty");
+    if (*alphabet_count > 128) return std::unexpected("AXF1 QUAL pack alphabet is too large");
+
+    std::vector<std::uint8_t> alphabet;
+    alphabet.reserve(static_cast<std::size_t>(*alphabet_count));
+    std::uint8_t previous = 0;
+    for (std::uint64_t idx = 0; idx < *alphabet_count; ++idx) {
+        auto value = reader.read_u8();
+        if (!value) return std::unexpected("truncated AXF1 QUAL pack alphabet");
+        if (idx > 0 && *value <= previous) {
+            return std::unexpected("AXF1 QUAL pack alphabet is not strictly ascending");
+        }
+        alphabet.push_back(*value);
+        previous = *value;
+    }
+
+    const std::uint8_t bit_width = bit_width_for_alphabet_size(alphabet.size());
+    const std::uint64_t code_mask =
+        bit_width < 64 ? (static_cast<std::uint64_t>(1) << bit_width) - 1 : ~std::uint64_t{0};
+
+    FlatColumn col;
+    col.offsets.reserve(record_count + 1);
+    col.data.reserve(size * 8 / (bit_width > 0 ? bit_width : 1));
+
+    for (std::uint32_t record_index = 0; record_index < record_count; ++record_index) {
+        auto length = read_varint_u64(reader, "truncated AXF1 QUAL pack length",
+                                      "AXF1 QUAL pack length overflow");
+        if (!length) return std::unexpected(length.error());
+        const auto qual_len = static_cast<std::size_t>(*length);
+
+        col.offsets.push_back(static_cast<std::uint32_t>(col.data.size()));
+
+        if (bit_width == 0) {
+            col.data.resize(col.data.size() + qual_len, static_cast<char>(alphabet.front()));
+            continue;
+        }
+
+        const std::size_t total_bits = qual_len * bit_width;
+        const std::size_t encoded_bytes = (total_bits + 7) / 8;
+        auto adv = reader.advance(encoded_bytes);
+        if (!adv) return std::unexpected("truncated AXF1 QUAL pack codes");
+        const unsigned char* src = reader.current_ptr() - encoded_bytes;
+
+        col.data.resize(col.data.size() + qual_len);
+        char* dst = col.data.data() + col.offsets.back();
+
+        if (encoded_bytes >= 8) {
+            std::size_t bit_pos = 0;
+            const std::size_t safe_len = std::min(
+                qual_len, ((encoded_bytes - 8) * 8) / static_cast<std::size_t>(bit_width));
+            std::size_t index = 0;
+            for (; index < safe_len; ++index) {
+                std::uint64_t word;
+                std::memcpy(&word, src + (bit_pos >> 3), sizeof(word));
+                const auto code = static_cast<std::uint8_t>((word >> (bit_pos & 7)) & code_mask);
+                if (code >= alphabet.size()) {
+                    return std::unexpected("AXF1 QUAL pack code is outside alphabet");
+                }
+                dst[index] = static_cast<char>(alphabet[code]);
+                bit_pos += bit_width;
+            }
+            std::size_t tail_pos = bit_pos >> 3;
+            std::uint64_t tail_acc = 0;
+            int tail_bits = 0;
+            int skip = static_cast<int>(bit_pos & 7);
+            if (skip > 0 && tail_pos < encoded_bytes) {
+                tail_acc = static_cast<std::uint64_t>(src[tail_pos++]) >> skip;
+                tail_bits = 8 - skip;
+            }
+            for (; index < qual_len; ++index) {
+                while (tail_bits < bit_width && tail_pos < encoded_bytes) {
+                    tail_acc |= static_cast<std::uint64_t>(src[tail_pos++]) << tail_bits;
+                    tail_bits += 8;
+                }
+                const auto code = static_cast<std::uint8_t>(tail_acc & code_mask);
+                tail_acc >>= bit_width;
+                tail_bits -= bit_width;
+                if (code >= alphabet.size()) {
+                    return std::unexpected("AXF1 QUAL pack code is outside alphabet");
+                }
+                dst[index] = static_cast<char>(alphabet[code]);
+            }
+        } else {
+            std::uint64_t accumulator = 0;
+            int acc_bits = 0;
+            std::size_t src_pos = 0;
+            for (std::size_t index = 0; index < qual_len; ++index) {
+                while (acc_bits < bit_width) {
+                    accumulator |= static_cast<std::uint64_t>(src[src_pos++]) << acc_bits;
+                    acc_bits += 8;
+                }
+                const auto code = static_cast<std::uint8_t>(accumulator & code_mask);
+                accumulator >>= bit_width;
+                acc_bits -= bit_width;
+                if (code >= alphabet.size()) {
+                    return std::unexpected("AXF1 QUAL pack code is outside alphabet");
+                }
+                dst[index] = static_cast<char>(alphabet[code]);
+            }
+        }
+    }
+    col.offsets.push_back(static_cast<std::uint32_t>(col.data.size()));
+
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 QUAL pack column has trailing bytes");
+    }
+    return col;
 }
 
 std::expected<std::vector<std::string>, std::string>
@@ -2971,6 +3186,352 @@ Axf1FileReader::decode_chunk_mapped(const unsigned char* data, std::uint64_t len
         }
     }
     return result;
+}
+
+namespace {
+
+struct ColumnarDecode {
+    std::vector<std::string> qnames;
+    std::vector<std::uint16_t> flags;
+    std::vector<std::int32_t> positions;
+    std::vector<std::uint8_t> mapqs;
+    std::vector<std::string> cigars;
+    std::vector<std::string> mate_refs;
+    std::vector<std::int32_t> mate_positions;
+    std::vector<std::int32_t> template_lengths;
+    FlatColumn sequences;
+    FlatColumn qualities;
+    std::vector<std::string> tags;
+    std::uint32_t record_count = 0;
+};
+
+std::expected<ColumnarDecode, std::string>
+decode_all_columns_mapped(const unsigned char* data, std::size_t size,
+                          const Axf1ChunkIndexEntry& chunk) {
+    Reader reader(data, size);
+
+    auto ref_id = reader.read_u32();
+    auto start_pos = reader.read_i32();
+    auto end_pos = reader.read_i32();
+    auto record_count = reader.read_u32();
+    auto column_count = reader.read_u16();
+    if (!ref_id || !start_pos || !end_pos || !record_count || !column_count) {
+        return std::unexpected("truncated AXF1 chunk");
+    }
+    if (*ref_id != chunk.ref_id || *start_pos != chunk.start_pos ||
+        *end_pos != chunk.end_pos || *record_count != chunk.record_count) {
+        return std::unexpected("AXF1 chunk metadata does not match index");
+    }
+
+    std::vector<ColumnEntry> entries;
+    entries.reserve(*column_count);
+    for (std::uint16_t i = 0; i < *column_count; ++i) {
+        auto cid = reader.read_u16();
+        auto codec = reader.read_u16();
+        auto offset = reader.read_u64();
+        auto length = reader.read_u64();
+        if (!cid || !codec || !offset || !length) {
+            return std::unexpected("truncated AXF1 column entry");
+        }
+        entries.push_back({.column_id = static_cast<Axf1ColumnId>(*cid),
+                           .codec_id = static_cast<Axf1CodecId>(*codec),
+                           .offset = *offset,
+                           .length = *length});
+    }
+
+    const std::size_t payload_start = static_cast<std::size_t>(reader.offset());
+    const unsigned char* payload_data = data + payload_start;
+    const std::size_t payload_size = size - payload_start;
+
+    ColumnarDecode result;
+    result.record_count = *record_count;
+
+    for (const ColumnEntry& entry : entries) {
+        auto slice = slice_column_payload(payload_data, payload_size, entry);
+        if (!slice) {
+            return std::unexpected(slice.error());
+        }
+        const unsigned char* col_data = slice->data;
+        const std::size_t col_size = slice->size;
+
+        switch (entry.column_id) {
+        case Axf1ColumnId::qname: {
+            auto v = entry.codec_id == Axf1CodecId::qname_dict
+                         ? decode_qname_dict_column(col_data, col_size, *record_count)
+                         : decode_string_column(col_data, col_size, *record_count);
+            if (!v) return std::unexpected(v.error());
+            result.qnames = std::move(*v);
+            break;
+        }
+        case Axf1ColumnId::flag: {
+            auto v = entry.codec_id == Axf1CodecId::flag_bitpack
+                         ? decode_flag_bitpack_column(col_data, col_size, *record_count)
+                         : decode_fixed_column<std::uint16_t>(col_data, col_size, *record_count,
+                                                              &Reader::read_u16);
+            if (!v) return std::unexpected(v.error());
+            result.flags = std::move(*v);
+            break;
+        }
+        case Axf1ColumnId::pos: {
+            auto v = entry.codec_id == Axf1CodecId::pos_delta_varint
+                         ? decode_pos_delta_varint_column(col_data, col_size, *record_count)
+                         : decode_fixed_column<std::int32_t>(col_data, col_size, *record_count,
+                                                             &Reader::read_i32);
+            if (!v) return std::unexpected(v.error());
+            result.positions = std::move(*v);
+            break;
+        }
+        case Axf1ColumnId::mapq: {
+            auto v = entry.codec_id == Axf1CodecId::mapq_rle
+                         ? decode_mapq_rle_column(col_data, col_size, *record_count)
+                         : decode_fixed_column<std::uint8_t>(col_data, col_size, *record_count,
+                                                             &Reader::read_u8);
+            if (!v) return std::unexpected(v.error());
+            result.mapqs = std::move(*v);
+            break;
+        }
+        case Axf1ColumnId::cigar: {
+            std::expected<std::vector<std::string>, std::string> v;
+            if (entry.codec_id == Axf1CodecId::cigar_dict)
+                v = decode_cigar_dict_column(col_data, col_size, *record_count);
+            else if (entry.codec_id == Axf1CodecId::cigar_token)
+                v = decode_cigar_token_column(col_data, col_size, *record_count);
+            else
+                v = decode_string_column(col_data, col_size, *record_count);
+            if (!v) return std::unexpected(v.error());
+            result.cigars = std::move(*v);
+            break;
+        }
+        case Axf1ColumnId::mate_reference: {
+            auto v = decode_string_column(col_data, col_size, *record_count);
+            if (!v) return std::unexpected(v.error());
+            result.mate_refs = std::move(*v);
+            break;
+        }
+        case Axf1ColumnId::mate_pos: {
+            auto v = decode_fixed_column<std::int32_t>(col_data, col_size, *record_count,
+                                                       &Reader::read_i32);
+            if (!v) return std::unexpected(v.error());
+            result.mate_positions = std::move(*v);
+            break;
+        }
+        case Axf1ColumnId::template_length: {
+            auto v = decode_fixed_column<std::int32_t>(col_data, col_size, *record_count,
+                                                       &Reader::read_i32);
+            if (!v) return std::unexpected(v.error());
+            result.template_lengths = std::move(*v);
+            break;
+        }
+        case Axf1ColumnId::sequence: {
+            if (entry.codec_id == Axf1CodecId::seq_2bit_literal) {
+                auto v = decode_seq_2bit_literal_flat(col_data, col_size, *record_count);
+                if (!v) return std::unexpected(v.error());
+                result.sequences = std::move(*v);
+            } else {
+                auto v = decode_string_column(col_data, col_size, *record_count);
+                if (!v) return std::unexpected(v.error());
+                FlatColumn flat;
+                flat.offsets.reserve(v->size() + 1);
+                for (const auto& s : *v) {
+                    flat.offsets.push_back(static_cast<std::uint32_t>(flat.data.size()));
+                    flat.data.insert(flat.data.end(), s.begin(), s.end());
+                }
+                flat.offsets.push_back(static_cast<std::uint32_t>(flat.data.size()));
+                result.sequences = std::move(flat);
+            }
+            break;
+        }
+        case Axf1ColumnId::quality: {
+            if (entry.codec_id == Axf1CodecId::qual_pack) {
+                auto v = decode_qual_pack_flat(col_data, col_size, *record_count);
+                if (!v) return std::unexpected(v.error());
+                result.qualities = std::move(*v);
+            } else if (entry.codec_id == Axf1CodecId::qual_pack_compressed) {
+                auto base = decode_compressed_base_payload(col_data, col_size,
+                    Axf1CodecId::qual_pack, "unsupported AXF1 compressed QUAL base codec");
+                if (!base) return std::unexpected(base.error());
+                auto v = decode_qual_pack_flat(base->data(), base->size(), *record_count);
+                if (!v) return std::unexpected(v.error());
+                result.qualities = std::move(*v);
+            } else {
+                std::expected<std::vector<std::string>, std::string> v =
+                    std::unexpected("unsupported AXF1 QUAL codec");
+                if (entry.codec_id == Axf1CodecId::qual_rle)
+                    v = decode_qual_rle_column(col_data, col_size, *record_count);
+                else
+                    v = decode_string_column(col_data, col_size, *record_count);
+                if (!v) return std::unexpected(v.error());
+                FlatColumn flat;
+                flat.offsets.reserve(v->size() + 1);
+                for (const auto& s : *v) {
+                    flat.offsets.push_back(static_cast<std::uint32_t>(flat.data.size()));
+                    flat.data.insert(flat.data.end(), s.begin(), s.end());
+                }
+                flat.offsets.push_back(static_cast<std::uint32_t>(flat.data.size()));
+                result.qualities = std::move(flat);
+            }
+            break;
+        }
+        case Axf1ColumnId::tags: {
+            auto v = entry.codec_id == Axf1CodecId::tags_per_stream
+                         ? decode_tags_per_stream_column(col_data, col_size, *record_count)
+                         : decode_string_column(col_data, col_size, *record_count);
+            if (!v) return std::unexpected(v.error());
+            result.tags = std::move(*v);
+            break;
+        }
+        }
+    }
+    return result;
+}
+
+// Write a single SAM record directly to a pre-allocated buffer via pointer.
+// Returns the advanced write pointer. Caller must ensure sufficient space.
+char* write_record_to_sam(char* dst, const ColumnarDecode& cols,
+                          std::size_t i, const std::string& ref_name) {
+    auto write_str = [&](std::string_view sv) {
+        std::memcpy(dst, sv.data(), sv.size());
+        dst += sv.size();
+    };
+    auto write_int = [&](auto value) {
+        auto [end, ec] = std::to_chars(dst, dst + 20, value);
+        dst = end;
+    };
+
+    write_str(cols.qnames[i]);
+    *dst++ = '\t';
+    write_int(cols.flags[i]);
+    *dst++ = '\t';
+    write_str(ref_name);
+    *dst++ = '\t';
+    write_int(cols.positions[i] + 1);
+    *dst++ = '\t';
+    write_int(cols.mapqs[i]);
+    *dst++ = '\t';
+    write_str(cols.cigars[i]);
+    *dst++ = '\t';
+    write_str(cols.mate_refs[i]);
+    *dst++ = '\t';
+    write_int(cols.mate_positions[i] <= 0 ? 0 : cols.mate_positions[i] + 1);
+    *dst++ = '\t';
+    write_int(cols.template_lengths[i]);
+    *dst++ = '\t';
+    write_str(cols.sequences.at(i));
+    *dst++ = '\t';
+    write_str(cols.qualities.at(i));
+    if (!cols.tags[i].empty()) {
+        *dst++ = '\t';
+        write_str(cols.tags[i]);
+    }
+    *dst++ = '\n';
+    return dst;
+}
+
+} // anonymous namespace
+
+std::expected<Axf1FileReader::FusedDecodeResult, std::string>
+Axf1FileReader::decode_chunk_to_sam_mapped(const unsigned char* data, std::uint64_t length,
+                                           const Axf1ChunkIndexEntry& chunk,
+                                           const std::string& ref_name,
+                                           bool is_interior_chunk,
+                                           std::int32_t region_start, std::int32_t region_end) {
+    auto cols = decode_all_columns_mapped(data, static_cast<std::size_t>(length), chunk);
+    if (!cols) {
+        return std::unexpected(cols.error());
+    }
+
+    FusedDecodeResult result;
+    const std::uint32_t n = cols->record_count;
+
+    // Compute upper-bound output size: sum all variable fields + fixed overhead per record
+    // 5 ints × 11 chars max + 10 tabs + 1 optional tab + 1 newline = 67 per record
+    std::size_t total_var = 0;
+    for (std::uint32_t i = 0; i < n; ++i) {
+        total_var += cols->qnames[i].size() + cols->cigars[i].size() +
+                     cols->mate_refs[i].size() + cols->tags[i].size();
+    }
+    total_var += cols->sequences.data.size() + cols->qualities.data.size();
+    const std::size_t upper_bound = total_var + n * (ref_name.size() + 67);
+
+    if (is_interior_chunk) {
+        result.records_formatted = n;
+        result.sam_output.resize_and_overwrite(upper_bound,
+            [&](char* buf, [[maybe_unused]] std::size_t buf_size) -> std::size_t {
+                char* ptr = buf;
+                for (std::uint32_t i = 0; i < n; ++i) {
+                    ptr = write_record_to_sam(ptr, *cols, i, ref_name);
+                }
+                return static_cast<std::size_t>(ptr - buf);
+            });
+    } else {
+        result.sam_output.resize_and_overwrite(upper_bound,
+            [&](char* buf, [[maybe_unused]] std::size_t buf_size) -> std::size_t {
+                char* ptr = buf;
+                for (std::uint32_t i = 0; i < n; ++i) {
+                    auto span = query::cigar_reference_span(cols->cigars[i]);
+                    if (!span) return static_cast<std::size_t>(ptr - buf);
+                    const std::int32_t pos = cols->positions[i];
+                    if (!query::half_open_intervals_overlap(
+                            pos, pos + *span, region_start, region_end)) {
+                        continue;
+                    }
+                    result.records_formatted += 1;
+                    ptr = write_record_to_sam(ptr, *cols, i, ref_name);
+                }
+                return static_cast<std::size_t>(ptr - buf);
+            });
+    }
+    return result;
+}
+
+std::expected<std::size_t, std::string>
+Axf1FileReader::decode_chunk_to_sam_append(const unsigned char* data, std::uint64_t length,
+                                           const Axf1ChunkIndexEntry& chunk,
+                                           const std::string& ref_name,
+                                           bool is_interior_chunk,
+                                           std::int32_t region_start, std::int32_t region_end,
+                                           std::string& output) {
+    auto cols = decode_all_columns_mapped(data, static_cast<std::size_t>(length), chunk);
+    if (!cols) {
+        return std::unexpected(cols.error());
+    }
+
+    const std::uint32_t n = cols->record_count;
+    std::size_t total_var = 0;
+    for (std::uint32_t i = 0; i < n; ++i) {
+        total_var += cols->qnames[i].size() + cols->cigars[i].size() +
+                     cols->mate_refs[i].size() + cols->tags[i].size();
+    }
+    total_var += cols->sequences.data.size() + cols->qualities.data.size();
+    const std::size_t upper_bound = total_var + n * (ref_name.size() + 67);
+
+    const std::size_t old_size = output.size();
+    output.resize(old_size + upper_bound);
+    char* ptr = output.data() + old_size;
+
+    std::size_t records_formatted = 0;
+    if (is_interior_chunk) {
+        records_formatted = n;
+        for (std::uint32_t i = 0; i < n; ++i) {
+            ptr = write_record_to_sam(ptr, *cols, i, ref_name);
+        }
+    } else {
+        for (std::uint32_t i = 0; i < n; ++i) {
+            auto span = query::cigar_reference_span(cols->cigars[i]);
+            if (!span) {
+                output.resize(old_size);
+                return std::unexpected(span.error());
+            }
+            const std::int32_t pos = cols->positions[i];
+            if (!query::half_open_intervals_overlap(pos, pos + *span, region_start, region_end)) {
+                continue;
+            }
+            records_formatted += 1;
+            ptr = write_record_to_sam(ptr, *cols, i, ref_name);
+        }
+    }
+    output.resize(old_size + static_cast<std::size_t>(ptr - (output.data() + old_size)));
+    return records_formatted;
 }
 
 const unsigned char* Axf1FileReader::mapped_data() const noexcept {

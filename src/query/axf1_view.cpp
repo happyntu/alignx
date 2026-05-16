@@ -120,17 +120,19 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
     const auto& ref_name = reader->index().references.at(*ref_id).name;
 
     constexpr std::size_t kParallelThreshold = 16;
-    const bool use_parallel =
-        !filter.is_active() && hits->size() >= kParallelThreshold;
+    const bool use_parallel = hits->size() >= kParallelThreshold;
 
     if (use_parallel) {
         const std::size_t num_workers =
             std::min<std::size_t>(std::thread::hardware_concurrency(), 8);
 
         struct ChunkResult {
-            std::string output;
+            std::size_t worker_id = 0;
+            std::size_t buffer_offset = 0;
+            std::size_t buffer_length = 0;
             std::size_t records_scanned = 0;
             std::size_t records_matched = 0;
+            std::size_t records_filtered = 0;
             std::uint64_t bytes_read = 0;
             std::uint64_t payload_bytes = 0;
         };
@@ -138,15 +140,27 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
         const auto decode_start = Clock::now();
         const bool use_mmap = reader->mapped_data() != nullptr;
 
-        // Pre-allocate result slots for all chunks
         std::vector<std::expected<ChunkResult, std::string>> results(hits->size());
 
-        // Thread pool with work-stealing via atomic index
         std::atomic<std::size_t> next_chunk{0};
         const std::size_t total_chunks = hits->size();
         const auto& columns_ref = kAllViewColumns;
+        const bool filter_active = filter.is_active();
 
-        auto worker_fn = [&]() {
+        std::vector<std::string> worker_buffers(num_workers);
+        {
+            std::uint64_t total_payload = 0;
+            for (const auto* entry : *hits) {
+                total_payload += entry->chunk_length;
+            }
+            const std::size_t per_worker = static_cast<std::size_t>(total_payload * 3 / num_workers);
+            for (auto& buf : worker_buffers) {
+                buf.reserve(per_worker);
+            }
+        }
+
+        auto worker_fn = [&](std::size_t my_id) {
+            auto& buf = worker_buffers[my_id];
             while (true) {
                 const std::size_t idx = next_chunk.fetch_add(1, std::memory_order_relaxed);
                 if (idx >= total_chunks) {
@@ -154,51 +168,56 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
                 }
                 const format::Axf1ChunkIndexEntry* chunk_entry = (*hits)[idx];
 
-                std::expected<ChunkResult, std::string> result;
                 if (use_mmap) {
                     const unsigned char* chunk_data =
                         reader->mapped_data() + chunk_entry->chunk_offset;
-                    auto chunk = format::Axf1FileReader::decode_chunk_mapped(
-                        chunk_data, chunk_entry->chunk_length, *chunk_entry, columns_ref);
-                    if (!chunk) {
-                        results[idx] = std::unexpected(chunk.error());
-                        continue;
-                    }
-                    ChunkResult cr;
-                    cr.bytes_read = chunk_entry->chunk_length;
-                    cr.payload_bytes = chunk_entry->chunk_length;
-
-                    const bool is_interior_chunk =
+                    const bool is_interior =
                         chunk_entry->start_pos >= parsed_region->start &&
                         chunk_entry->end_pos <= parsed_region->end;
 
-                    if (is_interior_chunk) {
+                    ChunkResult cr;
+                    cr.worker_id = my_id;
+                    cr.buffer_offset = buf.size();
+                    cr.bytes_read = chunk_entry->chunk_length;
+                    cr.payload_bytes = chunk_entry->chunk_length;
+
+                    if (filter_active) {
+                        auto chunk = format::Axf1FileReader::decode_chunk_mapped(
+                            chunk_data, chunk_entry->chunk_length, *chunk_entry, columns_ref);
+                        if (!chunk) {
+                            results[idx] = std::unexpected(chunk.error());
+                            continue;
+                        }
                         cr.records_scanned = chunk->records.size();
-                        cr.records_matched = chunk->records.size();
                         for (std::size_t i = 0; i < chunk->records.size(); ++i) {
-                            format::append_axf1_sam_record(cr.output, chunk->records[i], ref_name);
+                            const auto& rec = chunk->records[i];
+                            if (!is_interior) {
+                                auto overlaps = record_overlaps_region(rec, *parsed_region);
+                                if (!overlaps) {
+                                    results[idx] = std::unexpected(overlaps.error());
+                                    return;
+                                }
+                                if (!*overlaps) continue;
+                            }
+                            if ((rec.flag & filter.flag_exclude) != 0) continue;
+                            if (rec.mapq < filter.min_mapq) continue;
+                            cr.records_matched += 1;
+                            format::append_axf1_sam_record(buf, rec, ref_name);
                         }
                     } else {
-                        for (std::size_t i = 0; i < chunk->records.size(); ++i) {
-                            cr.records_scanned += 1;
-                            auto overlaps =
-                                record_overlaps_region(chunk->records[i], *parsed_region);
-                            if (!overlaps) {
-                                results[idx] = std::unexpected(overlaps.error());
-                                return;
-                            }
-                            if (!*overlaps) {
-                                continue;
-                            }
-                            cr.records_matched += 1;
-                            format::append_axf1_sam_record(cr.output, chunk->records[i], ref_name);
+                        cr.records_scanned = chunk_entry->record_count;
+                        auto formatted = format::Axf1FileReader::decode_chunk_to_sam_append(
+                            chunk_data, chunk_entry->chunk_length, *chunk_entry, ref_name,
+                            is_interior, parsed_region->start, parsed_region->end, buf);
+                        if (!formatted) {
+                            results[idx] = std::unexpected(formatted.error());
+                            continue;
                         }
+                        cr.records_matched = *formatted;
                     }
-                    results[idx] = std::move(cr);
+                    cr.buffer_length = buf.size() - cr.buffer_offset;
+                    results[idx] = cr;
                 } else {
-                    // Fallback: read_chunk_raw requires ifstream (not thread-safe)
-                    // This path shouldn't be reached in parallel mode on non-mmap systems
-                    // but kept for correctness on Windows
                     results[idx] = std::unexpected(
                         std::string("parallel decode requires mmap"));
                 }
@@ -209,16 +228,14 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
             std::vector<std::thread> workers;
             workers.reserve(num_workers);
             for (std::size_t i = 0; i < num_workers; ++i) {
-                workers.emplace_back(worker_fn);
+                workers.emplace_back(worker_fn, i);
             }
             for (auto& w : workers) {
                 w.join();
             }
         } else {
-            // Non-mmap fallback: sliding-window async with sequential main-thread reads
-            std::deque<std::pair<std::size_t, std::future<std::expected<ChunkResult, std::string>>>>
-                in_flight;
-
+            // Non-mmap fallback: sequential decode with append
+            auto& buf = worker_buffers[0];
             for (std::size_t idx = 0; idx < total_chunks; ++idx) {
                 const format::Axf1ChunkIndexEntry* chunk_entry = (*hits)[idx];
                 auto chunk_bytes = reader->read_chunk_raw(*chunk_entry);
@@ -227,61 +244,38 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
                     break;
                 }
 
-                auto fut = std::async(
-                    std::launch::async,
-                    [bytes = std::move(*chunk_bytes), entry = *chunk_entry, &columns_ref,
-                     &parsed_region, &ref_name]() -> std::expected<ChunkResult, std::string> {
-                        auto chunk = format::Axf1FileReader::decode_chunk_raw(
-                            bytes, entry, columns_ref);
-                        if (!chunk) {
-                            return std::unexpected(chunk.error());
-                        }
-                        ChunkResult cr;
-                        cr.bytes_read = bytes.size();
-                        cr.payload_bytes = bytes.size();
-
-                        const bool is_interior =
-                            entry.start_pos >= parsed_region->start &&
-                            entry.end_pos <= parsed_region->end;
-
-                        if (is_interior) {
-                            cr.records_scanned = chunk->records.size();
-                            cr.records_matched = chunk->records.size();
-                            for (std::size_t i = 0; i < chunk->records.size(); ++i) {
-                                format::append_axf1_sam_record(
-                                    cr.output, chunk->records[i], ref_name);
-                            }
-                        } else {
-                            for (std::size_t i = 0; i < chunk->records.size(); ++i) {
-                                cr.records_scanned += 1;
-                                auto overlaps =
-                                    record_overlaps_region(chunk->records[i], *parsed_region);
-                                if (!overlaps) {
-                                    return std::unexpected(overlaps.error());
-                                }
-                                if (!*overlaps) {
-                                    continue;
-                                }
-                                cr.records_matched += 1;
-                                format::append_axf1_sam_record(
-                                    cr.output, chunk->records[i], ref_name);
-                            }
-                        }
-                        return cr;
-                    });
-
-                in_flight.emplace_back(idx, std::move(fut));
-
-                while (in_flight.size() >= num_workers) {
-                    auto& [result_idx, front_fut] = in_flight.front();
-                    results[result_idx] = front_fut.get();
-                    in_flight.pop_front();
+                auto chunk = format::Axf1FileReader::decode_chunk_raw(
+                    *chunk_bytes, *chunk_entry, columns_ref);
+                if (!chunk) {
+                    results[idx] = std::unexpected(chunk.error());
+                    continue;
                 }
-            }
-            while (!in_flight.empty()) {
-                auto& [result_idx, front_fut] = in_flight.front();
-                results[result_idx] = front_fut.get();
-                in_flight.pop_front();
+
+                ChunkResult cr;
+                cr.worker_id = 0;
+                cr.buffer_offset = buf.size();
+                cr.bytes_read = chunk_bytes->size();
+                cr.payload_bytes = chunk_bytes->size();
+
+                const bool is_interior =
+                    chunk_entry->start_pos >= parsed_region->start &&
+                    chunk_entry->end_pos <= parsed_region->end;
+
+                cr.records_scanned = chunk->records.size();
+                for (std::size_t i = 0; i < chunk->records.size(); ++i) {
+                    if (!is_interior) {
+                        auto overlaps = record_overlaps_region(chunk->records[i], *parsed_region);
+                        if (!overlaps) {
+                            results[idx] = std::unexpected(overlaps.error());
+                            break;
+                        }
+                        if (!*overlaps) continue;
+                    }
+                    cr.records_matched += 1;
+                    format::append_axf1_sam_record(buf, chunk->records[i], ref_name);
+                }
+                cr.buffer_length = buf.size() - cr.buffer_offset;
+                results[idx] = cr;
             }
         }
 
@@ -293,16 +287,18 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
             }
             profile.records_scanned += result->records_scanned;
             profile.records_matched += result->records_matched;
+            profile.records_filtered += result->records_filtered;
             profile.records_output += result->records_matched;
             profile.output_bytes_read += result->bytes_read;
             profile.output_payload_bytes += result->payload_bytes;
-            if (!result->output.empty()) {
+            if (result->buffer_length > 0) {
                 profile.chunks_with_matches += 1;
                 const auto write_start = Clock::now();
-                out.write(result->output.data(),
-                          static_cast<std::streamsize>(result->output.size()));
+                out.write(worker_buffers[result->worker_id].data() +
+                              static_cast<std::streamsize>(result->buffer_offset),
+                          static_cast<std::streamsize>(result->buffer_length));
                 profile.write_time += Clock::now() - write_start;
-                profile.stdout_bytes += result->output.size();
+                profile.stdout_bytes += result->buffer_length;
             }
         }
         profile.output_decode_time += Clock::now() - decode_start;
@@ -310,7 +306,7 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
         return {};
     }
 
-    // Sequential path (small chunk count or filter active)
+    // Sequential path (small chunk count)
     std::string output;
     for (const format::Axf1ChunkIndexEntry* chunk_entry : *hits) {
         if (!filter.is_active()) {

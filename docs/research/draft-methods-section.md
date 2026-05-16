@@ -96,12 +96,12 @@ AXF1 lossless encoding is comparable to BAM extraction (1.07x-1.18x). AXF1 lossy
 
 | Config | chr1:1M-2M (ms) | chrY:20M-21M (ms) | chr1:121M-142M (ms) |
 |:---|---:|---:|---:|
-| BAM (samtools) | 280 | 193 | 3,850 |
+| BAM (samtools) | 221 | 158 | 3,328 |
 | BAM (samtools -@8) | — | 134 | ~1,050 |
 | CRAM | 673 (2.7x) | 376 (2.1x) | 11,411 (2.9x) |
-| AXF1 (mmap+pool) | **63 (4.4x)** | **48 (4.0x)** | **1,075 (3.6x)** |
+| AXF1 (fused decode) | **56 (3.9x)** | **42 (3.8x)** | **1,064 (3.1x)** |
 
-AXF1 lossless full-record decode with mmap, thread pool, zero-copy decode, and interior chunk skip is **3.6x-4.4x faster than samtools view** across all regions. The file is memory-mapped on Linux; a fixed pool of 8 worker threads reads directly from mapped memory via atomic work-stealing, decoding columns directly from mapped pointers (no intermediate copies), and formatting SAM in parallel, with results written in chunk order. Interior chunks (fully contained within the query region) skip CIGAR-based overlap checking. On the centromeric 21 Mb region (6,878 chunks, 58,168 records, 1.12 GB payload), 8-thread mmap decode achieves ~1.04 GB/s effective throughput. Against samtools -@8 (parallel BGZF decompression), AXF1 is **2.8x faster on 1 Mb regions** and at parity on the centromeric 21 Mb region.
+AXF1 lossless full-record decode with mmap, thread pool, fused columnar-to-SAM formatting, and interior chunk skip is **3.1x-3.9x faster than samtools view** across all regions. The file is memory-mapped on Linux; a fixed pool of 8 worker threads reads directly from mapped memory via atomic work-stealing. The fused decode path decodes all columns into columnar arrays and formats SAM directly without intermediate per-record struct allocation. Interior chunks (fully contained within the query region) skip CIGAR-based overlap checking. On the centromeric 21 Mb region (6,878 chunks, 58,168 records, 1.12 GB payload), 8-thread fused decode achieves ~1.05 GB/s effective throughput.
 
 ## Query Benchmark
 
@@ -124,16 +124,15 @@ AXF1 pileup reads only POS and CIGAR columns, skipping QUAL, SEQ, QNAME, and TAG
 | samtools depth (filtered) | 329 | 265 | 4,978 |
 | alignx pileup AXF1 (filtered) | **222** | 290 | 8,587 |
 
-When read filters are active (FLAG exclude unmapped, secondary, supplementary; MAPQ ≥ 20), the AXF1 pileup path adds FLAG and MAPQ columns to the selective I/O set (POS+CIGAR+FLAG+MAPQ). AXF1 is faster on chr1:1M-2M (1.49x) but slightly slower on chrY:20M-21M (0.92x) and the centromeric region (0.58x). The filter itself has minimal impact on pileup timing because few reads in this HG002 PacBio dataset are excluded by FLAG 2308 + MAPQ 20.
+When read filters are active (FLAG exclude unmapped, secondary, supplementary; MAPQ ≥ 20), the AXF1 pileup path adds FLAG and MAPQ columns to the selective I/O set (POS+CIGAR+FLAG+MAPQ). AXF1 is faster on chr1:1M-2M (1.49x) but slightly slower on chrY:20M-21M (0.92x) and the centromeric region (0.58x). The filter itself has minimal impact on pileup timing because few reads in this HG002 PacBio dataset are excluded by FLAG 2308 + MAPQ 20. Note: pileup uses sequential processing (no thread pool); the parallel optimization applies to view only.
 
 ### View (Full-Record Output)
 
 | Tool | chr1:1M-2M (ms) | chrY:20M-21M (ms) | chr1:121M-142M (ms) |
 |:---|---:|---:|---:|
-| samtools view | 280 | 193 | 3,850 |
-| samtools view -@8 | — | 134 | ~1,050 |
-| alignx view (AXF1, mmap+pool) | **63** | **48** | **1,075** |
-| samtools view (filtered) | 576 | 322 | 4,078 |
-| alignx view AXF1 (filtered) | **468** | **319** | 5,034 |
+| samtools view | 236 | 169 | 3,223 |
+| alignx view (AXF1) | **44** | **35** | **854** |
+| samtools view (filtered) | 224 | 162 | 2,594 |
+| alignx view AXF1 (filtered) | **42** | **32** | **500** |
 
-With mmap + thread pool + zero-copy + interior chunk skip (8 workers), AXF1 view is **4.0x-4.4x faster than samtools on 1 Mb regions** (63 ms vs 280 ms on chr1:1M-2M, 48 ms vs 193 ms on chrY:20M-21M) and **3.6x faster on the centromeric 21 Mb region** (1,075 ms vs 3,850 ms). Against samtools -@8 (parallel BGZF), AXF1 is **2.8x faster** on chrY:20M-21M and at parity on centromeric. The filtered path still uses sequential two-pass decode; filtered numbers are from batch 1 formal benchmark. Note: unfiltered (mmap+pool) numbers are from batch 4 manual runs on an 88-core server; actual speedup depends on available cores.
+With mmap + thread pool + fused decode + worker-local buffers (8 workers), AXF1 view is **4.8x-5.4x faster than samtools on 1 Mb regions** (44 ms vs 236 ms on chr1:1M-2M, 35 ms vs 169 ms on chrY:20M-21M) and **3.8x faster on the centromeric 21 Mb region** (854 ms vs 3,223 ms). The fused decode path decodes all columns into columnar arrays and formats SAM directly without per-record struct allocation. Worker-local buffers reduce heap allocations from one per chunk (~6,878 on centromeric) to one per worker (8 total), eliminating the dominant deallocation overhead. The filtered path decodes all columns in a single pass, applies FLAG/MAPQ check inline, and formats only matched records — achieving **5.1x-5.3x faster** than samtools filtered. Filtered centromeric (500 ms) is faster than unfiltered (854 ms) because excluded records skip SAM formatting. Note: all numbers are from manual runs on an 88-core server; actual speedup depends on available cores.

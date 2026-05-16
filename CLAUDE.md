@@ -112,7 +112,12 @@ Completed:
 - AXF1 view mmap + thread pool: memory-mapped file on Linux (`mmap` + `MADV_SEQUENTIAL`); fixed thread pool with atomic work-stealing replaces per-chunk `std::async`. Eliminates main-thread I/O serialization and thread creation overhead.
 - AXF1 zero-copy decode: all 15 decode functions refactored from `const std::vector<unsigned char>&` to `const unsigned char*, size_t`. `decode_chunk_mapped` reads directly from mmap'd memory without intermediate copies. `slice_column_payload` returns `PayloadSlice{ptr, size}` instead of vector copy.
 - AXF1 interior chunk skip: chunks fully contained within query region skip per-record CIGAR overlap check. Eliminates ~58K CIGAR string parses on centromeric.
-- Result: AXF1 view **3.6x-4.4x faster than samtools** (63 ms vs 280 ms chr1:1M-2M, 48 ms vs 193 ms chrY:20M-21M, 1,075 ms vs 3,850 ms centromeric); at parity with samtools -@8 on centromeric, **2.8x faster** on 1 Mb regions
+- AXF1 parallel filtered view: mmap + thread pool extended to filtered queries. Each worker performs single-pass all-column decode + inline filter from mapped memory. Previously sequential-only.
+- AXF1 fused decode: `decode_chunk_to_sam_mapped` decodes all columns into columnar arrays (`ColumnarDecode`) and formats SAM directly without intermediate `Axf1Record` struct allocation. Eliminates per-record string moves.
+- AXF1 view branchless QUAL decode: direct bit-position calculation replaces serial accumulator dependency chain. FlatColumn SEQ/QUAL: single contiguous buffer + offset array eliminates per-record heap allocations.
+- AXF1 view worker-local buffer reuse: each worker thread accumulates all chunk outputs into one pre-reserved `std::string`. `ChunkResult` stores offset+length into worker buffer. Reduces allocations from N chunks to 8 workers.
+- Result (unfiltered): AXF1 view **3.8x-5.4x faster than samtools** (44 ms vs 236 ms chr1:1M-2M, 35 ms vs 169 ms chrY:20M-21M, 854 ms vs 3,223 ms centromeric)
+- Result (filtered): AXF1 view **5.1x-5.3x faster than samtools filtered** (42 ms vs 224 ms chr1:1M-2M, 32 ms vs 162 ms chrY:20M-21M, 500 ms vs 2,594 ms centromeric)
 - `alignx index <axf1>` rebuilds `.axf.idx` from AXF1 chunk index metadata via `convert_axf1_index_to_axf()`
 - `BamWriter` RAII HTSlib wrapper in `src/io/bam_writer.hpp/.cpp`: `sam_parse1()` + `sam_write1()` approach for Phase 1 correctness
 - `convert_axf1_to_bam()` in `src/convert/axf_to_bam.hpp/.cpp`: reads all AXF1 chunks sequentially, formats SAM lines, writes via BamWriter
