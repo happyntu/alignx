@@ -2390,4 +2390,38 @@ read_axf1_chunk_columns_profiled(const std::filesystem::path& path,
     return decode_chunk_bytes(*bytes, chunk, columns, &profile);
 }
 
+std::string format_axf1_sam_record(const Axf1Record& record, const std::string& reference) {
+    std::string line;
+    line.reserve(record.qname.size() + reference.size() + record.cigar.size() +
+                 record.mate_reference.size() + record.sequence.size() + record.quality.size() +
+                 record.tags.size() + 64);
+    line.append(record.qname);
+    line.push_back('\t');
+    line.append(std::to_string(record.flag));
+    line.push_back('\t');
+    line.append(reference);
+    line.push_back('\t');
+    line.append(std::to_string(record.pos + 1));
+    line.push_back('\t');
+    line.append(std::to_string(record.mapq));
+    line.push_back('\t');
+    line.append(record.cigar);
+    line.push_back('\t');
+    line.append(record.mate_reference);
+    line.push_back('\t');
+    line.append(std::to_string(record.mate_pos <= 0 ? 0 : record.mate_pos + 1));
+    line.push_back('\t');
+    line.append(std::to_string(record.template_length));
+    line.push_back('\t');
+    line.append(record.sequence);
+    line.push_back('\t');
+    line.append(record.quality);
+    if (!record.tags.empty()) {
+        line.push_back('\t');
+        line.append(record.tags);
+    }
+    line.push_back('\n');
+    return line;
+}
+
 } // namespace alignx::format

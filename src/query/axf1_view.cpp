@@ -40,40 +40,6 @@ std::expected<bool, std::string> record_overlaps_region(const format::Axf1Record
     return half_open_intervals_overlap(record.pos, record.pos + *span, region.start, region.end);
 }
 
-std::string format_sam_record(const format::Axf1Record& record, const std::string& reference) {
-    std::string line;
-    line.reserve(record.qname.size() + reference.size() + record.cigar.size() +
-                 record.mate_reference.size() + record.sequence.size() + record.quality.size() +
-                 record.tags.size() + 64);
-    line.append(record.qname);
-    line.push_back('\t');
-    line.append(std::to_string(record.flag));
-    line.push_back('\t');
-    line.append(reference);
-    line.push_back('\t');
-    line.append(std::to_string(record.pos + 1));
-    line.push_back('\t');
-    line.append(std::to_string(record.mapq));
-    line.push_back('\t');
-    line.append(record.cigar);
-    line.push_back('\t');
-    line.append(record.mate_reference);
-    line.push_back('\t');
-    line.append(std::to_string(record.mate_pos <= 0 ? 0 : record.mate_pos + 1));
-    line.push_back('\t');
-    line.append(std::to_string(record.template_length));
-    line.push_back('\t');
-    line.append(record.sequence);
-    line.push_back('\t');
-    line.append(record.quality);
-    if (!record.tags.empty()) {
-        line.push_back('\t');
-        line.append(record.tags);
-    }
-    line.push_back('\n');
-    return line;
-}
-
 void merge_output_columns(format::Axf1Chunk& target, format::Axf1Chunk&& source) {
     for (std::size_t index = 0; index < target.records.size(); ++index) {
         auto& target_record = target.records.at(index);
@@ -196,7 +162,7 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
 
         const auto format_start = Clock::now();
         for (std::size_t record_index : matching_records) {
-            output.append(format_sam_record(filter_chunk->records.at(record_index),
+            output.append(format::format_axf1_sam_record(filter_chunk->records.at(record_index),
                                             reader->index().references.at(*ref_id).name));
             profile.records_output += 1;
         }

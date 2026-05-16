@@ -867,6 +867,46 @@ TEST(Cli, PileupAxf1FilterMatchesBamFilter) {
     std::filesystem::remove_all(temp_dir);
 }
 
+TEST(Cli, ExportToyAxf1OutputsBam) {
+    const auto temp_dir = make_temp_dir("alignx_cli_export");
+    const auto axf1_path = temp_dir / "toy.axf1";
+    const auto bam_path = temp_dir / "exported.bam";
+
+    std::ostringstream convert_out;
+    std::ostringstream convert_err;
+    const int convert_code = run_cli(
+        {"alignx", "convert", toy_bam_path().string(), "-o", axf1_path.string(), "--format", "AXF1"},
+        convert_out, convert_err);
+    ASSERT_EQ(convert_code, 0) << convert_err.str();
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code =
+        run_cli({"alignx", "export", axf1_path.string(), "-o", bam_path.string()}, out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_NE(out.str().find("input\t"), std::string::npos);
+    EXPECT_NE(out.str().find("output\t"), std::string::npos);
+    EXPECT_TRUE(std::filesystem::is_regular_file(bam_path));
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ExportRejectsNonAxf1Input) {
+    const auto temp_dir = make_temp_dir("alignx_cli_export_reject");
+    const auto bam_path = temp_dir / "exported.bam";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code =
+        run_cli({"alignx", "export", toy_bam_path().string(), "-o", bam_path.string()}, out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_NE(err.str().find("input must be an AXF1 file"), std::string::npos);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
 #else
 
 TEST(Cli, ConvertReportsMissingHtslib) {

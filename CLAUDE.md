@@ -104,14 +104,15 @@ Completed:
 - `scripts/bench_pileup.sh` pileup benchmark harness: compares `samtools depth`, `alignx pileup <bam>`, `alignx pileup <axf1>` with SHA-based correctness preflight, warmup, repeats, and median/p95/outlier summary TSV
 - Pileup integration tests: `PileupFullRangeFidelity` (hardcoded expected depth for chrToy:101-160), `PileupAxf1MatchesBamPileup` (BAM→AXF1→pileup byte-identical), `PileupAxf1FilterMatchesBamFilter` (`--flag-exclude 16` parity across BAM and AXF1 paths)
 - Remote HG002 pileup benchmark: AXF1 1.47x faster (chr1:1M-2M), 1.11x faster (chrY:20M-21M), 0.82x (chr1:121M-142M centromeric) vs samtools depth; AXF1 1.28x–2.07x faster than BAM full-record parse. See `docs/research/phase2-pileup-benchmark-results.md`.
-
-Remaining implementation targets:
-- Round-trip fidelity: BAM → AXF → BAM → diff
-  - AXF1 round-trip smoke now supports `scripts/smoke_axf_roundtrip.sh --format AXF1`; a direct AXF export path is still not implemented
-  - Toy AXF1 roundtrip smoke passed with `scripts/smoke_axf_roundtrip.sh --format AXF1` on `tests/toy_data/toy_alignment.sorted.bam`
-- Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
-  - Timed benchmark completed on missmi-server00 for chr1:1000000-2000000, chr1:121000000-142000000, and chrY:20000000-21000000; AXF1 view was correct but slower than BAM-backed view on all tested regions, so the v0.3 success criterion is not met yet
-  - AXF1 profiling hooks and remote correctness preflight are now in place; the next optimization pass should target output-column decode cost first
+- AXF1 selective column I/O coverage benchmark completed on HG002: 2.97x faster (chr1:1M-2M), 1.16x faster (chr1:121M-142M), 2.22x faster (chrY:20M-21M) vs BAM full-record parse. See `docs/research/phase1-axf1-coverage-benchmark-results.md`.
+- `format_axf1_sam_record()` promoted from anonymous namespace in `axf1_view.cpp` to shared function in `format/axf1_file.hpp/.cpp` for reuse by view and export paths
+- `BamWriter` RAII HTSlib wrapper in `src/io/bam_writer.hpp/.cpp`: `sam_parse1()` + `sam_write1()` approach for Phase 1 correctness
+- `convert_axf1_to_bam()` in `src/convert/axf_to_bam.hpp/.cpp`: reads all AXF1 chunks sequentially, formats SAM lines, writes via BamWriter
+- `alignx export <axf1> -o <bam>` CLI subcommand: detects AXF1 input, calls `convert_axf1_to_bam()`
+- Round-trip fidelity: BAM → AXF1 → BAM → SAM diff verified on toy data; AXF1 stores mapped records only so unmapped are filtered from comparison
+- `scripts/smoke_axf_roundtrip.sh --roundtrip-bam` extends smoke to verify BAM→AXF1→BAM→SAM parity
+- Export unit tests: `ExportToyAxf1ToBam`, `ExportEmptyAxf1ProducesValidBam`, `ExportToyBamRoundtripSamDiff` in `tests/unit/test_axf_to_bam.cpp`
+- Export CLI tests: `Cli.ExportToyAxf1OutputsBam`, `Cli.ExportRejectsNonAxf1Input` in `tests/unit/test_cli.cpp`
 
 ## Build & Test Commands
 

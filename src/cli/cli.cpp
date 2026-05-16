@@ -20,6 +20,7 @@
 
 #include "analysis/stats.hpp"
 #include "cli/runner.hpp"
+#include "convert/axf_to_bam.hpp"
 #include "convert/bam_to_axf.hpp"
 #include "format/axf1_file.hpp"
 #include "index/axf_index.hpp"
@@ -761,6 +762,16 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
         ->check(::CLI::ExistingFile);
     index_cmd->add_option("-o,--output", index_output, "Output .axf.idx path");
 
+    std::filesystem::path export_input;
+    std::filesystem::path export_output;
+    int export_hts_threads = -1;
+    auto* export_cmd = app.add_subcommand("export", "Export AXF1 to BAM");
+    export_cmd->add_option("input", export_input, "Input AXF1 file")
+        ->required()
+        ->check(::CLI::ExistingFile);
+    export_cmd->add_option("-o,--output", export_output, "Output BAM file")->required();
+    export_cmd->add_option("--hts-threads", export_hts_threads, "HTSlib worker threads");
+
     try {
         app.parse(argc, argv);
     } catch (const ::CLI::ParseError& error) {
@@ -815,6 +826,27 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     }
     if (*index_cmd) {
         return run_index(index_input, index_output, out, err);
+    }
+    if (*export_cmd) {
+        const auto format = detect_view_input_format(export_input);
+        if (format != ViewInputFormat::axf1) {
+            err << "alignx export: input must be an AXF1 file\n";
+            return 1;
+        }
+        if (export_hts_threads < -1) {
+            err << "alignx export: --hts-threads must be a non-negative integer\n";
+            return 1;
+        }
+        const auto hts_threads =
+            export_hts_threads >= 0 ? std::optional<int>{export_hts_threads} : std::nullopt;
+        auto result = convert::convert_axf1_to_bam(export_input, export_output, hts_threads);
+        if (!result) {
+            err << "alignx export: " << result.error() << '\n';
+            return 1;
+        }
+        out << "input\t" << export_input.string() << '\n';
+        out << "output\t" << export_output.string() << '\n';
+        return 0;
     }
 
     err << "alignx: no command selected\n";

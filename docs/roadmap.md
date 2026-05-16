@@ -110,9 +110,12 @@ and region-query correctness.
 - [x] AXF1 QUAL query-impact observation design note: define future benchmark axes for wrapper vs QUAL-specific model
 - [x] AXF1 lazy output-column decode for matched records (now uses selective I/O for both filter and output passes)
 - [x] `alignx coverage` subcommand: POS-only AXF1 selective column decode for per-base coverage, with BAM full-record baseline and profiling hook
-- [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
-- [ ] `AxfFileReader`: chunk seek, per-column read
-- [ ] Codec design: SEQ reference-delta with reference identity metadata
+- [x] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
+  - Implemented as `write_chunk()` / `write_axf1_file()` functional pipeline in `axf1_file.cpp`
+- [x] `AxfFileReader`: chunk seek, per-column read
+  - `Axf1FileReader` class with persistent ifstream, `read_chunk_columns_selective()`, used by `axf1_view.cpp` and `axf1_coverage.cpp`
+- [x] Codec design: SEQ reference-delta with reference identity metadata
+  - Deferred per `docs/research/axf1-seq-codec-design.md`: prerequisites include reference dictionary, CIGAR-driven reconstruction, strand semantics. Current `seq_2bit_literal` meets immediate needs.
 - [x] Production AXF1 chunk sizing policy design: byte budget, genomic span, record count hybrid
 - [x] Implement production AXF1 hybrid chunk sizing in converter
 - [x] Tune AXF1 chunk sizing thresholds on HG002-style data
@@ -120,8 +123,10 @@ and region-query correctness.
   - Remote benchmark preflight passed for the final comparison regions; ready-to-run candidates are baseline vs span_tight, but timed repeats still need explicit confirmation.
   - Timed benchmark results show span_tight is not a universal win: it is slightly faster on chr1:121000000-142000000 but slower on chr1:1000000-2000000 and chrY:20000000-21000000, so keep the current conservative byte-budget default.
   - Final recommendation: keep the hybrid default at 256 KiB target / 512 KiB max / 4096 records / 1,000,000 bp span, and do not promote span_tight.
-- [ ] Round-trip fidelity: BAM → AXF → BAM → diff
-  - AXF1 round-trip smoke now uses `scripts/smoke_axf_roundtrip.sh --format AXF1`; the remaining gap is a true AXF export path if/when we decide the round-trip target must emit BAM directly.
+- [x] Round-trip fidelity: BAM → AXF → BAM → diff
+  - `alignx export <axf1> -o <bam>` writes BAM via HTSlib `sam_parse1` + `sam_write1`
+  - `ExportToyBamRoundtripSamDiff` test: toy.bam → AXF1 → export BAM → SAM lines identical
+  - `scripts/smoke_axf_roundtrip.sh --roundtrip-bam` extends the smoke to verify BAM→AXF→BAM→SAM parity
 - [x] Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
   - Prior `alignx view` benchmark measured full-record decode and was 4.5-5.9x slower than BAM; that comparison exercises output-column decode, not the selective-column advantage.
   - `alignx coverage` with `read_chunk_columns_selective` reads only chunk header + POS+CIGAR payloads. Persistent ifstream avoids repeated file open/close.
@@ -139,7 +144,10 @@ and region-query correctness.
 **Deliverables:**
 
 - [ ] CRAM reader via HTSlib
-- [ ] `alignx export <axf> -o <bam|cram>`
+- [x] `alignx export <axf> -o <bam|cram>`
+  - AXF1→BAM path implemented via `BamWriter` (HTSlib `sam_parse1` + `sam_write1`)
+  - `format_axf1_sam_record()` promoted to shared function in `format/axf1_file.hpp/.cpp`
+  - CRAM output deferred until CRAM reader is available
 - [ ] AXF index: HTTP-range-friendly chunk map (contiguous offsets, no random seeks)
 - [ ] Integration test: CRAM → AXF → BAM fidelity
 

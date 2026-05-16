@@ -7,6 +7,7 @@ REGION=""
 WORK_DIR=""
 FORMAT="AXF0"
 AXF1_QUALITY_COMPRESSION="none"
+ROUNDTRIP_BAM=0
 
 usage() {
   cat <<'USAGE'
@@ -27,6 +28,7 @@ Options:
                      output AXF format for the convert step (default: AXF0)
   --axf1-quality-compression <none|zstd>
                      pass AXF1 quality compression to alignx convert (default: none)
+  --roundtrip-bam    also export AXF back to BAM and verify SAM identity
   -h, --help         show this help
 
 This script performs no timing, repeats, profiling, or benchmark reporting.
@@ -58,6 +60,10 @@ while [[ $# -gt 0 ]]; do
     --axf1-quality-compression)
       AXF1_QUALITY_COMPRESSION="$2"
       shift 2
+      ;;
+    --roundtrip-bam)
+      ROUNDTRIP_BAM=1
+      shift
       ;;
     -h|--help)
       usage
@@ -162,3 +168,26 @@ echo "diff	$DIFF_OUT"
 echo "records	$RECORDS"
 echo "bam_stdout_bytes	$BAM_BYTES"
 echo "axf_stdout_bytes	$AXF_BYTES"
+
+if [[ "$ROUNDTRIP_BAM" -eq 1 ]]; then
+  EXPORTED_BAM="$WORK_DIR/exported.bam"
+  EXPORTED_BAM_SAM="$WORK_DIR/exported_bam.sam"
+  EXPORT_DIFF_OUT="$WORK_DIR/export_diff.txt"
+
+  rm -f "$EXPORTED_BAM" "$EXPORTED_BAM_SAM" "$EXPORT_DIFF_OUT"
+
+  "$ALIGNX" export "$AXF_FILE" -o "$EXPORTED_BAM"
+  "$ALIGNX" view "$EXPORTED_BAM" "$REGION" >"$EXPORTED_BAM_SAM"
+
+  if ! diff -u "$BAM_SAM" "$EXPORTED_BAM_SAM" >"$EXPORT_DIFF_OUT"; then
+    echo "FAIL export_roundtrip: BAM→AXF→BAM SAM outputs differ" >&2
+    echo "  bam_sam:          $BAM_SAM" >&2
+    echo "  exported_bam_sam: $EXPORTED_BAM_SAM" >&2
+    echo "  diff:             $EXPORT_DIFF_OUT" >&2
+    exit 1
+  fi
+
+  echo "OK export_roundtrip"
+  echo "exported_bam	$EXPORTED_BAM"
+  echo "exported_bam_sam	$EXPORTED_BAM_SAM"
+fi

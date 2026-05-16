@@ -194,4 +194,7 @@ read_axf1_chunk_columns_profiled(const std::filesystem::path& path,
                                  const std::vector<Axf1ColumnId>& columns,
                                  Axf1ChunkReadProfile& profile);
 
+[[nodiscard]] std::string format_axf1_sam_record(const Axf1Record& record,
+                                                  const std::string& reference);
+
 } // namespace alignx::format
