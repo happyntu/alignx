@@ -74,6 +74,22 @@ std::string format_sam_record(const format::Axf1Record& record, const std::strin
     return line;
 }
 
+void merge_output_columns(format::Axf1Chunk& target, format::Axf1Chunk&& source) {
+    for (std::size_t index = 0; index < target.records.size(); ++index) {
+        auto& target_record = target.records.at(index);
+        auto& source_record = source.records.at(index);
+        target_record.qname = std::move(source_record.qname);
+        target_record.flag = source_record.flag;
+        target_record.mapq = source_record.mapq;
+        target_record.mate_reference = std::move(source_record.mate_reference);
+        target_record.mate_pos = source_record.mate_pos;
+        target_record.template_length = source_record.template_length;
+        target_record.sequence = std::move(source_record.sequence);
+        target_record.quality = std::move(source_record.quality);
+        target_record.tags = std::move(source_record.tags);
+    }
+}
+
 } // namespace
 
 std::expected<void, std::string> write_axf1_region_sam(const std::filesystem::path& input,
@@ -148,19 +164,26 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
         }
         profile.chunks_with_matches += 1;
 
-        format::Axf1ChunkReadProfile full_profile;
-        const auto full_decode_start = Clock::now();
-        auto output_chunk = reader->read_chunk_profiled(*chunk_entry, full_profile);
-        profile.full_decode_time += Clock::now() - full_decode_start;
+        format::Axf1ChunkReadProfile output_profile;
+        const auto output_decode_start = Clock::now();
+        auto output_chunk = reader->read_chunk_columns_profiled(
+            *chunk_entry,
+            {format::Axf1ColumnId::qname, format::Axf1ColumnId::flag, format::Axf1ColumnId::mapq,
+             format::Axf1ColumnId::mate_reference, format::Axf1ColumnId::mate_pos,
+             format::Axf1ColumnId::template_length, format::Axf1ColumnId::sequence,
+             format::Axf1ColumnId::quality, format::Axf1ColumnId::tags},
+            output_profile);
+        profile.output_decode_time += Clock::now() - output_decode_start;
         if (!output_chunk) {
             return std::unexpected(output_chunk.error());
         }
-        profile.full_chunk_bytes_read += full_profile.bytes_read;
-        profile.full_payload_bytes += full_profile.selected_payload_bytes;
+        profile.output_bytes_read += output_profile.bytes_read;
+        profile.output_payload_bytes += output_profile.selected_payload_bytes;
+        merge_output_columns(*filter_chunk, std::move(*output_chunk));
 
         const auto format_start = Clock::now();
         for (std::size_t record_index : matching_records) {
-            output.append(format_sam_record(output_chunk->records.at(record_index),
+            output.append(format_sam_record(filter_chunk->records.at(record_index),
                                             reader->index().references.at(*ref_id).name));
             profile.records_output += 1;
         }

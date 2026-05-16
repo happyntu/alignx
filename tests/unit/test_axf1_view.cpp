@@ -338,9 +338,9 @@ TEST(Axf1View, ProfileTracksSelectiveAndFullDecodeWork) {
     EXPECT_EQ(profile.records_matched, 1);
     EXPECT_EQ(profile.records_output, 1);
     EXPECT_GT(profile.selective_bytes_read, 0);
-    EXPECT_GT(profile.full_chunk_bytes_read, 0);
+    EXPECT_GT(profile.output_bytes_read, 0);
     EXPECT_GT(profile.selective_payload_bytes, 0);
-    EXPECT_GT(profile.full_payload_bytes, profile.selective_payload_bytes);
+    EXPECT_GT(profile.output_payload_bytes, profile.selective_payload_bytes);
     EXPECT_EQ(profile.stdout_bytes, out.str().size());
 
     std::filesystem::remove(path);

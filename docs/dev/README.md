@@ -262,10 +262,10 @@ The profile currently reports:
 
 - chunk selection counts
 - scanned / matched / output record counts
-- open, reference lookup, chunk query, selective decode, filter, full decode,
+- open, reference lookup, chunk query, selective decode, filter, output decode,
   format, and write timings
-- selective and full chunk byte counts
-- selective and full payload byte counts
+- selective and output chunk byte counts
+- selective and output payload byte counts
 - stdout bytes
 
 This is a profiling aid, not a benchmark harness. For large-data profiling on

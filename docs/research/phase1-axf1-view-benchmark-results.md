@@ -66,7 +66,7 @@ Status: correctness-only preflight completed on 2026-05-16.
 The new `ALIGNX_PROFILE_AXF1=1` hook preserved stdout parity and emitted the
 following AXF1-specific breakdown:
 
-| chunks_selected | chunks_with_matches | records_scanned | records_matched | selective_decode_ms | full_decode_ms | format_ms |
+| chunks_selected | chunks_with_matches | records_scanned | records_matched | selective_decode_ms | output_decode_ms | format_ms |
 |---:|---:|---:|---:|---:|---:|---:|
 | 7 | 7 | 64 | 64 | 7.168 | 147.566 | 5.452 |
 
@@ -79,10 +79,28 @@ Additional profile counters from the same run:
 - `write_ms=0.744`
 - `total_ms=162.221`
 - `selective_bytes_read=1,054,776`
-- `full_chunk_bytes_read=1,054,776`
+- `output_bytes_read=1,054,776`
 - `selective_payload_bytes=20,803`
-- `full_payload_bytes=1,053,110`
+- `output_payload_bytes=1,053,110`
 - `stdout_bytes=1,851,159`
+
+After the lazy output-column decode refactor, the same region was rerun on
+2026-05-16 with `/mypool/alignx/bin/alignx_axf1_lazy_output_20260516` and the
+same stdout SHA-256. The profile snapshot shifted to:
+
+| chunks_selected | chunks_with_matches | records_scanned | records_matched | selective_decode_ms | output_decode_ms | format_ms |
+|---:|---:|---:|---:|---:|---:|---:|
+| 7 | 7 | 64 | 64 | 7.924 | 136.490 | 5.160 |
+
+The narrower `chr1:1000000-1000500` preflight on the same binary produced a
+smaller matched set:
+
+| chunks_selected | chunks_with_matches | records_scanned | records_matched | selective_decode_ms | output_decode_ms | format_ms |
+|---:|---:|---:|---:|---:|---:|---:|
+| 4 | 4 | 40 | 39 | 5.381 | 84.403 | 3.228 |
+
+That confirms the lazy output-column split is working, and it starts paying off
+more clearly as the matched record count drops.
 
 This is not a timed benchmark result. It is a profiling-format and correctness
 preflight used to decide where the next AXF1 query-path optimization work should

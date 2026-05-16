@@ -93,8 +93,8 @@ Completed:
 - Benchmark scripts default to WSL release builds
 - Benchmark scripts emit raw timing TSV plus median/p95/outlier summary TSV
 - Remote HG002 chr1:1M-2M engineering benchmark completed for `alignx view` vs `samtools view`
-- AXF1 view profiling hook: `ALIGNX_PROFILE_AXF1=1` emits AXF1-specific stderr TSV counters for chunk selection, selective decode, full decode, filtering, formatting, writing, and byte totals without changing SAM stdout
-- AXF1 profiling preflight completed on missmi-server00 for HG002 `chr1:1000000-1010000`; stdout SHA matched `samtools view`, and the first snapshot shows full chunk decode dominating selective decode and formatting time
+- AXF1 view profiling hook: `ALIGNX_PROFILE_AXF1=1` emits AXF1-specific stderr TSV counters for chunk selection, selective decode, output-column decode, filtering, formatting, writing, and byte totals without changing SAM stdout
+- AXF1 profiling preflight completed on missmi-server00 for HG002 `chr1:1000000-1010000`; stdout SHA matched `samtools view`, and the first snapshot shows output-column decode dominating selective decode and formatting time
 
 Remaining implementation targets:
 - Round-trip fidelity: BAM → AXF → BAM → diff
@@ -102,7 +102,7 @@ Remaining implementation targets:
   - Toy AXF1 roundtrip smoke passed with `scripts/smoke_axf_roundtrip.sh --format AXF1` on `tests/toy_data/toy_alignment.sorted.bam`
 - Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
   - Timed benchmark completed on missmi-server00 for chr1:1000000-2000000, chr1:121000000-142000000, and chrY:20000000-21000000; AXF1 view was correct but slower than BAM-backed view on all tested regions, so the v0.3 success criterion is not met yet
-  - AXF1 profiling hooks and remote correctness preflight are now in place; the next optimization pass should target full chunk decode cost first
+  - AXF1 profiling hooks and remote correctness preflight are now in place; the next optimization pass should target output-column decode cost first
 
 ## Build & Test Commands
 

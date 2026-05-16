@@ -175,19 +175,19 @@ void write_axf1_view_profile(const query::Axf1ViewProfile& profile, Clock::durat
                              std::ostream& err) {
     err << "profile\tchunks_selected\tchunks_with_matches\trecords_scanned\trecords_matched"
            "\trecords_output\topen_ms\tref_lookup_ms\tchunk_query_ms\tselective_decode_ms"
-           "\tfilter_ms\tfull_decode_ms\tformat_ms\twrite_ms\ttotal_ms\tselective_bytes_read"
-           "\tfull_chunk_bytes_read\tselective_payload_bytes\tfull_payload_bytes\tstdout_bytes\n";
+           "\tfilter_ms\toutput_decode_ms\tformat_ms\twrite_ms\ttotal_ms\tselective_bytes_read"
+           "\toutput_bytes_read\tselective_payload_bytes\toutput_payload_bytes\tstdout_bytes\n";
     err << "axf1_view\t" << profile.chunks_selected << '\t' << profile.chunks_with_matches << '\t'
         << profile.records_scanned << '\t' << profile.records_matched << '\t'
         << profile.records_output << '\t' << milliseconds(profile.open_time) << '\t'
         << milliseconds(profile.reference_lookup_time) << '\t'
         << milliseconds(profile.chunk_query_time) << '\t'
         << milliseconds(profile.selective_decode_time) << '\t'
-        << milliseconds(profile.filter_time) << '\t' << milliseconds(profile.full_decode_time)
+        << milliseconds(profile.filter_time) << '\t' << milliseconds(profile.output_decode_time)
         << '\t' << milliseconds(profile.format_time) << '\t'
         << milliseconds(profile.write_time) << '\t' << milliseconds(total_time) << '\t'
-        << profile.selective_bytes_read << '\t' << profile.full_chunk_bytes_read << '\t'
-        << profile.selective_payload_bytes << '\t' << profile.full_payload_bytes << '\t'
+        << profile.selective_bytes_read << '\t' << profile.output_bytes_read << '\t'
+        << profile.selective_payload_bytes << '\t' << profile.output_payload_bytes << '\t'
         << profile.stdout_bytes << '\n';
 }
 

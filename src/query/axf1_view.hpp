@@ -17,15 +17,15 @@ struct Axf1ViewProfile {
     std::uint64_t records_output = 0;
     std::uint64_t stdout_bytes = 0;
     std::uint64_t selective_bytes_read = 0;
-    std::uint64_t full_chunk_bytes_read = 0;
+    std::uint64_t output_bytes_read = 0;
     std::uint64_t selective_payload_bytes = 0;
-    std::uint64_t full_payload_bytes = 0;
+    std::uint64_t output_payload_bytes = 0;
     std::chrono::steady_clock::duration open_time{};
     std::chrono::steady_clock::duration reference_lookup_time{};
     std::chrono::steady_clock::duration chunk_query_time{};
     std::chrono::steady_clock::duration selective_decode_time{};
     std::chrono::steady_clock::duration filter_time{};
-    std::chrono::steady_clock::duration full_decode_time{};
+    std::chrono::steady_clock::duration output_decode_time{};
     std::chrono::steady_clock::duration format_time{};
     std::chrono::steady_clock::duration write_time{};
 };
