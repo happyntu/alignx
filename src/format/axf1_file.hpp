@@ -160,6 +160,14 @@ public:
                                 const std::vector<Axf1ColumnId>& columns,
                                 Axf1ChunkReadProfile& profile);
 
+    [[nodiscard]] std::expected<std::vector<unsigned char>, std::string>
+    read_chunk_raw(const Axf1ChunkIndexEntry& chunk);
+
+    [[nodiscard]] static std::expected<Axf1Chunk, std::string>
+    decode_chunk_raw(const std::vector<unsigned char>& chunk_bytes,
+                     const Axf1ChunkIndexEntry& chunk,
+                     const std::vector<Axf1ColumnId>& columns);
+
 private:
     Axf1FileReader(std::filesystem::path path, Axf1FileIndex index,
                    std::unique_ptr<std::ifstream> stream, std::uint64_t file_size);

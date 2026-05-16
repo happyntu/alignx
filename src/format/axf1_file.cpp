@@ -2823,6 +2823,18 @@ Axf1FileReader::read_chunk_columns_selective(const Axf1ChunkIndexEntry& chunk,
     return result;
 }
 
+std::expected<std::vector<unsigned char>, std::string>
+Axf1FileReader::read_chunk_raw(const Axf1ChunkIndexEntry& chunk) {
+    return read_range(chunk.chunk_offset, chunk.chunk_length);
+}
+
+std::expected<Axf1Chunk, std::string>
+Axf1FileReader::decode_chunk_raw(const std::vector<unsigned char>& chunk_bytes,
+                                 const Axf1ChunkIndexEntry& chunk,
+                                 const std::vector<Axf1ColumnId>& columns) {
+    return decode_chunk_bytes(chunk_bytes, chunk, columns);
+}
+
 std::expected<void, std::string> write_axf1_file(const Axf1File& file,
                                                  const std::filesystem::path& path) {
     return write_axf1_file(file, path, Axf1WriteOptions{});

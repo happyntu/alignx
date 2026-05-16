@@ -96,12 +96,12 @@ AXF1 lossless encoding is comparable to BAM extraction (1.07x-1.18x). AXF1 lossy
 
 | Config | chr1:1M-2M (ms) | chrY:20M-21M (ms) | chr1:121M-142M (ms) |
 |:---|---:|---:|---:|
-| BAM (samtools) | 275 | 199 | 4,178 |
-| CRAM | 673 (2.4x) | 376 (1.9x) | 11,411 (2.7x) |
-| AXF1 | **259 (1.06x)** | **171 (1.16x)** | 5,963 (0.70x) |
+| BAM (samtools) | 247 | 175 | 3,878 |
+| CRAM | 673 (2.7x) | 376 (2.1x) | 11,411 (2.9x) |
+| AXF1 (parallel) | **85 (2.9x)** | **61 (2.9x)** | **1,669 (2.3x)** |
 | AXF1 lossy | — | — | — |
 
-AXF1 lossless full-record decode is **faster than samtools view on 1 Mb regions** (1.06x-1.16x) after two rounds of decoder optimization: (1) batch SEQ 2-bit LUT, QUAL pack bit-accumulator, CIGAR LUT, QNAME dict ref-counting, zero-copy SAM formatting; (2) per-chunk streaming write, pointer-based bulk SEQ/QUAL/varint decode, bulk chunk I/O, Reader class refactored to pointer+size. The centromeric 21 Mb region is 0.70x of samtools (improved from 0.55x after batch 1 and 0.18x pre-optimization). The remaining centromeric gap is structural: TAG per-stream decode + columnar reconstruction dominates (4.4s for 934 MB output column payload at 210 MB/s); closing this gap requires parallel chunk decode or lighter intermediate representation. BAM baseline times shown here are from batch 2 manual runs under different system load than the formal benchmark; relative rankings are the primary comparison.
+AXF1 lossless full-record decode with parallel chunk processing is **2.3x-2.9x faster than samtools view** across all regions. The parallel decode path uses a sliding window of up to 8 `std::async` workers: the main thread reads chunk bytes sequentially (ifstream not thread-safe), workers decode columns, filter records, and format SAM in parallel, with results written in chunk order. On the centromeric 21 Mb region (6,878 chunks, 58,168 records, 1.12 GB payload), 8-thread decode achieves 634 MB/s effective throughput (vs 210 MB/s single-threaded). BAM baseline times shown here are from batch 3 manual runs; relative rankings are the primary comparison.
 
 ## Query Benchmark
 
@@ -130,9 +130,9 @@ When read filters are active (FLAG exclude unmapped, secondary, supplementary; M
 
 | Tool | chr1:1M-2M (ms) | chrY:20M-21M (ms) | chr1:121M-142M (ms) |
 |:---|---:|---:|---:|
-| samtools view | 275 | 199 | 4,178 |
-| alignx view (AXF1) | **259** | **171** | 5,963 |
+| samtools view | 247 | 175 | 3,878 |
+| alignx view (AXF1, parallel) | **85** | **61** | **1,669** |
 | samtools view (filtered) | 576 | 322 | 4,078 |
 | alignx view AXF1 (filtered) | **468** | **319** | 5,034 |
 
-After two rounds of decoder optimization, AXF1 view is **faster than samtools view on 1 Mb regions**: 259 ms vs 275 ms (chr1:1M-2M, 1.06x) and 171 ms vs 199 ms (chrY:20M-21M, 1.16x). Filtered AXF1 view is 1.01x-1.23x faster than filtered samtools view on 1 Mb regions due to the two-pass selective decode path. The centromeric 21 Mb region is **0.70x** for unfiltered view (improved from 0.55x) and 0.81x for filtered view. Profiling shows the centromeric bottleneck is output column decode (4.4s for 934 MB payload), dominated by TAG per-stream and SEQ/QUAL decode for 58,168 PacBio long reads. Note: unfiltered view numbers are from batch 2 manual runs; filtered numbers are from batch 1 formal benchmark under different system load.
+With parallel chunk decode (8 threads), AXF1 view is **2.9x faster than samtools on 1 Mb regions** (85 ms vs 247 ms on chr1:1M-2M, 61 ms vs 175 ms on chrY:20M-21M) and **2.3x faster on the centromeric 21 Mb region** (1,669 ms vs 3,878 ms). The filtered path still uses sequential two-pass decode; filtered numbers are from batch 1 formal benchmark. Note: unfiltered (parallel) numbers are from batch 3 manual runs on an 88-core server; actual speedup depends on available cores.

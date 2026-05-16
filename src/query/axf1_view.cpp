@@ -2,10 +2,13 @@
 
 #include <chrono>
 #include <cstdint>
+#include <deque>
+#include <future>
 #include <limits>
 #include <ostream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "format/axf1_file.hpp"
@@ -114,10 +117,107 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
     }
 
     const auto& ref_name = reader->index().references.at(*ref_id).name;
+
+    constexpr std::size_t kParallelThreshold = 16;
+    const bool use_parallel =
+        !filter.is_active() && hits->size() >= kParallelThreshold;
+
+    if (use_parallel) {
+        const std::size_t window_size =
+            std::min<std::size_t>(std::thread::hardware_concurrency(), 8);
+
+        struct ChunkResult {
+            std::string output;
+            std::size_t records_scanned = 0;
+            std::size_t records_matched = 0;
+            std::uint64_t bytes_read = 0;
+            std::uint64_t payload_bytes = 0;
+        };
+
+        std::deque<std::future<std::expected<ChunkResult, std::string>>> in_flight;
+
+        auto drain_one = [&]() -> std::expected<void, std::string> {
+            auto result = in_flight.front().get();
+            in_flight.pop_front();
+            if (!result) {
+                return std::unexpected(result.error());
+            }
+            profile.records_scanned += result->records_scanned;
+            profile.records_matched += result->records_matched;
+            profile.records_output += result->records_matched;
+            profile.output_bytes_read += result->bytes_read;
+            profile.output_payload_bytes += result->payload_bytes;
+            if (!result->output.empty()) {
+                profile.chunks_with_matches += 1;
+                const auto write_start = Clock::now();
+                out.write(result->output.data(),
+                          static_cast<std::streamsize>(result->output.size()));
+                profile.write_time += Clock::now() - write_start;
+                profile.stdout_bytes += result->output.size();
+            }
+            return {};
+        };
+
+        const auto decode_start = Clock::now();
+        for (const format::Axf1ChunkIndexEntry* chunk_entry : *hits) {
+            auto chunk_bytes = reader->read_chunk_raw(*chunk_entry);
+            if (!chunk_bytes) {
+                return std::unexpected(chunk_bytes.error());
+            }
+
+            const auto& columns_ref = kAllViewColumns;
+            auto fut = std::async(
+                std::launch::async,
+                [bytes = std::move(*chunk_bytes), entry = *chunk_entry, &columns_ref,
+                 &parsed_region, &ref_name]() -> std::expected<ChunkResult, std::string> {
+                    auto chunk = format::Axf1FileReader::decode_chunk_raw(
+                        bytes, entry, columns_ref);
+                    if (!chunk) {
+                        return std::unexpected(chunk.error());
+                    }
+
+                    ChunkResult cr;
+                    cr.bytes_read = bytes.size();
+                    cr.payload_bytes = bytes.size();
+                    for (std::size_t i = 0; i < chunk->records.size(); ++i) {
+                        cr.records_scanned += 1;
+                        auto overlaps = record_overlaps_region(chunk->records[i], *parsed_region);
+                        if (!overlaps) {
+                            return std::unexpected(overlaps.error());
+                        }
+                        if (!*overlaps) {
+                            continue;
+                        }
+                        cr.records_matched += 1;
+                        format::append_axf1_sam_record(cr.output, chunk->records[i], ref_name);
+                    }
+                    return cr;
+                });
+
+            in_flight.push_back(std::move(fut));
+
+            while (in_flight.size() >= window_size) {
+                auto drain = drain_one();
+                if (!drain) {
+                    return std::unexpected(drain.error());
+                }
+            }
+        }
+        while (!in_flight.empty()) {
+            auto drain = drain_one();
+            if (!drain) {
+                return std::unexpected(drain.error());
+            }
+        }
+        profile.output_decode_time += Clock::now() - decode_start;
+
+        return {};
+    }
+
+    // Sequential path (small chunk count or filter active)
     std::string output;
     for (const format::Axf1ChunkIndexEntry* chunk_entry : *hits) {
         if (!filter.is_active()) {
-            // Single-pass: read all columns at once, skip second read and merge
             format::Axf1ChunkReadProfile chunk_profile;
             const auto decode_start = Clock::now();
             auto chunk =
@@ -158,7 +258,6 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
             }
             profile.format_time += Clock::now() - format_start;
         } else {
-            // Two-pass: selective filter columns first, then output columns if needed
             format::Axf1ChunkReadProfile selective_profile;
             const auto selective_decode_start = Clock::now();
             auto filter_chunk = reader->read_chunk_columns_selective(*chunk_entry, filter_columns,
@@ -223,7 +322,6 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
             profile.format_time += Clock::now() - format_start;
         }
 
-        // Flush per-chunk to avoid accumulating a multi-GB output string
         const auto write_start = Clock::now();
         out.write(output.data(), static_cast<std::streamsize>(output.size()));
         profile.write_time += Clock::now() - write_start;
