@@ -3387,6 +3387,41 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
 
 // Write a single SAM record directly to a pre-allocated buffer via pointer.
 // Returns the advanced write pointer. Caller must ensure sufficient space.
+void append_record_from_columns(std::string& out, const ColumnarDecode& cols,
+                                std::uint32_t i, const std::string& ref_name) {
+    char num_buf[20];
+    auto append_int = [&](auto value) {
+        auto [end, ec] = std::to_chars(num_buf, num_buf + 20, value);
+        out.append(num_buf, static_cast<std::size_t>(end - num_buf));
+    };
+    out.append(cols.qnames[i]);
+    out.push_back('\t');
+    append_int(cols.flags[i]);
+    out.push_back('\t');
+    out.append(ref_name);
+    out.push_back('\t');
+    append_int(cols.positions[i] + 1);
+    out.push_back('\t');
+    append_int(cols.mapqs[i]);
+    out.push_back('\t');
+    out.append(cols.cigars[i]);
+    out.push_back('\t');
+    out.append(cols.mate_refs[i]);
+    out.push_back('\t');
+    append_int(cols.mate_positions[i] <= 0 ? 0 : cols.mate_positions[i] + 1);
+    out.push_back('\t');
+    append_int(cols.template_lengths[i]);
+    out.push_back('\t');
+    out.append(cols.sequences.at(i));
+    out.push_back('\t');
+    out.append(cols.qualities.at(i));
+    if (!cols.tags[i].empty()) {
+        out.push_back('\t');
+        out.append(cols.tags[i]);
+    }
+    out.push_back('\n');
+}
+
 char* write_record_to_sam(char* dst, const ColumnarDecode& cols,
                           std::size_t i, const std::string& ref_name) {
     auto write_str = [&](std::string_view sv) {
@@ -3532,6 +3567,49 @@ Axf1FileReader::decode_chunk_to_sam_append(const unsigned char* data, std::uint6
     }
     output.resize(old_size + static_cast<std::size_t>(ptr - (output.data() + old_size)));
     return records_formatted;
+}
+
+std::expected<Axf1FileReader::FilteredAppendResult, std::string>
+Axf1FileReader::decode_chunk_to_sam_append_filtered(
+    const unsigned char* data, std::uint64_t length,
+    const Axf1ChunkIndexEntry& chunk,
+    const std::string& ref_name,
+    bool is_interior_chunk,
+    std::int32_t region_start, std::int32_t region_end,
+    std::uint16_t flag_exclude, std::uint8_t min_mapq,
+    std::string& output) {
+    auto cols = decode_all_columns_mapped(data, static_cast<std::size_t>(length), chunk);
+    if (!cols) {
+        return std::unexpected(cols.error());
+    }
+
+    const std::uint32_t n = cols->record_count;
+    FilteredAppendResult result;
+    result.records_scanned = n;
+
+    for (std::uint32_t i = 0; i < n; ++i) {
+        if (!is_interior_chunk) {
+            auto span = query::cigar_reference_span(cols->cigars[i]);
+            if (!span) {
+                return std::unexpected(span.error());
+            }
+            const std::int32_t pos = cols->positions[i];
+            if (!query::half_open_intervals_overlap(pos, pos + *span, region_start, region_end)) {
+                continue;
+            }
+        }
+        if ((cols->flags[i] & flag_exclude) != 0) {
+            result.records_filtered += 1;
+            continue;
+        }
+        if (cols->mapqs[i] < min_mapq) {
+            result.records_filtered += 1;
+            continue;
+        }
+        result.records_matched += 1;
+        append_record_from_columns(output, *cols, i, ref_name);
+    }
+    return result;
 }
 
 const unsigned char* Axf1FileReader::mapped_data() const noexcept {

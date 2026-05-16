@@ -193,6 +193,21 @@ public:
                               std::int32_t region_start, std::int32_t region_end,
                               std::string& output);
 
+    struct FilteredAppendResult {
+        std::size_t records_scanned = 0;
+        std::size_t records_matched = 0;
+        std::size_t records_filtered = 0;
+    };
+
+    [[nodiscard]] static std::expected<FilteredAppendResult, std::string>
+    decode_chunk_to_sam_append_filtered(const unsigned char* data, std::uint64_t length,
+                                       const Axf1ChunkIndexEntry& chunk,
+                                       const std::string& ref_name,
+                                       bool is_interior_chunk,
+                                       std::int32_t region_start, std::int32_t region_end,
+                                       std::uint16_t flag_exclude, std::uint8_t min_mapq,
+                                       std::string& output);
+
     [[nodiscard]] const unsigned char* mapped_data() const noexcept;
     [[nodiscard]] std::uint64_t file_size() const noexcept;
 

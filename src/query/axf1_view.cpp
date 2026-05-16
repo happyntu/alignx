@@ -182,15 +182,15 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
                     cr.payload_bytes = chunk_entry->chunk_length;
 
                     if (filter_active) {
-                        auto chunk = format::Axf1FileReader::decode_chunk_mapped(
+                        auto chunk_dec = format::Axf1FileReader::decode_chunk_mapped(
                             chunk_data, chunk_entry->chunk_length, *chunk_entry, columns_ref);
-                        if (!chunk) {
-                            results[idx] = std::unexpected(chunk.error());
+                        if (!chunk_dec) {
+                            results[idx] = std::unexpected(chunk_dec.error());
                             continue;
                         }
-                        cr.records_scanned = chunk->records.size();
-                        for (std::size_t i = 0; i < chunk->records.size(); ++i) {
-                            const auto& rec = chunk->records[i];
+                        cr.records_scanned = chunk_dec->records.size();
+                        for (std::size_t ri = 0; ri < chunk_dec->records.size(); ++ri) {
+                            const auto& rec = chunk_dec->records[ri];
                             if (!is_interior) {
                                 auto overlaps = record_overlaps_region(rec, *parsed_region);
                                 if (!overlaps) {
@@ -199,8 +199,14 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
                                 }
                                 if (!*overlaps) continue;
                             }
-                            if ((rec.flag & filter.flag_exclude) != 0) continue;
-                            if (rec.mapq < filter.min_mapq) continue;
+                            if ((rec.flag & filter.flag_exclude) != 0) {
+                                cr.records_filtered += 1;
+                                continue;
+                            }
+                            if (rec.mapq < filter.min_mapq) {
+                                cr.records_filtered += 1;
+                                continue;
+                            }
                             cr.records_matched += 1;
                             format::append_axf1_sam_record(buf, rec, ref_name);
                         }
