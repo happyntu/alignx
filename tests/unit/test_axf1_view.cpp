@@ -283,12 +283,15 @@ TEST(Axf1View, DoesNotDecodeNonOverlappingMalformedChunk) {
 }
 
 TEST(Axf1View, DoesNotDecodeOutputColumnsWhenOverlappingChunkHasNoMatchingRecords) {
+    // Two-pass (filtered) path skips output decode when no records match.
+    // A trivial filter that excludes nothing exercises the two-pass path.
     const auto path = temp_path("alignx_axf1_view_selective_no_record_hit");
     write_axf1_or_fail(make_file(), path);
     corrupt_first_column_length(path, 0);
 
     std::ostringstream out;
-    auto result = alignx::query::write_axf1_region_sam(path, "chrToy:151-299", out);
+    alignx::query::RecordFilter filter{.min_mapq = 1};
+    auto result = alignx::query::write_axf1_region_sam(path, "chrToy:151-299", out, filter);
 
     EXPECT_TRUE(result) << result.error();
     EXPECT_EQ(out.str(), "");
@@ -324,12 +327,43 @@ TEST(Axf1View, ReportsOverlappingMalformedChunkAtomically) {
 }
 
 TEST(Axf1View, ProfileTracksSelectiveAndFullDecodeWork) {
+    // Unfiltered view uses single-pass: selective counters are zero,
+    // output counters carry all I/O.
     const auto path = temp_path("alignx_axf1_view_profile");
     write_axf1_or_fail(make_file(), path);
 
     std::ostringstream out;
     alignx::query::Axf1ViewProfile profile;
     auto result = alignx::query::write_axf1_region_sam_profiled(path, "chrToy:101-110", out, profile);
+
+    EXPECT_TRUE(result) << result.error();
+    EXPECT_EQ(out.str(),
+              "read001\t0\tchrToy\t101\t60\t10M\t*\t0\t0\tACGTACGTAA\tFFFFFFFFFF\tNM:i:0\n");
+    EXPECT_EQ(profile.chunks_selected, 1);
+    EXPECT_EQ(profile.chunks_with_matches, 1);
+    EXPECT_EQ(profile.records_scanned, 2);
+    EXPECT_EQ(profile.records_matched, 1);
+    EXPECT_EQ(profile.records_output, 1);
+    EXPECT_EQ(profile.selective_bytes_read, 0);
+    EXPECT_GT(profile.output_bytes_read, 0);
+    EXPECT_EQ(profile.selective_payload_bytes, 0);
+    EXPECT_GT(profile.output_payload_bytes, 0);
+    EXPECT_EQ(profile.stdout_bytes, out.str().size());
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1View, ProfileTracksFilteredTwoPassDecodeWork) {
+    // Filtered view uses two-pass: selective counters track filter columns,
+    // output counters track remaining columns.
+    const auto path = temp_path("alignx_axf1_view_profile_filtered");
+    write_axf1_or_fail(make_file(), path);
+
+    std::ostringstream out;
+    alignx::query::Axf1ViewProfile profile;
+    alignx::query::RecordFilter filter{.min_mapq = 1};
+    auto result =
+        alignx::query::write_axf1_region_sam_profiled(path, "chrToy:101-110", out, profile, filter);
 
     EXPECT_TRUE(result) << result.error();
     EXPECT_EQ(out.str(),

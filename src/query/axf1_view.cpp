@@ -97,6 +97,15 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
     }
     profile.chunks_selected += hits->size();
 
+    static const std::vector<format::Axf1ColumnId> kAllViewColumns = {
+        format::Axf1ColumnId::qname,          format::Axf1ColumnId::flag,
+        format::Axf1ColumnId::pos,            format::Axf1ColumnId::mapq,
+        format::Axf1ColumnId::cigar,          format::Axf1ColumnId::mate_reference,
+        format::Axf1ColumnId::mate_pos,       format::Axf1ColumnId::template_length,
+        format::Axf1ColumnId::sequence,       format::Axf1ColumnId::quality,
+        format::Axf1ColumnId::tags,
+    };
+
     std::vector<format::Axf1ColumnId> filter_columns = {format::Axf1ColumnId::pos,
                                                         format::Axf1ColumnId::cigar};
     if (filter.is_active()) {
@@ -104,8 +113,54 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
         filter_columns.push_back(format::Axf1ColumnId::mapq);
     }
 
+    const auto& ref_name = reader->index().references.at(*ref_id).name;
     std::string output;
     for (const format::Axf1ChunkIndexEntry* chunk_entry : *hits) {
+        if (!filter.is_active()) {
+            // Single-pass: read all columns at once, skip second read and merge
+            format::Axf1ChunkReadProfile chunk_profile;
+            const auto decode_start = Clock::now();
+            auto chunk =
+                reader->read_chunk_columns_selective(*chunk_entry, kAllViewColumns, chunk_profile);
+            profile.output_decode_time += Clock::now() - decode_start;
+            if (!chunk) {
+                return std::unexpected(chunk.error());
+            }
+            profile.output_bytes_read += chunk_profile.bytes_read;
+            profile.output_payload_bytes += chunk_profile.selected_payload_bytes;
+
+            const auto filter_start = Clock::now();
+            std::vector<std::size_t> matching_records;
+            for (std::size_t record_index = 0; record_index < chunk->records.size();
+                 ++record_index) {
+                profile.records_scanned += 1;
+                const auto& rec = chunk->records[record_index];
+                auto overlaps = record_overlaps_region(rec, *parsed_region);
+                if (!overlaps) {
+                    return std::unexpected(overlaps.error());
+                }
+                if (!*overlaps) {
+                    continue;
+                }
+                matching_records.push_back(record_index);
+                profile.records_matched += 1;
+            }
+            profile.filter_time += Clock::now() - filter_start;
+            if (matching_records.empty()) {
+                continue;
+            }
+            profile.chunks_with_matches += 1;
+
+            const auto format_start = Clock::now();
+            for (std::size_t record_index : matching_records) {
+                format::append_axf1_sam_record(output, chunk->records[record_index], ref_name);
+                profile.records_output += 1;
+            }
+            profile.format_time += Clock::now() - format_start;
+            continue;
+        }
+
+        // Two-pass: selective filter columns first, then output columns if needed
         format::Axf1ChunkReadProfile selective_profile;
         const auto selective_decode_start = Clock::now();
         auto filter_chunk =
@@ -122,7 +177,7 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
         for (std::size_t record_index = 0; record_index < filter_chunk->records.size();
              ++record_index) {
             profile.records_scanned += 1;
-            const auto& rec = filter_chunk->records.at(record_index);
+            const auto& rec = filter_chunk->records[record_index];
             auto overlaps = record_overlaps_region(rec, *parsed_region);
             if (!overlaps) {
                 return std::unexpected(overlaps.error());
@@ -130,7 +185,7 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
             if (!*overlaps) {
                 continue;
             }
-            if (filter.is_active() && !passes_filter(filter, rec.flag, rec.mapq)) {
+            if (!passes_filter(filter, rec.flag, rec.mapq)) {
                 profile.records_filtered += 1;
                 continue;
             }
@@ -162,8 +217,7 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
 
         const auto format_start = Clock::now();
         for (std::size_t record_index : matching_records) {
-            output.append(format::format_axf1_sam_record(filter_chunk->records.at(record_index),
-                                            reader->index().references.at(*ref_id).name));
+            format::append_axf1_sam_record(output, filter_chunk->records[record_index], ref_name);
             profile.records_output += 1;
         }
         profile.format_time += Clock::now() - format_start;

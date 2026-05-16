@@ -1474,8 +1474,8 @@ decode_qname_dict_column(const std::vector<unsigned char>& bytes, std::uint32_t 
         dictionary.push_back(std::move(entry));
     }
 
-    std::vector<std::string> values;
-    values.reserve(record_count);
+    std::vector<std::size_t> indices;
+    indices.reserve(record_count);
     for (std::uint32_t j = 0; j < record_count; ++j) {
         auto idx = reader.read_varint_u64();
         if (!idx) {
@@ -1484,11 +1484,27 @@ decode_qname_dict_column(const std::vector<unsigned char>& bytes, std::uint32_t 
         if (*idx >= dict_size) {
             return std::unexpected("AXF1 QNAME dict index out of range");
         }
-        values.push_back(dictionary[static_cast<std::size_t>(*idx)]);
+        indices.push_back(static_cast<std::size_t>(*idx));
     }
 
     if (reader.offset() != reader.size()) {
         return std::unexpected("AXF1 QNAME dict column has trailing bytes");
+    }
+
+    // Count references to determine move vs copy per entry
+    std::vector<std::uint32_t> ref_counts(dict_size, 0);
+    for (auto idx : indices) {
+        ++ref_counts[idx];
+    }
+
+    std::vector<std::string> values;
+    values.reserve(record_count);
+    for (auto idx : indices) {
+        if (ref_counts[idx] == 1) {
+            values.push_back(std::move(dictionary[idx]));
+        } else {
+            values.push_back(dictionary[idx]);
+        }
     }
     return values;
 }
@@ -1716,29 +1732,13 @@ decode_mapq_rle_column(const std::vector<unsigned char>& bytes, std::uint32_t re
     return values;
 }
 
+constexpr char kCigarOpTable[9] = {'M', 'I', 'D', 'N', 'S', 'H', 'P', '=', 'X'};
+
 std::expected<char, std::string> decode_cigar_op(std::uint8_t op) {
-    switch (op) {
-    case 0:
-        return 'M';
-    case 1:
-        return 'I';
-    case 2:
-        return 'D';
-    case 3:
-        return 'N';
-    case 4:
-        return 'S';
-    case 5:
-        return 'H';
-    case 6:
-        return 'P';
-    case 7:
-        return '=';
-    case 8:
-        return 'X';
-    default:
-        return std::unexpected("unknown AXF1 CIGAR token operation");
+    if (op < 9) {
+        return kCigarOpTable[op];
     }
+    return std::unexpected("unknown AXF1 CIGAR token operation");
 }
 
 std::expected<std::vector<std::string>, std::string>
@@ -1778,7 +1778,9 @@ decode_cigar_token_column(const std::vector<unsigned char>& bytes, std::uint32_t
             if (!decoded_op) {
                 return std::unexpected(decoded_op.error());
             }
-            cigar.append(std::to_string(*length));
+            char int_buf[20];
+            auto [ptr, ec] = std::to_chars(int_buf, int_buf + sizeof(int_buf), *length);
+            cigar.append(int_buf, ptr);
             cigar.push_back(*decoded_op);
         }
         values.push_back(std::move(cigar));
@@ -1840,6 +1842,25 @@ decode_cigar_dict_column(const std::vector<unsigned char>& bytes, std::uint32_t 
     return values;
 }
 
+constexpr char kBase2bit[4] = {'A', 'C', 'G', 'T'};
+
+struct Seq2bitQuad {
+    char bases[4];
+};
+
+consteval std::array<Seq2bitQuad, 256> build_seq_2bit_lut() {
+    std::array<Seq2bitQuad, 256> lut{};
+    for (int byte = 0; byte < 256; ++byte) {
+        lut[byte].bases[0] = kBase2bit[(byte >> 0) & 0x03];
+        lut[byte].bases[1] = kBase2bit[(byte >> 2) & 0x03];
+        lut[byte].bases[2] = kBase2bit[(byte >> 4) & 0x03];
+        lut[byte].bases[3] = kBase2bit[(byte >> 6) & 0x03];
+    }
+    return lut;
+}
+
+constexpr auto kSeq2bitLut = build_seq_2bit_lut();
+
 std::expected<char, std::string> decode_acgt_base_2bit(std::uint8_t value) {
     switch (value) {
     case 0:
@@ -1872,26 +1893,34 @@ decode_seq_2bit_literal_column(const std::vector<unsigned char>& bytes,
             return std::unexpected("AXF1 SEQ 2-bit length is too large");
         }
 
-        std::string sequence;
-        sequence.reserve(static_cast<std::size_t>(*length));
-        for (std::uint64_t base_index = 0; base_index < *length; ++base_index) {
-            std::uint8_t packed = 0;
-            if (base_index % 4U == 0) {
-                auto byte = reader.read_u8();
-                if (!byte) {
-                    return std::unexpected("truncated AXF1 SEQ 2-bit bases");
-                }
-                packed = *byte;
-            } else {
-                packed = bytes.at(reader.offset() - 1U);
-            }
+        const auto seq_len = static_cast<std::size_t>(*length);
+        std::string sequence(seq_len, '\0');
+        char* dst = sequence.data();
 
-            auto base = decode_acgt_base_2bit(
-                static_cast<std::uint8_t>((packed >> ((base_index % 4U) * 2U)) & 0x03U));
-            if (!base) {
-                return std::unexpected(base.error());
+        const std::size_t full_bytes = seq_len / 4;
+        const std::size_t remaining = seq_len % 4;
+
+        for (std::size_t i = 0; i < full_bytes; ++i) {
+            auto byte = reader.read_u8();
+            if (!byte) {
+                return std::unexpected("truncated AXF1 SEQ 2-bit bases");
             }
-            sequence.push_back(*base);
+            const auto& quad = kSeq2bitLut[*byte];
+            dst[0] = quad.bases[0];
+            dst[1] = quad.bases[1];
+            dst[2] = quad.bases[2];
+            dst[3] = quad.bases[3];
+            dst += 4;
+        }
+        if (remaining > 0) {
+            auto byte = reader.read_u8();
+            if (!byte) {
+                return std::unexpected("truncated AXF1 SEQ 2-bit bases");
+            }
+            const auto& quad = kSeq2bitLut[*byte];
+            for (std::size_t r = 0; r < remaining; ++r) {
+                dst[r] = quad.bases[r];
+            }
         }
         values.push_back(std::move(sequence));
     }
@@ -1978,6 +2007,8 @@ decode_qual_pack_column(const std::vector<unsigned char>& bytes, std::uint32_t r
     }
 
     const std::uint8_t bit_width = bit_width_for_alphabet_size(alphabet.size());
+    const std::uint64_t code_mask =
+        bit_width < 64 ? (static_cast<std::uint64_t>(1) << bit_width) - 1 : ~std::uint64_t{0};
     std::vector<std::string> values;
     values.reserve(record_count);
     for (std::uint32_t record_index = 0; record_index < record_count; ++record_index) {
@@ -1990,37 +2021,32 @@ decode_qual_pack_column(const std::vector<unsigned char>& bytes, std::uint32_t r
             return std::unexpected("AXF1 QUAL pack length is too large");
         }
 
-        std::string quality;
-        quality.reserve(static_cast<std::size_t>(*length));
+        const auto qual_len = static_cast<std::size_t>(*length);
         if (bit_width == 0) {
-            quality.assign(static_cast<std::size_t>(*length), static_cast<char>(alphabet.front()));
-            values.push_back(std::move(quality));
+            values.emplace_back(qual_len, static_cast<char>(alphabet.front()));
             continue;
         }
 
-        std::uint8_t packed = 0;
-        std::uint8_t bits_remaining = 0;
-        for (std::uint64_t index = 0; index < *length; ++index) {
-            std::uint8_t code = 0;
-            for (std::uint8_t bit = 0; bit < bit_width; ++bit) {
-                if (bits_remaining == 0) {
-                    auto byte = reader.read_u8();
-                    if (!byte) {
-                        return std::unexpected("truncated AXF1 QUAL pack codes");
-                    }
-                    packed = *byte;
-                    bits_remaining = 8;
+        std::string quality(qual_len, '\0');
+        char* dst = quality.data();
+        std::uint64_t accumulator = 0;
+        int acc_bits = 0;
+        for (std::size_t index = 0; index < qual_len; ++index) {
+            while (acc_bits < bit_width) {
+                auto byte = reader.read_u8();
+                if (!byte) {
+                    return std::unexpected("truncated AXF1 QUAL pack codes");
                 }
-                if ((packed & 1U) != 0) {
-                    code |= static_cast<std::uint8_t>(1U << bit);
-                }
-                packed >>= 1U;
-                --bits_remaining;
+                accumulator |= static_cast<std::uint64_t>(*byte) << acc_bits;
+                acc_bits += 8;
             }
+            const auto code = static_cast<std::uint8_t>(accumulator & code_mask);
+            accumulator >>= bit_width;
+            acc_bits -= bit_width;
             if (code >= alphabet.size()) {
                 return std::unexpected("AXF1 QUAL pack code is outside alphabet");
             }
-            quality.push_back(static_cast<char>(alphabet.at(code)));
+            dst[index] = static_cast<char>(alphabet[code]);
         }
         values.push_back(std::move(quality));
     }
@@ -3003,23 +3029,30 @@ std::string format_axf1_sam_record(const Axf1Record& record, const std::string& 
     line.reserve(record.qname.size() + reference.size() + record.cigar.size() +
                  record.mate_reference.size() + record.sequence.size() + record.quality.size() +
                  record.tags.size() + 64);
+
+    char int_buf[20];
+    auto append_int = [&](auto value) {
+        auto [ptr, ec] = std::to_chars(int_buf, int_buf + sizeof(int_buf), value);
+        line.append(int_buf, ptr);
+    };
+
     line.append(record.qname);
     line.push_back('\t');
-    line.append(std::to_string(record.flag));
+    append_int(record.flag);
     line.push_back('\t');
     line.append(reference);
     line.push_back('\t');
-    line.append(std::to_string(record.pos + 1));
+    append_int(record.pos + 1);
     line.push_back('\t');
-    line.append(std::to_string(record.mapq));
+    append_int(record.mapq);
     line.push_back('\t');
     line.append(record.cigar);
     line.push_back('\t');
     line.append(record.mate_reference);
     line.push_back('\t');
-    line.append(std::to_string(record.mate_pos <= 0 ? 0 : record.mate_pos + 1));
+    append_int(record.mate_pos <= 0 ? 0 : record.mate_pos + 1);
     line.push_back('\t');
-    line.append(std::to_string(record.template_length));
+    append_int(record.template_length);
     line.push_back('\t');
     line.append(record.sequence);
     line.push_back('\t');
@@ -3030,6 +3063,46 @@ std::string format_axf1_sam_record(const Axf1Record& record, const std::string& 
     }
     line.push_back('\n');
     return line;
+}
+
+void append_axf1_sam_record(std::string& output, const Axf1Record& record,
+                            const std::string& reference) {
+    output.reserve(output.size() + record.qname.size() + reference.size() + record.cigar.size() +
+                   record.mate_reference.size() + record.sequence.size() + record.quality.size() +
+                   record.tags.size() + 64);
+
+    char int_buf[20];
+    auto append_int = [&](auto value) {
+        auto [ptr, ec] = std::to_chars(int_buf, int_buf + sizeof(int_buf), value);
+        output.append(int_buf, ptr);
+    };
+
+    output.append(record.qname);
+    output.push_back('\t');
+    append_int(record.flag);
+    output.push_back('\t');
+    output.append(reference);
+    output.push_back('\t');
+    append_int(record.pos + 1);
+    output.push_back('\t');
+    append_int(record.mapq);
+    output.push_back('\t');
+    output.append(record.cigar);
+    output.push_back('\t');
+    output.append(record.mate_reference);
+    output.push_back('\t');
+    append_int(record.mate_pos <= 0 ? 0 : record.mate_pos + 1);
+    output.push_back('\t');
+    append_int(record.template_length);
+    output.push_back('\t');
+    output.append(record.sequence);
+    output.push_back('\t');
+    output.append(record.quality);
+    if (!record.tags.empty()) {
+        output.push_back('\t');
+        output.append(record.tags);
+    }
+    output.push_back('\n');
 }
 
 } // namespace alignx::format
