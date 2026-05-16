@@ -198,7 +198,8 @@ and region-query correctness.
   - AXF1 pileup: **1.20x-2.08x faster** than BAM full-record pileup across all regions
   - AXF1 view: 3-5x slower (expected — full-column decode); filtered view near-parity on centromeric (0.81x)
   - See `docs/research/v1-query-benchmark-results.md`
-- [ ] Draft methods section for benchmark paper
+- [x] Draft methods section for benchmark paper
+  - `docs/research/draft-methods-section.md`: AXF1 format design, v1.0 codec stack, benchmark setup, compression results (6 configs × 3 regions), query results (12 tool-filter combinations × 3 regions)
 
 **Phase 2+ (post v1.0):**
 - SIMD AVX2/AVX-512 decompression paths
