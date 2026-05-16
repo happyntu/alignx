@@ -133,7 +133,7 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
     for (const format::Axf1ChunkIndexEntry* chunk_entry : *hits) {
         format::Axf1ChunkReadProfile selective_profile;
         const auto selective_decode_start = Clock::now();
-        auto filter_chunk = reader->read_chunk_columns_profiled(
+        auto filter_chunk = reader->read_chunk_columns_selective(
             *chunk_entry, {format::Axf1ColumnId::pos, format::Axf1ColumnId::cigar},
             selective_profile);
         profile.selective_decode_time += Clock::now() - selective_decode_start;

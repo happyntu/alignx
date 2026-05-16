@@ -1664,6 +1664,145 @@ slice_column_payload(const std::vector<unsigned char>& chunk_payload, const Colu
     return std::vector<unsigned char>(begin, end);
 }
 
+std::expected<void, std::string>
+decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
+                         const ColumnEntry& entry,
+                         const std::vector<unsigned char>& payload) {
+    switch (entry.column_id) {
+    case Axf1ColumnId::qname: {
+        auto values = decode_string_column(payload, record_count);
+        if (!values) {
+            return std::unexpected(values.error());
+        }
+        for (std::uint32_t i = 0; i < record_count; ++i) {
+            chunk.records[i].qname = std::move(values->at(i));
+        }
+        break;
+    }
+    case Axf1ColumnId::flag: {
+        auto values = entry.codec_id == Axf1CodecId::flag_bitpack
+                          ? decode_flag_bitpack_column(payload, record_count)
+                          : decode_fixed_column<std::uint16_t>(payload, record_count,
+                                                               &Reader::read_u16);
+        if (!values) {
+            return std::unexpected(values.error());
+        }
+        for (std::uint32_t i = 0; i < record_count; ++i) {
+            chunk.records[i].flag = values->at(i);
+        }
+        break;
+    }
+    case Axf1ColumnId::pos: {
+        auto values =
+            entry.codec_id == Axf1CodecId::pos_delta_varint
+                ? decode_pos_delta_varint_column(payload, record_count)
+                : decode_fixed_column<std::int32_t>(payload, record_count, &Reader::read_i32);
+        if (!values) {
+            return std::unexpected(values.error());
+        }
+        for (std::uint32_t i = 0; i < record_count; ++i) {
+            chunk.records[i].pos = values->at(i);
+        }
+        break;
+    }
+    case Axf1ColumnId::mapq: {
+        auto values =
+            entry.codec_id == Axf1CodecId::mapq_rle
+                ? decode_mapq_rle_column(payload, record_count)
+                : decode_fixed_column<std::uint8_t>(payload, record_count, &Reader::read_u8);
+        if (!values) {
+            return std::unexpected(values.error());
+        }
+        for (std::uint32_t i = 0; i < record_count; ++i) {
+            chunk.records[i].mapq = values->at(i);
+        }
+        break;
+    }
+    case Axf1ColumnId::mate_reference:
+    case Axf1ColumnId::tags: {
+        auto values = decode_string_column(payload, record_count);
+        if (!values) {
+            return std::unexpected(values.error());
+        }
+        for (std::uint32_t i = 0; i < record_count; ++i) {
+            if (entry.column_id == Axf1ColumnId::mate_reference) {
+                chunk.records[i].mate_reference = std::move(values->at(i));
+            } else {
+                chunk.records[i].tags = std::move(values->at(i));
+            }
+        }
+        break;
+    }
+    case Axf1ColumnId::cigar: {
+        auto values = entry.codec_id == Axf1CodecId::cigar_token
+                          ? decode_cigar_token_column(payload, record_count)
+                          : decode_string_column(payload, record_count);
+        if (!values) {
+            return std::unexpected(values.error());
+        }
+        for (std::uint32_t i = 0; i < record_count; ++i) {
+            chunk.records[i].cigar = std::move(values->at(i));
+        }
+        break;
+    }
+    case Axf1ColumnId::sequence: {
+        auto values = entry.codec_id == Axf1CodecId::seq_2bit_literal
+                          ? decode_seq_2bit_literal_column(payload, record_count)
+                          : decode_string_column(payload, record_count);
+        if (!values) {
+            return std::unexpected(values.error());
+        }
+        for (std::uint32_t i = 0; i < record_count; ++i) {
+            chunk.records[i].sequence = std::move(values->at(i));
+        }
+        break;
+    }
+    case Axf1ColumnId::quality: {
+        std::expected<std::vector<std::string>, std::string> values =
+            std::unexpected("unsupported AXF1 QUAL codec");
+        if (entry.codec_id == Axf1CodecId::qual_rle) {
+            values = decode_qual_rle_column(payload, record_count);
+        } else if (entry.codec_id == Axf1CodecId::qual_pack) {
+            values = decode_qual_pack_column(payload, record_count);
+        } else if (entry.codec_id == Axf1CodecId::qual_pack_compressed) {
+            auto base_payload =
+                decode_compressed_base_payload(payload, Axf1CodecId::qual_pack,
+                                               "unsupported AXF1 compressed QUAL base codec");
+            if (!base_payload) {
+                return std::unexpected(base_payload.error());
+            }
+            values = decode_qual_pack_column(*base_payload, record_count);
+        } else {
+            values = decode_string_column(payload, record_count);
+        }
+        if (!values) {
+            return std::unexpected(values.error());
+        }
+        for (std::uint32_t i = 0; i < record_count; ++i) {
+            chunk.records[i].quality = std::move(values->at(i));
+        }
+        break;
+    }
+    case Axf1ColumnId::mate_pos:
+    case Axf1ColumnId::template_length: {
+        auto values =
+            decode_fixed_column<std::int32_t>(payload, record_count, &Reader::read_i32);
+        if (!values) {
+            return std::unexpected(values.error());
+        }
+        for (std::uint32_t i = 0; i < record_count; ++i) {
+            if (entry.column_id == Axf1ColumnId::mate_pos) {
+                chunk.records[i].mate_pos = values->at(i);
+            } else {
+                chunk.records[i].template_length = values->at(i);
+            }
+        }
+        break;
+    }
+    }
+    return {};
+}
+
 std::expected<Axf1Chunk, std::string>
 decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
                    const Axf1ChunkIndexEntry& index_entry,
@@ -1737,137 +1876,9 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
         if (!payload) {
             return std::unexpected(payload.error());
         }
-        switch (entry.column_id) {
-        case Axf1ColumnId::qname: {
-            auto values = decode_string_column(*payload, *record_count);
-            if (!values) {
-                return std::unexpected(values.error());
-            }
-            for (std::uint32_t index = 0; index < *record_count; ++index) {
-                chunk.records[index].qname = std::move(values->at(index));
-            }
-            break;
-        }
-        case Axf1ColumnId::flag: {
-            auto values = entry.codec_id == Axf1CodecId::flag_bitpack
-                              ? decode_flag_bitpack_column(*payload, *record_count)
-                              : decode_fixed_column<std::uint16_t>(*payload, *record_count,
-                                                                   &Reader::read_u16);
-            if (!values) {
-                return std::unexpected(values.error());
-            }
-            for (std::uint32_t index = 0; index < *record_count; ++index) {
-                chunk.records[index].flag = values->at(index);
-            }
-            break;
-        }
-        case Axf1ColumnId::pos: {
-            auto values =
-                entry.codec_id == Axf1CodecId::pos_delta_varint
-                    ? decode_pos_delta_varint_column(*payload, *record_count)
-                    : decode_fixed_column<std::int32_t>(*payload, *record_count, &Reader::read_i32);
-            if (!values) {
-                return std::unexpected(values.error());
-            }
-            for (std::uint32_t index = 0; index < *record_count; ++index) {
-                chunk.records[index].pos = values->at(index);
-            }
-            break;
-        }
-        case Axf1ColumnId::mapq: {
-            auto values =
-                entry.codec_id == Axf1CodecId::mapq_rle
-                    ? decode_mapq_rle_column(*payload, *record_count)
-                    : decode_fixed_column<std::uint8_t>(*payload, *record_count, &Reader::read_u8);
-            if (!values) {
-                return std::unexpected(values.error());
-            }
-            for (std::uint32_t index = 0; index < *record_count; ++index) {
-                chunk.records[index].mapq = values->at(index);
-            }
-            break;
-        }
-        case Axf1ColumnId::mate_reference:
-        case Axf1ColumnId::tags: {
-            auto values = decode_string_column(*payload, *record_count);
-            if (!values) {
-                return std::unexpected(values.error());
-            }
-            for (std::uint32_t index = 0; index < *record_count; ++index) {
-                if (entry.column_id == Axf1ColumnId::mate_reference) {
-                    chunk.records[index].mate_reference = std::move(values->at(index));
-                } else {
-                    chunk.records[index].tags = std::move(values->at(index));
-                }
-            }
-            break;
-        }
-        case Axf1ColumnId::cigar: {
-            auto values = entry.codec_id == Axf1CodecId::cigar_token
-                              ? decode_cigar_token_column(*payload, *record_count)
-                              : decode_string_column(*payload, *record_count);
-            if (!values) {
-                return std::unexpected(values.error());
-            }
-            for (std::uint32_t index = 0; index < *record_count; ++index) {
-                chunk.records[index].cigar = std::move(values->at(index));
-            }
-            break;
-        }
-        case Axf1ColumnId::sequence: {
-            auto values = entry.codec_id == Axf1CodecId::seq_2bit_literal
-                              ? decode_seq_2bit_literal_column(*payload, *record_count)
-                              : decode_string_column(*payload, *record_count);
-            if (!values) {
-                return std::unexpected(values.error());
-            }
-            for (std::uint32_t index = 0; index < *record_count; ++index) {
-                chunk.records[index].sequence = std::move(values->at(index));
-            }
-            break;
-        }
-        case Axf1ColumnId::quality: {
-            std::expected<std::vector<std::string>, std::string> values =
-                std::unexpected("unsupported AXF1 QUAL codec");
-            if (entry.codec_id == Axf1CodecId::qual_rle) {
-                values = decode_qual_rle_column(*payload, *record_count);
-            } else if (entry.codec_id == Axf1CodecId::qual_pack) {
-                values = decode_qual_pack_column(*payload, *record_count);
-            } else if (entry.codec_id == Axf1CodecId::qual_pack_compressed) {
-                auto base_payload =
-                    decode_compressed_base_payload(*payload, Axf1CodecId::qual_pack,
-                                                   "unsupported AXF1 compressed QUAL base codec");
-                if (!base_payload) {
-                    return std::unexpected(base_payload.error());
-                }
-                values = decode_qual_pack_column(*base_payload, *record_count);
-            } else {
-                values = decode_string_column(*payload, *record_count);
-            }
-            if (!values) {
-                return std::unexpected(values.error());
-            }
-            for (std::uint32_t index = 0; index < *record_count; ++index) {
-                chunk.records[index].quality = std::move(values->at(index));
-            }
-            break;
-        }
-        case Axf1ColumnId::mate_pos:
-        case Axf1ColumnId::template_length: {
-            auto values =
-                decode_fixed_column<std::int32_t>(*payload, *record_count, &Reader::read_i32);
-            if (!values) {
-                return std::unexpected(values.error());
-            }
-            for (std::uint32_t index = 0; index < *record_count; ++index) {
-                if (entry.column_id == Axf1ColumnId::mate_pos) {
-                    chunk.records[index].mate_pos = values->at(index);
-                } else {
-                    chunk.records[index].template_length = values->at(index);
-                }
-            }
-            break;
-        }
+        auto decode = decode_column_into_chunk(chunk, *record_count, entry, *payload);
+        if (!decode) {
+            return std::unexpected(decode.error());
         }
     }
 
@@ -1899,15 +1910,31 @@ Axf1FileIndex::query_chunks(std::uint32_t ref_id, std::int32_t start, std::int32
     return hits;
 }
 
-Axf1FileReader::Axf1FileReader(std::filesystem::path path, Axf1FileIndex index)
-    : path_(std::move(path)), index_(std::move(index)) {}
+Axf1FileReader::Axf1FileReader(std::filesystem::path path, Axf1FileIndex index,
+                               std::unique_ptr<std::ifstream> stream, std::uint64_t file_size)
+    : path_(std::move(path)), index_(std::move(index)), stream_(std::move(stream)),
+      file_size_(file_size) {}
+
+Axf1FileReader::Axf1FileReader(Axf1FileReader&&) noexcept = default;
+Axf1FileReader& Axf1FileReader::operator=(Axf1FileReader&&) noexcept = default;
+Axf1FileReader::~Axf1FileReader() = default;
 
 std::expected<Axf1FileReader, std::string> Axf1FileReader::open(std::filesystem::path path) {
     auto index = read_axf1_index_metadata(path);
     if (!index) {
         return std::unexpected(index.error());
     }
-    return Axf1FileReader(std::move(path), std::move(*index));
+    auto stream = std::make_unique<std::ifstream>(path, std::ios::binary);
+    if (!*stream) {
+        return std::unexpected("failed to open AXF1 file: " + path.string());
+    }
+    stream->seekg(0, std::ios::end);
+    const auto size = stream->tellg();
+    if (size < 0) {
+        return std::unexpected("failed to determine AXF1 file size: " + path.string());
+    }
+    return Axf1FileReader(std::move(path), std::move(*index), std::move(stream),
+                          static_cast<std::uint64_t>(size));
 }
 
 const Axf1FileIndex& Axf1FileReader::index() const noexcept {
@@ -1919,28 +1946,146 @@ Axf1FileReader::query_chunks(std::uint32_t ref_id, std::int32_t start, std::int3
     return index_.query_chunks(ref_id, start, end);
 }
 
+std::expected<std::vector<unsigned char>, std::string>
+Axf1FileReader::read_range(std::uint64_t offset, std::uint64_t length) {
+    if (offset > file_size_ || length > file_size_ - offset) {
+        return std::unexpected("AXF1 read range points outside file");
+    }
+    if (length > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+        return std::unexpected("AXF1 read range is too large");
+    }
+    stream_->seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+    if (!*stream_) {
+        return std::unexpected("failed to seek AXF1 file");
+    }
+    std::vector<unsigned char> bytes(static_cast<std::size_t>(length));
+    if (!bytes.empty()) {
+        stream_->read(reinterpret_cast<char*>(bytes.data()),
+                      static_cast<std::streamsize>(bytes.size()));
+        if (!*stream_) {
+            return std::unexpected("failed to read AXF1 file: " + path_.string());
+        }
+    }
+    return bytes;
+}
+
 std::expected<Axf1Chunk, std::string>
-Axf1FileReader::read_chunk(const Axf1ChunkIndexEntry& chunk) const {
+Axf1FileReader::read_chunk(const Axf1ChunkIndexEntry& chunk) {
     return read_axf1_chunk(path_, chunk);
 }
 
 std::expected<Axf1Chunk, std::string>
 Axf1FileReader::read_chunk_profiled(const Axf1ChunkIndexEntry& chunk,
-                                    Axf1ChunkReadProfile& profile) const {
+                                    Axf1ChunkReadProfile& profile) {
     return read_axf1_chunk_profiled(path_, chunk, profile);
 }
 
 std::expected<Axf1Chunk, std::string>
 Axf1FileReader::read_chunk_columns(const Axf1ChunkIndexEntry& chunk,
-                                   const std::vector<Axf1ColumnId>& columns) const {
+                                   const std::vector<Axf1ColumnId>& columns) {
     return read_axf1_chunk_columns(path_, chunk, columns);
 }
 
 std::expected<Axf1Chunk, std::string>
 Axf1FileReader::read_chunk_columns_profiled(const Axf1ChunkIndexEntry& chunk,
                                             const std::vector<Axf1ColumnId>& columns,
-                                            Axf1ChunkReadProfile& profile) const {
-    return read_axf1_chunk_columns_profiled(path_, chunk, columns, profile);
+                                            Axf1ChunkReadProfile& profile) {
+    auto bytes = read_range(chunk.chunk_offset, chunk.chunk_length);
+    if (!bytes) {
+        return std::unexpected(bytes.error());
+    }
+    return decode_chunk_bytes(*bytes, chunk, columns, &profile);
+}
+
+std::expected<Axf1Chunk, std::string>
+Axf1FileReader::read_chunk_columns_selective(const Axf1ChunkIndexEntry& chunk,
+                                             const std::vector<Axf1ColumnId>& columns,
+                                             Axf1ChunkReadProfile& profile) {
+    constexpr std::uint64_t kChunkFixedHeader = 4 + 4 + 4 + 4 + 2; // 18 bytes
+
+    auto header_bytes = read_range(chunk.chunk_offset, kChunkFixedHeader);
+    if (!header_bytes) {
+        return std::unexpected(header_bytes.error());
+    }
+    Reader header_reader(*header_bytes);
+    auto ref_id = header_reader.read_u32();
+    auto start_pos = header_reader.read_i32();
+    auto end_pos = header_reader.read_i32();
+    auto record_count = header_reader.read_u32();
+    auto column_count = header_reader.read_u16();
+    if (!ref_id || !start_pos || !end_pos || !record_count || !column_count) {
+        return std::unexpected("truncated AXF1 chunk");
+    }
+    if (*ref_id != chunk.ref_id || *start_pos != chunk.start_pos || *end_pos != chunk.end_pos ||
+        *record_count != chunk.record_count) {
+        return std::unexpected("AXF1 chunk metadata does not match index");
+    }
+
+    const std::uint64_t entries_size =
+        static_cast<std::uint64_t>(*column_count) * kColumnEntrySize;
+    auto entries_bytes = read_range(chunk.chunk_offset + kChunkFixedHeader, entries_size);
+    if (!entries_bytes) {
+        return std::unexpected(entries_bytes.error());
+    }
+    Reader entries_reader(*entries_bytes);
+    std::vector<ColumnEntry> entries;
+    entries.reserve(*column_count);
+    for (std::uint16_t col = 0; col < *column_count; ++col) {
+        auto cid = entries_reader.read_u16();
+        auto codec = entries_reader.read_u16();
+        auto offset = entries_reader.read_u64();
+        auto length = entries_reader.read_u64();
+        if (!cid || !codec || !offset || !length) {
+            return std::unexpected("truncated AXF1 column entry");
+        }
+        entries.push_back({.column_id = static_cast<Axf1ColumnId>(*cid),
+                           .codec_id = static_cast<Axf1CodecId>(*codec),
+                           .offset = *offset,
+                           .length = *length});
+    }
+
+    auto column_validation = validate_selected_column_entries(entries, columns);
+    if (!column_validation) {
+        return std::unexpected(column_validation.error());
+    }
+
+    const std::uint64_t payload_file_offset = chunk.chunk_offset + kChunkFixedHeader + entries_size;
+    std::uint64_t bytes_actually_read = kChunkFixedHeader + entries_size;
+
+    profile.bytes_read = 0;
+    profile.total_columns = static_cast<std::uint16_t>(entries.size());
+    profile.selected_columns = 0;
+    profile.total_payload_bytes = 0;
+    profile.selected_payload_bytes = 0;
+    for (const ColumnEntry& entry : entries) {
+        profile.total_payload_bytes += entry.length;
+        if (contains_column(columns, entry.column_id)) {
+            profile.selected_columns += 1;
+            profile.selected_payload_bytes += entry.length;
+        }
+    }
+
+    Axf1Chunk result{.ref_id = *ref_id, .start_pos = *start_pos, .end_pos = *end_pos};
+    result.records.resize(*record_count);
+
+    for (const ColumnEntry& entry : entries) {
+        if (!contains_column(columns, entry.column_id)) {
+            continue;
+        }
+        auto payload = read_range(payload_file_offset + entry.offset, entry.length);
+        if (!payload) {
+            return std::unexpected(payload.error());
+        }
+        bytes_actually_read += entry.length;
+
+        auto decode = decode_column_into_chunk(result, *record_count, entry, *payload);
+        if (!decode) {
+            return std::unexpected(decode.error());
+        }
+    }
+
+    profile.bytes_read = bytes_actually_read;
+    return result;
 }
 
 std::expected<void, std::string> write_axf1_file(const Axf1File& file,

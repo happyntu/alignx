@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -117,6 +119,10 @@ struct Axf1FileIndex {
 
 class Axf1FileReader {
 public:
+    Axf1FileReader(Axf1FileReader&&) noexcept;
+    Axf1FileReader& operator=(Axf1FileReader&&) noexcept;
+    ~Axf1FileReader();
+
     [[nodiscard]] static std::expected<Axf1FileReader, std::string>
     open(std::filesystem::path path);
 
@@ -126,25 +132,36 @@ public:
     query_chunks(std::uint32_t ref_id, std::int32_t start, std::int32_t end) const;
 
     [[nodiscard]] std::expected<Axf1Chunk, std::string>
-    read_chunk(const Axf1ChunkIndexEntry& chunk) const;
+    read_chunk(const Axf1ChunkIndexEntry& chunk);
 
     [[nodiscard]] std::expected<Axf1Chunk, std::string>
-    read_chunk_profiled(const Axf1ChunkIndexEntry& chunk, Axf1ChunkReadProfile& profile) const;
+    read_chunk_profiled(const Axf1ChunkIndexEntry& chunk, Axf1ChunkReadProfile& profile);
 
     [[nodiscard]] std::expected<Axf1Chunk, std::string>
     read_chunk_columns(const Axf1ChunkIndexEntry& chunk,
-                       const std::vector<Axf1ColumnId>& columns) const;
+                       const std::vector<Axf1ColumnId>& columns);
 
     [[nodiscard]] std::expected<Axf1Chunk, std::string>
     read_chunk_columns_profiled(const Axf1ChunkIndexEntry& chunk,
                                 const std::vector<Axf1ColumnId>& columns,
-                                Axf1ChunkReadProfile& profile) const;
+                                Axf1ChunkReadProfile& profile);
+
+    [[nodiscard]] std::expected<Axf1Chunk, std::string>
+    read_chunk_columns_selective(const Axf1ChunkIndexEntry& chunk,
+                                const std::vector<Axf1ColumnId>& columns,
+                                Axf1ChunkReadProfile& profile);
 
 private:
-    Axf1FileReader(std::filesystem::path path, Axf1FileIndex index);
+    Axf1FileReader(std::filesystem::path path, Axf1FileIndex index,
+                   std::unique_ptr<std::ifstream> stream, std::uint64_t file_size);
+
+    [[nodiscard]] std::expected<std::vector<unsigned char>, std::string>
+    read_range(std::uint64_t offset, std::uint64_t length);
 
     std::filesystem::path path_;
     Axf1FileIndex index_;
+    std::unique_ptr<std::ifstream> stream_;
+    std::uint64_t file_size_ = 0;
 };
 
 [[nodiscard]] std::expected<void, std::string> write_axf1_file(const Axf1File& file,
