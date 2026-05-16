@@ -174,7 +174,10 @@ and region-query correctness.
 - [x] QNAME dictionary encoding
   - `qname_dict` codec (ID 9): sorted unique dictionary with front compression + per-record varint indices; raw fallback when dict is not smaller
   - Design: `docs/research/axf1-qname-codec-design.md`
-- [ ] TAG per-stream encoding
+- [x] TAG per-stream encoding
+  - `tags_per_stream` codec (ID 10): decomposes per-record tag strings into per-tag-key streams with zigzag varint for integer tags, presence bitmaps for partial tag presence, raw fallback for inconsistent tag order or when per-stream is not smaller
+  - Design: `docs/research/axf1-tag-codec-design.md`
+  - HG002 chr1:1M-2M smoke: 250/324 chunks (77%) use `tags_per_stream`, 74 chunks fall back to raw; three-way SAM stdout SHA parity confirmed
 - [ ] `alignx index` — rebuild `.axf.idx` from existing `.axf`
 - [ ] Compression benchmark: AXF vs BAM vs CRAM (ratio, encode time, decode time)
 - [ ] Query benchmark: AXF vs BAM on region / coverage / pileup / filter workloads

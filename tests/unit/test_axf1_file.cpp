@@ -43,6 +43,7 @@ constexpr std::size_t kMapqColumnIndex = 3;
 constexpr std::size_t kCigarColumnIndex = 4;
 constexpr std::size_t kSeqColumnIndex = 8;
 constexpr std::size_t kQualColumnIndex = 9;
+constexpr std::size_t kTagsColumnIndex = 10;
 
 std::filesystem::path temp_path(std::string_view label) {
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -1356,6 +1357,8 @@ TEST(Axf1File, RejectsDuplicateRequiredColumn) {
     auto data = read_bytes(path);
     write_u16_at(data, column_entry_offset(data, 10) + kColumnIdOffset,
                  static_cast<std::uint16_t>(alignx::format::Axf1ColumnId::qname));
+    write_u16_at(data, column_entry_offset(data, 10) + kColumnCodecOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::raw));
     write_bytes(path, data);
 
     auto read = alignx::format::read_axf1_file(path);
@@ -2204,6 +2207,230 @@ TEST(Axf1File, RejectsQnameDictIndexOutOfRange) {
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
     EXPECT_NE(read.error().find("QNAME dict"), std::string::npos) << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, TagsPerStreamRoundTripsTypicalTags) {
+    const auto path = temp_path("alignx_axf1_tags_per_stream");
+    auto file = make_file();
+    file.chunks[0].records[0].tags = "NM:i:0\tHP:i:1";
+    file.chunks[0].records[1].tags = "NM:i:1\tHP:i:2";
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kTagsColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::tags_per_stream));
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].tags, "NM:i:0\tHP:i:1");
+    EXPECT_EQ(read->chunks[0].records[1].tags, "NM:i:1\tHP:i:2");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, TagsPerStreamRoundTripsNegativeInteger) {
+    const auto path = temp_path("alignx_axf1_tags_neg_int");
+    auto file = make_file();
+    file.chunks[0].records[0].tags = "XS:i:-5";
+    file.chunks[0].records[1].tags = "XS:i:-100";
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    EXPECT_EQ(read->chunks[0].records[0].tags, "XS:i:-5");
+    EXPECT_EQ(read->chunks[0].records[1].tags, "XS:i:-100");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, TagsPerStreamRoundTripsStringTag) {
+    const auto path = temp_path("alignx_axf1_tags_string");
+    auto file = make_file();
+    file.chunks[0].records[0].tags = "RG:Z:m64011_190830_220126";
+    file.chunks[0].records[1].tags = "RG:Z:m64011_190830_220126";
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    EXPECT_EQ(read->chunks[0].records[0].tags, "RG:Z:m64011_190830_220126");
+    EXPECT_EQ(read->chunks[0].records[1].tags, "RG:Z:m64011_190830_220126");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, TagsPerStreamHandlesPartialPresence) {
+    const auto path = temp_path("alignx_axf1_tags_partial");
+    auto file = make_file();
+    file.chunks[0].records[0].tags = "NM:i:0\tHP:i:1";
+    file.chunks[0].records[1].tags = "NM:i:1";
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    EXPECT_EQ(read->chunks[0].records[0].tags, "NM:i:0\tHP:i:1");
+    EXPECT_EQ(read->chunks[0].records[1].tags, "NM:i:1");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, TagsPerStreamHandlesEmptyTags) {
+    const auto path = temp_path("alignx_axf1_tags_empty");
+    auto file = make_file();
+    file.chunks[0].records[0].tags = "";
+    file.chunks[0].records[1].tags = "";
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    EXPECT_EQ(read->chunks[0].records[0].tags, "");
+    EXPECT_EQ(read->chunks[0].records[1].tags, "");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, TagsPerStreamHandlesMixedEmptyAndPresent) {
+    const auto path = temp_path("alignx_axf1_tags_mixed_empty");
+    auto file = make_file();
+    file.chunks[0].records[0].tags = "NM:i:0\tHP:i:1";
+    file.chunks[0].records[1].tags = "";
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    EXPECT_EQ(read->chunks[0].records[0].tags, "NM:i:0\tHP:i:1");
+    EXPECT_EQ(read->chunks[0].records[1].tags, "");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, TagsPerStreamFallsBackOnInconsistentOrder) {
+    const auto path = temp_path("alignx_axf1_tags_order_fallback");
+    auto file = make_file();
+    file.chunks[0].records[0].tags = "NM:i:0\tHP:i:1";
+    file.chunks[0].records[1].tags = "HP:i:2\tNM:i:1";
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kTagsColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::raw));
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    EXPECT_EQ(read->chunks[0].records[0].tags, "NM:i:0\tHP:i:1");
+    EXPECT_EQ(read->chunks[0].records[1].tags, "HP:i:2\tNM:i:1");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, TagsPerStreamSmallerThanRawForMultipleRecords) {
+    const auto path = temp_path("alignx_axf1_tags_size");
+    auto file = make_file();
+    file.chunks[0].records.clear();
+    for (int i = 0; i < 16; ++i) {
+        file.chunks[0].records.push_back(
+            {.qname = "read" + std::to_string(i),
+             .flag = 0,
+             .pos = static_cast<std::int32_t>(100 + i),
+             .mapq = 60,
+             .cigar = "10M",
+             .mate_reference = "*",
+             .mate_pos = 0,
+             .template_length = 0,
+             .sequence = "ACGTACGTAA",
+             .quality = "FFFFFFFFFF",
+             .tags = "NM:i:" + std::to_string(i) + "\tHP:i:1\tPS:i:12345\tRG:Z:group1"});
+    }
+    file.chunks[0].end_pos = 126;
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kTagsColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::tags_per_stream));
+
+    const auto per_stream_length =
+        read_u64_at(data, column_entry_offset(data, kTagsColumnIndex) + kColumnLengthOffset);
+    std::uint64_t raw_total = 0;
+    for (const auto& record : file.chunks[0].records) {
+        raw_total += sizeof(std::uint32_t) + record.tags.size();
+    }
+    EXPECT_LT(per_stream_length, raw_total);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks[0].records.size(), 16);
+    for (int i = 0; i < 16; ++i) {
+        EXPECT_EQ(read->chunks[0].records[static_cast<std::size_t>(i)].tags,
+                  "NM:i:" + std::to_string(i) + "\tHP:i:1\tPS:i:12345\tRG:Z:group1");
+    }
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedTagsPerStream) {
+    const auto path = temp_path("alignx_axf1_truncated_tags");
+    auto file = make_file();
+    file.chunks[0].records[0].tags = "NM:i:0\tHP:i:1";
+    file.chunks[0].records[1].tags = "NM:i:1\tHP:i:2";
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kTagsColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::tags_per_stream));
+    write_u64_at(data, column_entry_offset(data, kTagsColumnIndex) + kColumnLengthOffset, 1);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("TAG stream"), std::string::npos) << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTagsPerStreamPresenceCountMismatch) {
+    const auto path = temp_path("alignx_axf1_tags_count_mismatch");
+    auto file = make_file();
+    file.chunks[0].records[0].tags = "NM:i:0\tHP:i:1";
+    file.chunks[0].records[1].tags = "NM:i:1\tHP:i:2";
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kTagsColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::tags_per_stream));
+
+    const auto payload_offset = column_payload_offset(data, kTagsColumnIndex);
+    std::size_t cursor = payload_offset;
+    read_varint_at(data, cursor);
+    cursor += 3 * 2;
+    cursor += 1 + 1;
+    data.at(cursor) = 99;
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("TAG stream"), std::string::npos) << read.error();
 
     std::filesystem::remove(path);
 }

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <fstream>
 #include <limits>
 #include <map>
@@ -89,6 +90,12 @@ void append_varint_u64(std::vector<unsigned char>& bytes, std::uint64_t value) {
     bytes.push_back(static_cast<unsigned char>(value));
 }
 
+void append_zigzag_varint_i64(std::vector<unsigned char>& bytes, std::int64_t value) {
+    const auto encoded = static_cast<std::uint64_t>(
+        (value << 1) ^ (value >> 63));
+    append_varint_u64(bytes, encoded);
+}
+
 void append_string(std::vector<unsigned char>& bytes, std::string_view value) {
     append_u32(bytes, static_cast<std::uint32_t>(value.size()));
     bytes.insert(bytes.end(), value.begin(), value.end());
@@ -167,6 +174,15 @@ public:
             }
         }
         return std::unexpected("AXF1 varint overflow");
+    }
+
+    [[nodiscard]] std::expected<std::int64_t, std::string> read_zigzag_varint_i64() {
+        auto raw = read_varint_u64();
+        if (!raw) {
+            return std::unexpected(raw.error());
+        }
+        const auto v = *raw;
+        return static_cast<std::int64_t>((v >> 1) ^ (~(v & 1) + 1));
     }
 
     [[nodiscard]] std::expected<void, std::string> seek(std::uint64_t offset) {
@@ -1081,6 +1097,165 @@ encode_quality_column(const std::vector<Axf1Record>& records, const Axf1WriteOpt
 #endif
 }
 
+struct ParsedTag {
+    char key0 = 0;
+    char key1 = 0;
+    char type = 0;
+    std::string_view value;
+};
+
+struct TagKeyEntry {
+    char key0 = 0;
+    char key1 = 0;
+    char type = 0;
+};
+
+std::expected<std::vector<ParsedTag>, std::string>
+parse_tags(std::string_view tags) {
+    std::vector<ParsedTag> result;
+    if (tags.empty()) {
+        return result;
+    }
+    std::size_t pos = 0;
+    while (pos < tags.size()) {
+        auto tab = tags.find('\t', pos);
+        auto field = tags.substr(pos, tab == std::string_view::npos ? std::string_view::npos : tab - pos);
+        if (field.size() < 5 || field[2] != ':' || field[4] != ':') {
+            return std::unexpected("malformed SAM tag");
+        }
+        result.push_back({.key0 = static_cast<char>(field[0]),
+                          .key1 = static_cast<char>(field[1]),
+                          .type = static_cast<char>(field[3]),
+                          .value = field.substr(5)});
+        pos = (tab == std::string_view::npos) ? tags.size() : tab + 1;
+    }
+    return result;
+}
+
+std::expected<std::vector<unsigned char>, std::string>
+encode_tags_per_stream_payload(const std::vector<Axf1Record>& records) {
+    if (records.empty()) {
+        return std::vector<unsigned char>{};
+    }
+
+    const auto record_count = records.size();
+    std::vector<std::vector<ParsedTag>> all_tags;
+    all_tags.reserve(record_count);
+    for (const auto& record : records) {
+        auto parsed = parse_tags(record.tags);
+        if (!parsed) {
+            return std::unexpected(parsed.error());
+        }
+        all_tags.push_back(std::move(*parsed));
+    }
+
+    std::vector<TagKeyEntry> canonical;
+    std::map<std::pair<char, char>, std::size_t> key_index;
+    for (const auto& record_tags : all_tags) {
+        for (const auto& tag : record_tags) {
+            auto key = std::make_pair(tag.key0, tag.key1);
+            auto it = key_index.find(key);
+            if (it == key_index.end()) {
+                key_index[key] = canonical.size();
+                canonical.push_back({.key0 = tag.key0, .key1 = tag.key1, .type = tag.type});
+            } else if (canonical[it->second].type != tag.type) {
+                return std::unexpected("tag type conflict");
+            }
+        }
+    }
+
+    if (canonical.empty()) {
+        std::vector<unsigned char> bytes;
+        append_varint_u64(bytes, 0);
+        return bytes;
+    }
+
+    for (const auto& record_tags : all_tags) {
+        std::size_t last_canonical_index = 0;
+        bool first = true;
+        for (const auto& tag : record_tags) {
+            auto idx = key_index[std::make_pair(tag.key0, tag.key1)];
+            if (!first && idx <= last_canonical_index) {
+                return std::unexpected("tag order mismatch");
+            }
+            last_canonical_index = idx;
+            first = false;
+        }
+    }
+
+    const auto tag_count = canonical.size();
+    const auto bitmap_bytes = (record_count + 7) / 8;
+
+    std::vector<std::vector<bool>> presence(tag_count, std::vector<bool>(record_count, false));
+    std::vector<std::vector<std::string_view>> values(tag_count);
+
+    for (std::size_t r = 0; r < record_count; ++r) {
+        for (const auto& tag : all_tags[r]) {
+            auto idx = key_index[std::make_pair(tag.key0, tag.key1)];
+            presence[idx][r] = true;
+            values[idx].push_back(tag.value);
+        }
+    }
+
+    std::vector<unsigned char> bytes;
+    append_varint_u64(bytes, tag_count);
+    for (const auto& entry : canonical) {
+        bytes.push_back(static_cast<unsigned char>(entry.key0));
+        bytes.push_back(static_cast<unsigned char>(entry.key1));
+        bytes.push_back(static_cast<unsigned char>(entry.type));
+    }
+
+    for (std::size_t t = 0; t < tag_count; ++t) {
+        bool all_present = (values[t].size() == record_count);
+        bytes.push_back(all_present ? 0x01 : 0x00);
+        if (!all_present) {
+            for (std::size_t byte_idx = 0; byte_idx < bitmap_bytes; ++byte_idx) {
+                unsigned char bits = 0;
+                for (std::size_t bit = 0; bit < 8 && byte_idx * 8 + bit < record_count; ++bit) {
+                    if (presence[t][byte_idx * 8 + bit]) {
+                        bits |= static_cast<unsigned char>(1U << bit);
+                    }
+                }
+                bytes.push_back(bits);
+            }
+        }
+    }
+
+    for (std::size_t t = 0; t < tag_count; ++t) {
+        append_varint_u64(bytes, values[t].size());
+        if (canonical[t].type == 'i') {
+            for (const auto& val : values[t]) {
+                std::int64_t int_val = 0;
+                auto [ptr, ec] = std::from_chars(val.data(), val.data() + val.size(), int_val);
+                if (ec != std::errc{} || ptr != val.data() + val.size()) {
+                    return std::unexpected("invalid integer tag value");
+                }
+                append_zigzag_varint_i64(bytes, int_val);
+            }
+        } else {
+            for (const auto& val : values[t]) {
+                append_varint_u64(bytes, val.size());
+                bytes.insert(bytes.end(), val.begin(), val.end());
+            }
+        }
+    }
+
+    return bytes;
+}
+
+EncodedColumn encode_tags_column(const std::vector<Axf1Record>& records) {
+    auto raw = encode_strings(records, &Axf1Record::tags);
+    auto per_stream = encode_tags_per_stream_payload(records);
+    if (per_stream && per_stream->size() < raw.size()) {
+        return {.column_id = Axf1ColumnId::tags,
+                .codec_id = Axf1CodecId::tags_per_stream,
+                .payload = std::move(*per_stream)};
+    }
+    return {.column_id = Axf1ColumnId::tags,
+            .codec_id = Axf1CodecId::raw,
+            .payload = std::move(raw)};
+}
+
 std::expected<std::vector<EncodedColumn>, std::string>
 encode_columns(const Axf1Chunk& chunk, const Axf1WriteOptions& options) {
     auto flag_column = encode_flag_column(chunk.records);
@@ -1108,9 +1283,7 @@ encode_columns(const Axf1Chunk& chunk, const Axf1WriteOptions& options) {
          .payload = encode_i32(chunk.records, &Axf1Record::template_length)},
         std::move(sequence_column),
         std::move(*quality_column),
-        {.column_id = Axf1ColumnId::tags,
-         .codec_id = Axf1CodecId::raw,
-         .payload = encode_strings(chunk.records, &Axf1Record::tags)}};
+        encode_tags_column(chunk.records)};
 }
 
 std::expected<std::vector<unsigned char>, std::string>
@@ -1728,6 +1901,144 @@ decode_qual_pack_column(const std::vector<unsigned char>& bytes, std::uint32_t r
     return values;
 }
 
+std::expected<std::vector<std::string>, std::string>
+decode_tags_per_stream_column(const std::vector<unsigned char>& bytes,
+                              std::uint32_t record_count) {
+    Reader reader(bytes);
+
+    auto tag_count_val = reader.read_varint_u64();
+    if (!tag_count_val) {
+        return std::unexpected("AXF1 TAG stream: truncated tag_count");
+    }
+    const auto tag_count = static_cast<std::uint32_t>(*tag_count_val);
+
+    if (tag_count == 0) {
+        if (reader.offset() != reader.size()) {
+            return std::unexpected("AXF1 TAG stream column has trailing bytes");
+        }
+        return std::vector<std::string>(record_count);
+    }
+
+    struct TagHeader {
+        char key0 = 0;
+        char key1 = 0;
+        char type = 0;
+    };
+    std::vector<TagHeader> headers(tag_count);
+    for (std::uint32_t t = 0; t < tag_count; ++t) {
+        auto k0 = reader.read_u8();
+        if (!k0) {
+            return std::unexpected("AXF1 TAG stream: truncated tag key");
+        }
+        auto k1 = reader.read_u8();
+        if (!k1) {
+            return std::unexpected("AXF1 TAG stream: truncated tag key");
+        }
+        auto tp = reader.read_u8();
+        if (!tp) {
+            return std::unexpected("AXF1 TAG stream: truncated tag type");
+        }
+        headers[t] = {.key0 = static_cast<char>(*k0),
+                       .key1 = static_cast<char>(*k1),
+                       .type = static_cast<char>(*tp)};
+    }
+
+    const auto bitmap_bytes = (record_count + 7U) / 8U;
+    std::vector<std::vector<bool>> presence(tag_count);
+    for (std::uint32_t t = 0; t < tag_count; ++t) {
+        auto flag = reader.read_u8();
+        if (!flag) {
+            return std::unexpected("AXF1 TAG stream: truncated presence flag");
+        }
+        if (*flag == 0x01) {
+            presence[t].assign(record_count, true);
+        } else if (*flag == 0x00) {
+            presence[t].resize(record_count, false);
+            for (std::uint32_t byte_idx = 0; byte_idx < bitmap_bytes; ++byte_idx) {
+                auto bits = reader.read_u8();
+                if (!bits) {
+                    return std::unexpected("AXF1 TAG stream: truncated presence bitmap");
+                }
+                for (std::uint32_t bit = 0; bit < 8 && byte_idx * 8 + bit < record_count; ++bit) {
+                    if ((*bits >> bit) & 1U) {
+                        presence[t][byte_idx * 8 + bit] = true;
+                    }
+                }
+            }
+        } else {
+            return std::unexpected("AXF1 TAG stream: invalid presence flag");
+        }
+    }
+
+    std::vector<std::vector<std::string>> tag_values(tag_count);
+    for (std::uint32_t t = 0; t < tag_count; ++t) {
+        auto present_count_val = reader.read_varint_u64();
+        if (!present_count_val) {
+            return std::unexpected("AXF1 TAG stream: truncated present_count");
+        }
+        const auto present_count = static_cast<std::uint32_t>(*present_count_val);
+        std::uint32_t expected_count = 0;
+        for (std::uint32_t r = 0; r < record_count; ++r) {
+            if (presence[t][r]) {
+                ++expected_count;
+            }
+        }
+        if (present_count != expected_count) {
+            return std::unexpected("AXF1 TAG stream presence count mismatch");
+        }
+
+        tag_values[t].reserve(present_count);
+        if (headers[t].type == 'i') {
+            for (std::uint32_t v = 0; v < present_count; ++v) {
+                auto int_val = reader.read_zigzag_varint_i64();
+                if (!int_val) {
+                    return std::unexpected("AXF1 TAG stream: truncated integer value");
+                }
+                tag_values[t].push_back(std::to_string(*int_val));
+            }
+        } else {
+            for (std::uint32_t v = 0; v < present_count; ++v) {
+                auto len = reader.read_varint_u64();
+                if (!len) {
+                    return std::unexpected("AXF1 TAG stream: truncated string value length");
+                }
+                auto str = reader.read_string(static_cast<std::size_t>(*len));
+                if (!str) {
+                    return std::unexpected("AXF1 TAG stream: truncated string value");
+                }
+                tag_values[t].push_back(std::move(*str));
+            }
+        }
+    }
+
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 TAG stream column has trailing bytes");
+    }
+
+    std::vector<std::string> results(record_count);
+    std::vector<std::uint32_t> value_cursors(tag_count, 0);
+    for (std::uint32_t r = 0; r < record_count; ++r) {
+        std::string& out = results[r];
+        for (std::uint32_t t = 0; t < tag_count; ++t) {
+            if (!presence[t][r]) {
+                continue;
+            }
+            if (!out.empty()) {
+                out.push_back('\t');
+            }
+            out.push_back(headers[t].key0);
+            out.push_back(headers[t].key1);
+            out.push_back(':');
+            out.push_back(headers[t].type);
+            out.push_back(':');
+            out.append(tag_values[t][value_cursors[t]]);
+            ++value_cursors[t];
+        }
+    }
+
+    return results;
+}
+
 bool is_known_column(Axf1ColumnId column_id) {
     return std::find(kRequiredColumns.begin(), kRequiredColumns.end(), column_id) !=
            kRequiredColumns.end();
@@ -1745,7 +2056,8 @@ bool is_supported_column_codec(Axf1ColumnId column_id, Axf1CodecId codec_id) {
            (column_id == Axf1ColumnId::sequence && codec_id == Axf1CodecId::seq_2bit_literal) ||
            (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_rle) ||
            (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_pack) ||
-           (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_pack_compressed);
+           (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_pack_compressed) ||
+           (column_id == Axf1ColumnId::tags && codec_id == Axf1CodecId::tags_per_stream);
 }
 
 bool contains_column(const std::vector<Axf1ColumnId>& columns, Axf1ColumnId column_id) {
@@ -1871,18 +2183,25 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
         }
         break;
     }
-    case Axf1ColumnId::mate_reference:
-    case Axf1ColumnId::tags: {
+    case Axf1ColumnId::mate_reference: {
         auto values = decode_string_column(payload, record_count);
         if (!values) {
             return std::unexpected(values.error());
         }
         for (std::uint32_t i = 0; i < record_count; ++i) {
-            if (entry.column_id == Axf1ColumnId::mate_reference) {
-                chunk.records[i].mate_reference = std::move(values->at(i));
-            } else {
-                chunk.records[i].tags = std::move(values->at(i));
-            }
+            chunk.records[i].mate_reference = std::move(values->at(i));
+        }
+        break;
+    }
+    case Axf1ColumnId::tags: {
+        auto values = entry.codec_id == Axf1CodecId::tags_per_stream
+                          ? decode_tags_per_stream_column(payload, record_count)
+                          : decode_string_column(payload, record_count);
+        if (!values) {
+            return std::unexpected(values.error());
+        }
+        for (std::uint32_t i = 0; i < record_count; ++i) {
+            chunk.records[i].tags = std::move(values->at(i));
         }
         break;
     }

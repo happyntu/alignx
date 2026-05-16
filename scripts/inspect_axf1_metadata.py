@@ -43,6 +43,7 @@ CODEC_NAMES = {
     7: "qual_pack",
     8: "qual_pack_compressed",
     9: "qname_dict",
+    10: "tags_per_stream",
 }
 
 
