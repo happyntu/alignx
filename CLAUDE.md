@@ -33,7 +33,7 @@ Completed:
 - `convert::convert_bam_to_axf1_mvp()` for toy BAM -> AXF1 correctness work
 - `alignx convert --format AXF1` opt-in path and `.axf1` view routing
 - AXF1 metadata-first reader for `.axf1` region view; query decodes only overlapping chunks
-- AXF1 view uses selective `POS` + `CIGAR` column decode before full output decode
+- AXF1 view uses selective `POS` + `CIGAR` column decode before lazy output-column decode for matched records
 - AXF1 converter writes deterministic MVP chunks for toy correctness work
 - `alignx view` detects AXF0/AXF1 inputs by file magic before extension assumptions
 - AXF1 tests cover multi-chunk and multi-reference query ordering
@@ -95,6 +95,8 @@ Completed:
 - Remote HG002 chr1:1M-2M engineering benchmark completed for `alignx view` vs `samtools view`
 - AXF1 view profiling hook: `ALIGNX_PROFILE_AXF1=1` emits AXF1-specific stderr TSV counters for chunk selection, selective decode, output-column decode, filtering, formatting, writing, and byte totals without changing SAM stdout
 - AXF1 profiling preflight completed on missmi-server00 for HG002 `chr1:1000000-1010000`; stdout SHA matched `samtools view`, and the first snapshot shows output-column decode dominating selective decode and formatting time
+- `alignx coverage <bam|axf1> <region>` subcommand: POS-only selective column decode for per-base coverage, with `--output-mode summary|tsv` and `ALIGNX_PROFILE_COVERAGE=1` profiling hook
+- AXF1 coverage path reads only POS+CIGAR columns; BAM coverage path uses HTSlib full-record parse as baseline comparison
 
 Remaining implementation targets:
 - Round-trip fidelity: BAM → AXF → BAM → diff
@@ -240,7 +242,8 @@ alignx convert  <input.bam|cram>  -o <output.axf>      # BAM/CRAM → AXF0 by de
 alignx convert  <input.bam>       -o <output.axf1> --format AXF1 # opt-in columnar AXF1 MVP
 alignx view     <input.axf|axf1|bam> [region]           # region query → SAM stdout
 alignx export   <input.axf>       -o <output.bam|cram> # AXF → BAM/CRAM
-alignx pileup   <input.axf|bam>   <region>             # per-base coverage
+alignx coverage <input.axf1|bam> <region>               # per-base coverage (POS-only for AXF1)
+alignx pileup   <input.axf|bam>   <region>             # per-base coverage (planned)
 alignx stats    <input.axf|bam>                        # flag/MAPQ/insert stats
 alignx index    <input.bam|axf>  [-o output.axf.idx]    # build/rebuild .axf.idx
 ```

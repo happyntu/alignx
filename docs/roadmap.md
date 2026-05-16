@@ -99,6 +99,8 @@ and region-query correctness.
 - [x] Scripted AXF1 zstd quality writer smoke on HG002 chr1 small region
 - [x] AXF1 LZ4 compressed payload decision: reserve id 2, defer implementation pending profiling evidence
 - [x] AXF1 QUAL query-impact observation design note: define future benchmark axes for wrapper vs QUAL-specific model
+- [x] AXF1 lazy output-column decode for matched records
+- [x] `alignx coverage` subcommand: POS-only AXF1 selective column decode for per-base coverage, with BAM full-record baseline and profiling hook
 - [ ] `AxfFileWriter`: chunk header, column streams, chunk footer, file index
 - [ ] `AxfFileReader`: chunk seek, per-column read
 - [ ] Codec design: SEQ reference-delta with reference identity metadata
@@ -112,8 +114,9 @@ and region-query correctness.
 - [ ] Round-trip fidelity: BAM → AXF → BAM → diff
   - AXF1 round-trip smoke now uses `scripts/smoke_axf_roundtrip.sh --format AXF1`; the remaining gap is a true AXF export path if/when we decide the round-trip target must emit BAM directly.
 - [ ] Benchmark: AXF coverage (POS only) vs BAM full-record parse on chr1
-  - Timed benchmark completed on missmi-server00 for chr1:1000000-2000000, chr1:121000000-142000000, and chrY:20000000-21000000; AXF1 view was correct but slower than BAM-backed view on all tested regions. See `docs/research/phase1-axf1-view-benchmark-results.md`.
-  - `ALIGNX_PROFILE_AXF1=1` now provides AXF1-specific query-path timing and byte counters, and a correctness-only remote preflight has already run on HG002 chr1:1000000-1010000. The current small-region snapshot shows output-column decode still dominates selective decode and formatting by a wide margin, so the next optimization pass should start there.
+  - Prior `alignx view` benchmark measured full-record decode and was 4.5-5.9x slower than BAM; that comparison exercises output-column decode, not the selective-column advantage.
+  - `alignx coverage` now provides a POS-only query path reading only POS+CIGAR columns from AXF1 while BAM must parse full records. `ALIGNX_PROFILE_COVERAGE=1` confirms zero output-column decode cost.
+  - Remote timed benchmark on HG002 regions is the next step to demonstrate the columnar selective I/O advantage.
 
 **SIMD option (off by default):**
 - AVX2 delta decode of POS stream

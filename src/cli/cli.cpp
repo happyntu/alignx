@@ -27,8 +27,10 @@
 #include "index/bam_index_projection.hpp"
 #include "index/csi_reader.hpp"
 #include "io/bam_reader.hpp"
+#include "query/axf1_coverage.hpp"
 #include "query/axf1_view.hpp"
 #include "query/axf_view.hpp"
+#include "query/bam_coverage.hpp"
 
 namespace alignx::cli {
 namespace {
@@ -537,6 +539,117 @@ int run_index(const std::filesystem::path& input, const std::filesystem::path& r
     return 0;
 }
 
+bool coverage_profile_enabled() {
+    const auto value = get_env_value("ALIGNX_PROFILE_COVERAGE");
+    return value.has_value() && !value->empty() && *value != "0";
+}
+
+void write_axf1_coverage_profile(const query::Axf1CoverageProfile& profile,
+                                 Clock::duration total_time, std::ostream& err) {
+    err << "profile\tchunks_selected\tchunks_with_matches\trecords_scanned\trecords_matched"
+           "\topen_ms\tref_lookup_ms\tchunk_query_ms\tselective_decode_ms"
+           "\tfilter_ms\tcoverage_ms\ttotal_ms\tselective_bytes_read"
+           "\tselective_payload_bytes\n";
+    err << "axf1_coverage\t" << profile.chunks_selected << '\t' << profile.chunks_with_matches
+        << '\t' << profile.records_scanned << '\t' << profile.records_matched << '\t'
+        << milliseconds(profile.open_time) << '\t' << milliseconds(profile.reference_lookup_time)
+        << '\t' << milliseconds(profile.chunk_query_time) << '\t'
+        << milliseconds(profile.selective_decode_time) << '\t' << milliseconds(profile.filter_time)
+        << '\t' << milliseconds(profile.coverage_time) << '\t' << milliseconds(total_time) << '\t'
+        << profile.selective_bytes_read << '\t' << profile.selective_payload_bytes << '\n';
+}
+
+void write_bam_coverage_profile(const query::BamCoverageProfile& profile,
+                                Clock::duration total_time, std::ostream& err) {
+    err << "profile\trecords_scanned\trecords_matched\topen_ms\tfetch_ms\tread_ms"
+           "\tcoverage_ms\ttotal_ms\n";
+    err << "bam_coverage\t" << profile.records_scanned << '\t' << profile.records_matched << '\t'
+        << milliseconds(profile.open_time) << '\t' << milliseconds(profile.fetch_time) << '\t'
+        << milliseconds(profile.read_time) << '\t' << milliseconds(profile.coverage_time) << '\t'
+        << milliseconds(total_time) << '\n';
+}
+
+void write_coverage_tsv(const analysis::CoverageResult& result, std::ostream& out) {
+    for (std::size_t i = 0; i < result.depth.size(); ++i) {
+        const auto pos_1based = result.start + static_cast<std::int32_t>(i) + 1;
+        out << result.reference << '\t' << pos_1based << '\t' << result.depth[i] << '\n';
+    }
+}
+
+void write_coverage_summary(const analysis::CoverageResult& result, std::ostream& out) {
+    out << "reference\t" << result.reference << '\n';
+    out << "start\t" << (result.start + 1) << '\n';
+    out << "end\t" << result.end << '\n';
+    out << "bases\t" << result.depth.size() << '\n';
+    out << "records\t" << result.records_counted << '\n';
+    std::uint64_t covered = 0;
+    std::uint64_t total_depth = 0;
+    for (auto d : result.depth) {
+        if (d > 0) {
+            ++covered;
+        }
+        total_depth += d;
+    }
+    out << "covered_bases\t" << covered << '\n';
+    out << "total_depth\t" << total_depth << '\n';
+    if (!result.depth.empty()) {
+        const double mean =
+            static_cast<double>(total_depth) / static_cast<double>(result.depth.size());
+        out << "mean_depth\t" << mean << '\n';
+    }
+}
+
+int run_coverage(const std::filesystem::path& input, const std::string& region,
+                 std::string_view output_mode, std::optional<int> hts_threads, std::ostream& out,
+                 std::ostream& err) {
+    const bool profile_enabled = coverage_profile_enabled();
+    const auto total_start = profile_enabled ? Clock::now() : Clock::time_point{};
+
+    const auto format = detect_view_input_format(input);
+    if (format == ViewInputFormat::axf1) {
+        query::Axf1CoverageProfile profile;
+        auto result = profile_enabled
+                          ? query::compute_axf1_coverage_profiled(input, region, profile)
+                          : query::compute_axf1_coverage(input, region);
+        if (!result) {
+            err << "alignx coverage: " << result.error() << '\n';
+            return 1;
+        }
+        if (output_mode == "tsv") {
+            write_coverage_tsv(*result, out);
+        } else {
+            write_coverage_summary(*result, out);
+        }
+        if (profile_enabled) {
+            write_axf1_coverage_profile(profile, Clock::now() - total_start, err);
+        }
+        return 0;
+    }
+
+    if (format == ViewInputFormat::axf0 || format == ViewInputFormat::unsupported_axf) {
+        err << "alignx coverage: AXF0 coverage is not supported; use AXF1 or BAM input\n";
+        return 1;
+    }
+
+    query::BamCoverageProfile profile;
+    auto result = profile_enabled
+                      ? query::compute_bam_coverage_profiled(input, region, profile, hts_threads)
+                      : query::compute_bam_coverage(input, region, hts_threads);
+    if (!result) {
+        err << "alignx coverage: " << result.error() << '\n';
+        return 1;
+    }
+    if (output_mode == "tsv") {
+        write_coverage_tsv(*result, out);
+    } else {
+        write_coverage_summary(*result, out);
+    }
+    if (profile_enabled) {
+        write_bam_coverage_profile(profile, Clock::now() - total_start, err);
+    }
+    return 0;
+}
+
 } // namespace
 
 int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
@@ -577,6 +690,22 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     convert_cmd->add_option("--axf1-quality-compression", convert_axf1_quality_compression,
                             "AXF1 quality payload compression: none or zstd");
 
+    std::filesystem::path coverage_input;
+    std::string coverage_region;
+    std::string coverage_output_mode = "summary";
+    int coverage_hts_threads = -1;
+    auto* coverage_cmd =
+        app.add_subcommand("coverage", "Compute per-base coverage for a BAM or AXF1 region");
+    coverage_cmd->add_option("input", coverage_input, "Input BAM or AXF1 file")
+        ->required()
+        ->check(::CLI::ExistingFile);
+    coverage_cmd->add_option("region", coverage_region, "Genomic region, for example chr1:1-1000")
+        ->required();
+    coverage_cmd->add_option("--output-mode", coverage_output_mode,
+                             "Output format: summary or tsv");
+    coverage_cmd->add_option("--hts-threads", coverage_hts_threads,
+                             "HTSlib worker threads for BAM I/O");
+
     std::filesystem::path index_input;
     std::filesystem::path index_output;
     auto* index_cmd = app.add_subcommand("index", "Build an AXF index from a BAM index");
@@ -606,6 +735,20 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     if (*convert_cmd) {
         return run_convert(convert_input, convert_output, convert_region, convert_format,
                            convert_axf1_quality_compression, out, err);
+    }
+    if (*coverage_cmd) {
+        if (coverage_output_mode != "summary" && coverage_output_mode != "tsv") {
+            err << "alignx coverage: --output-mode must be summary or tsv\n";
+            return 1;
+        }
+        if (coverage_hts_threads < -1) {
+            err << "alignx coverage: --hts-threads must be a non-negative integer\n";
+            return 1;
+        }
+        const auto hts_threads =
+            coverage_hts_threads >= 0 ? std::optional<int>{coverage_hts_threads} : std::nullopt;
+        return run_coverage(coverage_input, coverage_region, coverage_output_mode, hts_threads, out,
+                            err);
     }
     if (*index_cmd) {
         return run_index(index_input, index_output, out, err);
