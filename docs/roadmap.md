@@ -184,7 +184,13 @@ and region-query correctness.
   - Design: `docs/research/axf1-tag-codec-design.md`
   - HG002 chr1:1M-2M smoke: 250/324 chunks (77%) use `tags_per_stream`, 74 chunks fall back to raw; three-way SAM stdout SHA parity confirmed
 - [ ] `alignx index` — rebuild `.axf.idx` from existing `.axf`
-- [ ] Compression benchmark: AXF vs BAM vs CRAM (ratio, encode time, decode time)
+- [x] Compression benchmark: AXF vs BAM vs CRAM (ratio, encode time, decode time)
+  - `scripts/bench_compression.sh` harness: 6 format configs (bam, cram, axf1, axf1_zstd, axf1_lossy, axf1_lossy_zstd) with correctness preflight + file size + timed encode/decode
+  - HG002 results across 3 regions (chr1:1M-2M, chrY:20M-21M, chr1:121M-142M centromeric)
+  - AXF1 lossy+zstd: **0.52x-0.96x** BAM size, encode **0.84x-0.93x** BAM (faster)
+  - AXF1 lossy+zstd matches or beats CRAM on 1 Mb regions; CRAM wins on centromeric 21 Mb
+  - CRAM encode 9-14x slower on 1 Mb, 1.08x on 21 Mb (startup amortization)
+  - See `docs/research/v1-compression-benchmark-results.md`
 - [ ] Query benchmark: AXF vs BAM on region / coverage / pileup / filter workloads
 - [ ] Draft methods section for benchmark paper
 
