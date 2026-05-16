@@ -157,76 +157,80 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
                 profile.records_output += 1;
             }
             profile.format_time += Clock::now() - format_start;
-            continue;
-        }
-
-        // Two-pass: selective filter columns first, then output columns if needed
-        format::Axf1ChunkReadProfile selective_profile;
-        const auto selective_decode_start = Clock::now();
-        auto filter_chunk =
-            reader->read_chunk_columns_selective(*chunk_entry, filter_columns, selective_profile);
-        profile.selective_decode_time += Clock::now() - selective_decode_start;
-        if (!filter_chunk) {
-            return std::unexpected(filter_chunk.error());
-        }
-        profile.selective_bytes_read += selective_profile.bytes_read;
-        profile.selective_payload_bytes += selective_profile.selected_payload_bytes;
-
-        std::vector<std::size_t> matching_records;
-        const auto filter_start = Clock::now();
-        for (std::size_t record_index = 0; record_index < filter_chunk->records.size();
-             ++record_index) {
-            profile.records_scanned += 1;
-            const auto& rec = filter_chunk->records[record_index];
-            auto overlaps = record_overlaps_region(rec, *parsed_region);
-            if (!overlaps) {
-                return std::unexpected(overlaps.error());
+        } else {
+            // Two-pass: selective filter columns first, then output columns if needed
+            format::Axf1ChunkReadProfile selective_profile;
+            const auto selective_decode_start = Clock::now();
+            auto filter_chunk = reader->read_chunk_columns_selective(*chunk_entry, filter_columns,
+                                                                     selective_profile);
+            profile.selective_decode_time += Clock::now() - selective_decode_start;
+            if (!filter_chunk) {
+                return std::unexpected(filter_chunk.error());
             }
-            if (!*overlaps) {
+            profile.selective_bytes_read += selective_profile.bytes_read;
+            profile.selective_payload_bytes += selective_profile.selected_payload_bytes;
+
+            std::vector<std::size_t> matching_records;
+            const auto filter_start = Clock::now();
+            for (std::size_t record_index = 0; record_index < filter_chunk->records.size();
+                 ++record_index) {
+                profile.records_scanned += 1;
+                const auto& rec = filter_chunk->records[record_index];
+                auto overlaps = record_overlaps_region(rec, *parsed_region);
+                if (!overlaps) {
+                    return std::unexpected(overlaps.error());
+                }
+                if (!*overlaps) {
+                    continue;
+                }
+                if (!passes_filter(filter, rec.flag, rec.mapq)) {
+                    profile.records_filtered += 1;
+                    continue;
+                }
+                matching_records.push_back(record_index);
+                profile.records_matched += 1;
+            }
+            profile.filter_time += Clock::now() - filter_start;
+            if (matching_records.empty()) {
                 continue;
             }
-            if (!passes_filter(filter, rec.flag, rec.mapq)) {
-                profile.records_filtered += 1;
-                continue;
+            profile.chunks_with_matches += 1;
+
+            format::Axf1ChunkReadProfile output_profile;
+            const auto output_decode_start = Clock::now();
+            auto output_chunk = reader->read_chunk_columns_selective(
+                *chunk_entry,
+                {format::Axf1ColumnId::qname, format::Axf1ColumnId::flag,
+                 format::Axf1ColumnId::mapq, format::Axf1ColumnId::mate_reference,
+                 format::Axf1ColumnId::mate_pos, format::Axf1ColumnId::template_length,
+                 format::Axf1ColumnId::sequence, format::Axf1ColumnId::quality,
+                 format::Axf1ColumnId::tags},
+                output_profile);
+            profile.output_decode_time += Clock::now() - output_decode_start;
+            if (!output_chunk) {
+                return std::unexpected(output_chunk.error());
             }
-            matching_records.push_back(record_index);
-            profile.records_matched += 1;
-        }
-        profile.filter_time += Clock::now() - filter_start;
-        if (matching_records.empty()) {
-            continue;
-        }
-        profile.chunks_with_matches += 1;
+            profile.output_bytes_read += output_profile.bytes_read;
+            profile.output_payload_bytes += output_profile.selected_payload_bytes;
+            merge_output_columns(*filter_chunk, std::move(*output_chunk));
 
-        format::Axf1ChunkReadProfile output_profile;
-        const auto output_decode_start = Clock::now();
-        auto output_chunk = reader->read_chunk_columns_selective(
-            *chunk_entry,
-            {format::Axf1ColumnId::qname, format::Axf1ColumnId::flag, format::Axf1ColumnId::mapq,
-             format::Axf1ColumnId::mate_reference, format::Axf1ColumnId::mate_pos,
-             format::Axf1ColumnId::template_length, format::Axf1ColumnId::sequence,
-             format::Axf1ColumnId::quality, format::Axf1ColumnId::tags},
-            output_profile);
-        profile.output_decode_time += Clock::now() - output_decode_start;
-        if (!output_chunk) {
-            return std::unexpected(output_chunk.error());
+            const auto format_start = Clock::now();
+            for (std::size_t record_index : matching_records) {
+                format::append_axf1_sam_record(output, filter_chunk->records[record_index],
+                                               ref_name);
+                profile.records_output += 1;
+            }
+            profile.format_time += Clock::now() - format_start;
         }
-        profile.output_bytes_read += output_profile.bytes_read;
-        profile.output_payload_bytes += output_profile.selected_payload_bytes;
-        merge_output_columns(*filter_chunk, std::move(*output_chunk));
 
-        const auto format_start = Clock::now();
-        for (std::size_t record_index : matching_records) {
-            format::append_axf1_sam_record(output, filter_chunk->records[record_index], ref_name);
-            profile.records_output += 1;
-        }
-        profile.format_time += Clock::now() - format_start;
+        // Flush per-chunk to avoid accumulating a multi-GB output string
+        const auto write_start = Clock::now();
+        out.write(output.data(), static_cast<std::streamsize>(output.size()));
+        profile.write_time += Clock::now() - write_start;
+        profile.stdout_bytes += output.size();
+        output.clear();
     }
 
-    const auto write_start = Clock::now();
-    out.write(output.data(), static_cast<std::streamsize>(output.size()));
-    profile.write_time += Clock::now() - write_start;
-    profile.stdout_bytes += output.size();
     return {};
 }
 

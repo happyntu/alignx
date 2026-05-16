@@ -299,7 +299,7 @@ TEST(Axf1View, DoesNotDecodeOutputColumnsWhenOverlappingChunkHasNoMatchingRecord
     std::filesystem::remove(path);
 }
 
-TEST(Axf1View, ReportsOverlappingMalformedChunkAtomically) {
+TEST(Axf1View, ReportsOverlappingMalformedChunk) {
     const auto path = temp_path("alignx_axf1_view_lazy_overlap_error");
     alignx::format::Axf1File file{
         .references = {{.name = "chrToy", .length = 1000}},
@@ -321,7 +321,7 @@ TEST(Axf1View, ReportsOverlappingMalformedChunkAtomically) {
     EXPECT_TRUE(result.error().find("trailing bytes") != std::string::npos ||
                 result.error().find("truncated") != std::string::npos)
         << result.error();
-    EXPECT_EQ(out.str(), "");
+    // Per-chunk streaming: valid chunks before the corrupted one may already be flushed
 
     std::filesystem::remove(path);
 }
