@@ -191,7 +191,13 @@ and region-query correctness.
   - AXF1 lossy+zstd matches or beats CRAM on 1 Mb regions; CRAM wins on centromeric 21 Mb
   - CRAM encode 9-14x slower on 1 Mb, 1.08x on 21 Mb (startup amortization)
   - See `docs/research/v1-compression-benchmark-results.md`
-- [ ] Query benchmark: AXF vs BAM on region / coverage / pileup / filter workloads
+- [x] Query benchmark: AXF vs BAM on region / coverage / pileup / filter workloads
+  - `scripts/bench_query.sh` harness: 12 tool-filter combinations (view + pileup, unfiltered + filtered, samtools vs alignx-BAM vs alignx-AXF1) with SHA correctness preflight + timed repeats
+  - HG002 results across 3 regions (chr1:1M-2M, chrY:20M-21M, chr1:121M-142M centromeric)
+  - AXF1 pileup: **1.15x-1.43x faster** than samtools depth on 1 Mb regions (selective POS+CIGAR I/O)
+  - AXF1 pileup: **1.20x-2.08x faster** than BAM full-record pileup across all regions
+  - AXF1 view: 3-5x slower (expected — full-column decode); filtered view near-parity on centromeric (0.81x)
+  - See `docs/research/v1-query-benchmark-results.md`
 - [ ] Draft methods section for benchmark paper
 
 **Phase 2+ (post v1.0):**
