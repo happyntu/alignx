@@ -1060,6 +1060,22 @@ encode_qual_pack_payload(const std::vector<Axf1Record>& records) {
     return bytes;
 }
 
+void bin_quality_illumina8(std::string& quality) {
+    for (auto& c : quality) {
+        const int q = static_cast<unsigned char>(c) - 33;
+        int binned;
+        if (q <= 1) binned = 0;
+        else if (q <= 9) binned = 6;
+        else if (q <= 19) binned = 15;
+        else if (q <= 24) binned = 22;
+        else if (q <= 29) binned = 27;
+        else if (q <= 34) binned = 33;
+        else if (q <= 39) binned = 37;
+        else binned = 40;
+        c = static_cast<char>(binned + 33);
+    }
+}
+
 EncodedColumn encode_quality_column(const std::vector<Axf1Record>& records) {
     const auto raw = encode_strings(records, &Axf1Record::quality);
     EncodedColumn best{
@@ -1117,19 +1133,33 @@ encode_compressed_payload_envelope(Axf1CodecId base_codec_id, Axf1Compression co
 
 std::expected<EncodedColumn, std::string>
 encode_quality_column(const std::vector<Axf1Record>& records, const Axf1WriteOptions& options) {
+    const std::vector<Axf1Record>* source = &records;
+    std::vector<Axf1Record> binned_records;
+
+    if (options.quality_lossy == Axf1QualityLossy::illumina8) {
+        binned_records.reserve(records.size());
+        for (const auto& record : records) {
+            Axf1Record r;
+            r.quality = record.quality;
+            bin_quality_illumina8(r.quality);
+            binned_records.push_back(std::move(r));
+        }
+        source = &binned_records;
+    }
+
     if (options.quality_compression != Axf1Compression::zstd) {
         if (options.quality_compression == Axf1Compression::none) {
-            return encode_quality_column(records);
+            return encode_quality_column(*source);
         }
         return std::unexpected("unsupported AXF1 writer quality compression");
     }
 
-    auto best = encode_quality_column(records);
+    auto best = encode_quality_column(*source);
 
 #ifndef ALIGNX_HAVE_ZSTD
     return std::unexpected("AXF1 zstd writer compression requires ALIGNX_ENABLE_ZSTD=ON");
 #else
-    auto packed = encode_qual_pack_payload(records);
+    auto packed = encode_qual_pack_payload(*source);
     if (!packed) {
         return best;
     }

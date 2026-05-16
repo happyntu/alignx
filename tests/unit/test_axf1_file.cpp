@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -2650,6 +2651,119 @@ TEST(Axf1File, RejectsCigarDictIndexOutOfRange) {
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
     EXPECT_NE(read.error().find("CIGAR dict"), std::string::npos) << read.error();
+
+    std::filesystem::remove(path);
+}
+
+// --- Quality lossy binning tests ---
+
+TEST(Axf1File, QualityLossyIllumina8BinsCorrectly) {
+    const auto path = temp_path("alignx_axf1_qual_lossy_bins");
+    auto file = make_file();
+    // Q0='!', Q5='&', Q15='0', Q22='7', Q30='?', Q40='I'
+    file.chunks[0].records[0].quality = "!&07?I????";
+    file.chunks[0].records[1].quality = "FFFFFFFFFF";
+
+    alignx::format::Axf1WriteOptions options;
+    options.quality_lossy = alignx::format::Axf1QualityLossy::illumina8;
+
+    auto write = alignx::format::write_axf1_file(file, path, options);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+
+    const auto& q0 = read->chunks[0].records[0].quality;
+    EXPECT_EQ(q0[0], '!');   // Q0 → Q0
+    EXPECT_EQ(q0[1], '\'');  // Q5 → Q6
+    EXPECT_EQ(q0[2], '0');   // Q15 → Q15
+    EXPECT_EQ(q0[3], '7');   // Q22 → Q22
+    EXPECT_EQ(q0[4], 'B');   // Q30 → Q33
+    EXPECT_EQ(q0[5], 'I');   // Q40 → Q40
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, QualityLossyIllumina8RoundTrips) {
+    const auto path = temp_path("alignx_axf1_qual_lossy_roundtrip");
+    auto file = make_file();
+    file.chunks[0].records[0].quality = "FFFFFFFFFF";
+    file.chunks[0].records[1].quality = "BBBBBBBBBB";
+
+    alignx::format::Axf1WriteOptions options;
+    options.quality_lossy = alignx::format::Axf1QualityLossy::illumina8;
+
+    auto write = alignx::format::write_axf1_file(file, path, options);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks[0].records.size(), 2);
+    EXPECT_EQ(read->chunks[0].records[0].quality, "FFFFFFFFFF");
+    EXPECT_EQ(read->chunks[0].records[1].quality, "BBBBBBBBBB");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, QualityLossyNonePreservesOriginal) {
+    const auto path = temp_path("alignx_axf1_qual_lossy_none");
+    auto file = make_file();
+
+    alignx::format::Axf1WriteOptions options;
+    options.quality_lossy = alignx::format::Axf1QualityLossy::none;
+
+    auto write = alignx::format::write_axf1_file(file, path, options);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    EXPECT_EQ(read->chunks[0].records[0].quality, file.chunks[0].records[0].quality);
+    EXPECT_EQ(read->chunks[0].records[1].quality, file.chunks[0].records[1].quality);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, QualityLossyIllumina8ReducesAlphabetSize) {
+    const auto path = temp_path("alignx_axf1_qual_lossy_alphabet");
+    auto file = make_file();
+    file.chunks[0].records.clear();
+    for (int i = 0; i < 8; ++i) {
+        std::string quality;
+        for (int q = 0; q <= 41; ++q) {
+            quality.push_back(static_cast<char>(q + 33));
+        }
+        file.chunks[0].records.push_back(
+            {.qname = "read" + std::to_string(i),
+             .flag = 0,
+             .pos = static_cast<std::int32_t>(100 + i),
+             .mapq = 60,
+             .cigar = "42M",
+             .mate_reference = "*",
+             .mate_pos = 0,
+             .template_length = 0,
+             .sequence = std::string(42, 'A'),
+             .quality = quality,
+             .tags = "NM:i:0"});
+    }
+    file.chunks[0].end_pos = 152;
+
+    alignx::format::Axf1WriteOptions options;
+    options.quality_lossy = alignx::format::Axf1QualityLossy::illumina8;
+
+    auto write = alignx::format::write_axf1_file(file, path, options);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+
+    std::set<char> unique_quals;
+    for (const auto& record : read->chunks[0].records) {
+        for (char c : record.quality) {
+            unique_quals.insert(c);
+        }
+    }
+    EXPECT_LE(unique_quals.size(), 8);
 
     std::filesystem::remove(path);
 }

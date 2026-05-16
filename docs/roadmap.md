@@ -169,7 +169,10 @@ and region-query correctness.
 
 **Deliverables:**
 
-- [ ] QUAL codec: stronger lossless model or compressed wrapper; lossy binning only under explicit lossy profile
+- [x] QUAL lossy binning: Illumina 8-level quality binning under explicit `--axf1-quality-lossy illumina8` opt-in
+  - Pre-processing step before codec selection; bins Phred Q0-41+ into 8 representative values (Q0, Q6, Q15, Q22, Q27, Q33, Q37, Q40)
+  - Reduces quality alphabet from ~40 to 8 unique values; shifts codec selection toward `qual_rle` (295/324 chunks) vs `qual_pack` (29/324) on HG002
+  - HG002 chr1:1M-2M smoke: record count matches BAM (3143), view outputs valid SAM, codec distribution confirmed
 - [x] CIGAR dictionary encoding
   - `cigar_dict` codec (ID 11): sorted chunk-local dictionary of unique CIGAR strings + per-record varint index stream; encoder picks smallest of raw, `cigar_token`, and `cigar_dict`
   - HG002 chr1:1M-2M smoke: 324/324 chunks remain `cigar_token` (PacBio CIGARs unique per read); designed for Illumina repeated-pattern benefit

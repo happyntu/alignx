@@ -44,8 +44,14 @@ enum class Axf1Compression {
     zstd,
 };
 
+enum class Axf1QualityLossy {
+    none,
+    illumina8,
+};
+
 struct Axf1WriteOptions {
     Axf1Compression quality_compression = Axf1Compression::none;
+    Axf1QualityLossy quality_lossy = Axf1QualityLossy::none;
 };
 
 struct Axf1Reference {

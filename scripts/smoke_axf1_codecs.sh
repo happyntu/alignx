@@ -8,6 +8,7 @@ INPUT_BAM=""
 REGION=""
 WORK_DIR=""
 AXF1_QUALITY_COMPRESSION="none"
+AXF1_QUALITY_LOSSY="none"
 EXPECT_CODECS=()
 
 usage() {
@@ -32,6 +33,10 @@ Options:
   --axf1-quality-compression <none|zstd>
                       pass AXF1 quality compression policy to alignx convert;
                       default is none
+  --axf1-quality-lossy <none|illumina8>
+                      pass AXF1 quality lossy binning policy to alignx convert;
+                      default is none; when set, SHA comparison is skipped
+                      because quality values are modified
   --expect-codec <column=codec>
                       require a column to use exactly one codec across all chunks;
                       may be repeated, for example --expect-codec cigar=cigar_token
@@ -69,6 +74,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --axf1-quality-compression)
       AXF1_QUALITY_COMPRESSION="$2"
+      shift 2
+      ;;
+    --axf1-quality-lossy)
+      AXF1_QUALITY_LOSSY="$2"
       shift 2
       ;;
     --expect-codec)
@@ -147,6 +156,9 @@ check_expected_codec() {
 if [[ "$AXF1_QUALITY_COMPRESSION" != "none" && "$AXF1_QUALITY_COMPRESSION" != "zstd" ]]; then
   fail_usage "--axf1-quality-compression must be none or zstd"
 fi
+if [[ "$AXF1_QUALITY_LOSSY" != "none" && "$AXF1_QUALITY_LOSSY" != "illumina8" ]]; then
+  fail_usage "--axf1-quality-lossy must be none or illumina8"
+fi
 
 require_executable "$ALIGNX"
 require_executable "$SAMTOOLS"
@@ -184,6 +196,9 @@ convert_args=(convert "$INPUT_BAM" -o "$AXF1_FILE" --format AXF1 --region "$REGI
 if [[ "$AXF1_QUALITY_COMPRESSION" != "none" ]]; then
   convert_args+=(--axf1-quality-compression "$AXF1_QUALITY_COMPRESSION")
 fi
+if [[ "$AXF1_QUALITY_LOSSY" != "none" ]]; then
+  convert_args+=(--axf1-quality-lossy "$AXF1_QUALITY_LOSSY")
+fi
 "$ALIGNX" "${convert_args[@]}" >/dev/null
 "$ALIGNX" view "$AXF1_FILE" "$REGION" >"$AXF1_SAM"
 "$ALIGNX" view "$INPUT_BAM" "$REGION" >"$BAM_SAM"
@@ -192,11 +207,25 @@ fi
 sha256sum "$AXF1_SAM" "$BAM_SAM" "$SAMTOOLS_SAM" >"$SHA256_OUT"
 wc -l "$AXF1_SAM" "$BAM_SAM" "$SAMTOOLS_SAM" >"$LINES_OUT"
 
-unique_hashes="$(awk '{print $1}' "$SHA256_OUT" | sort -u | wc -l)"
-if [[ "$unique_hashes" -ne 1 ]]; then
-  echo "FAIL axf1_codecs: AXF1, BAM, and samtools SAM outputs differ" >&2
-  echo "  sha256: $SHA256_OUT" >&2
-  exit 1
+if [[ "$AXF1_QUALITY_LOSSY" != "none" ]]; then
+  axf1_lines="$(grep -cve '^$' "$AXF1_SAM" || true)"
+  bam_lines="$(grep -cve '^$' "$BAM_SAM" || true)"
+  if [[ "$axf1_lines" -eq 0 ]]; then
+    echo "FAIL axf1_codecs: AXF1 lossy view produced zero records" >&2
+    exit 1
+  fi
+  if [[ "$axf1_lines" -ne "$bam_lines" ]]; then
+    echo "FAIL axf1_codecs: AXF1 lossy record count ($axf1_lines) differs from BAM ($bam_lines)" >&2
+    exit 1
+  fi
+  echo "OK axf1_codecs: lossy mode — SHA comparison skipped; record count matches ($axf1_lines)"
+else
+  unique_hashes="$(awk '{print $1}' "$SHA256_OUT" | sort -u | wc -l)"
+  if [[ "$unique_hashes" -ne 1 ]]; then
+    echo "FAIL axf1_codecs: AXF1, BAM, and samtools SAM outputs differ" >&2
+    echo "  sha256: $SHA256_OUT" >&2
+    exit 1
+  fi
 fi
 
 "$INSPECTOR" "$AXF1_FILE" --column-codecs >"$CODECS_OUT"
@@ -217,6 +246,7 @@ expected_codecs="$(IFS=,; echo "${EXPECT_CODECS[*]}")"
   echo -e "work_dir\t$WORK_DIR"
   echo -e "axf1\t$AXF1_FILE"
   echo -e "axf1_quality_compression\t$AXF1_QUALITY_COMPRESSION"
+  echo -e "axf1_quality_lossy\t$AXF1_QUALITY_LOSSY"
   echo -e "axf1_sam\t$AXF1_SAM"
   echo -e "bam_sam\t$BAM_SAM"
   echo -e "samtools_sam\t$SAMTOOLS_SAM"

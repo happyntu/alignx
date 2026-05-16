@@ -383,7 +383,8 @@ int run_stats(const std::filesystem::path& input, std::ostream& out, std::ostrea
 
 int run_convert(const std::filesystem::path& input, const std::filesystem::path& output,
                 const std::optional<std::string>& region, std::string_view format,
-                std::string_view axf1_quality_compression, std::ostream& out, std::ostream& err) {
+                std::string_view axf1_quality_compression, std::string_view axf1_quality_lossy,
+                std::ostream& out, std::ostream& err) {
     std::string normalized_format(format);
     std::transform(normalized_format.begin(), normalized_format.end(), normalized_format.begin(),
                    [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
@@ -402,6 +403,19 @@ int run_convert(const std::filesystem::path& input, const std::filesystem::path&
     }
     if (normalized_format != "AXF1" && normalized_quality_compression != "none") {
         err << "alignx convert: --axf1-quality-compression requires --format AXF1\n";
+        return 1;
+    }
+
+    std::string normalized_quality_lossy(axf1_quality_lossy);
+    std::transform(normalized_quality_lossy.begin(), normalized_quality_lossy.end(),
+                   normalized_quality_lossy.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (normalized_quality_lossy != "none" && normalized_quality_lossy != "illumina8") {
+        err << "alignx convert: --axf1-quality-lossy must be none or illumina8\n";
+        return 1;
+    }
+    if (normalized_format != "AXF1" && normalized_quality_lossy != "none") {
+        err << "alignx convert: --axf1-quality-lossy requires --format AXF1\n";
         return 1;
     }
 
@@ -424,6 +438,9 @@ int run_convert(const std::filesystem::path& input, const std::filesystem::path&
     if (normalized_quality_compression == "zstd") {
         axf1_options.quality_compression = format::Axf1Compression::zstd;
     }
+    if (normalized_quality_lossy == "illumina8") {
+        axf1_options.quality_lossy = format::Axf1QualityLossy::illumina8;
+    }
 
     auto conversion = normalized_format == "AXF1"
                           ? convert::convert_bam_to_axf1_mvp(input, output, region, axf1_options,
@@ -442,6 +459,7 @@ int run_convert(const std::filesystem::path& input, const std::filesystem::path&
     out << "format\t" << normalized_format << '\n';
     if (normalized_format == "AXF1") {
         out << "axf1_quality_compression\t" << normalized_quality_compression << '\n';
+        out << "axf1_quality_lossy\t" << normalized_quality_lossy << '\n';
     }
     return 0;
 }
@@ -702,6 +720,7 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     std::optional<std::string> convert_region;
     std::string convert_format = "AXF0";
     std::string convert_axf1_quality_compression = "none";
+    std::string convert_axf1_quality_lossy = "none";
     auto* convert_cmd = app.add_subcommand("convert", "Convert BAM to AXF MVP format");
     convert_cmd->add_option("input", convert_input, "Input BAM file")
         ->required()
@@ -712,6 +731,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     convert_cmd->add_option("--format", convert_format, "Output AXF format: AXF0 or AXF1");
     convert_cmd->add_option("--axf1-quality-compression", convert_axf1_quality_compression,
                             "AXF1 quality payload compression: none or zstd");
+    convert_cmd->add_option("--axf1-quality-lossy", convert_axf1_quality_lossy,
+                            "AXF1 lossy quality binning: none or illumina8");
 
     std::filesystem::path coverage_input;
     std::string coverage_region;
@@ -794,7 +815,7 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     }
     if (*convert_cmd) {
         return run_convert(convert_input, convert_output, convert_region, convert_format,
-                           convert_axf1_quality_compression, out, err);
+                           convert_axf1_quality_compression, convert_axf1_quality_lossy, out, err);
     }
     if (*coverage_cmd) {
         if (coverage_output_mode != "summary" && coverage_output_mode != "tsv") {
