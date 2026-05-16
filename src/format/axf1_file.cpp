@@ -836,15 +836,65 @@ encode_cigar_token_payload(const std::vector<Axf1Record>& records) {
     return bytes;
 }
 
+std::expected<std::vector<unsigned char>, std::string>
+encode_cigar_dict_payload(const std::vector<Axf1Record>& records) {
+    if (records.empty()) {
+        return std::vector<unsigned char>{};
+    }
+
+    std::map<std::string_view, std::uint32_t> unique_map;
+    for (const auto& record : records) {
+        unique_map.try_emplace(std::string_view{record.cigar}, 0);
+    }
+    std::uint32_t sorted_index = 0;
+    for (auto& [key, idx] : unique_map) {
+        idx = sorted_index++;
+    }
+
+    std::vector<unsigned char> bytes;
+    append_varint_u64(bytes, unique_map.size());
+
+    for (const auto& [key, idx] : unique_map) {
+        append_varint_u64(bytes, key.size());
+        bytes.insert(bytes.end(), key.begin(), key.end());
+    }
+
+    for (const auto& record : records) {
+        append_varint_u64(bytes, unique_map.at(std::string_view{record.cigar}));
+    }
+
+    return bytes;
+}
+
 EncodedColumn encode_cigar_column(const std::vector<Axf1Record>& records) {
-    const auto raw = encode_strings(records, &Axf1Record::cigar);
-    auto encoded = encode_cigar_token_payload(records);
-    if (encoded && encoded->size() < raw.size()) {
+    auto raw = encode_strings(records, &Axf1Record::cigar);
+    auto token = encode_cigar_token_payload(records);
+    auto dict = encode_cigar_dict_payload(records);
+
+    auto best_size = raw.size();
+    auto best_id = Axf1CodecId::raw;
+
+    if (token && token->size() < best_size) {
+        best_size = token->size();
+        best_id = Axf1CodecId::cigar_token;
+    }
+    if (dict && dict->size() < best_size) {
+        best_id = Axf1CodecId::cigar_dict;
+    }
+
+    if (best_id == Axf1CodecId::cigar_dict) {
+        return {.column_id = Axf1ColumnId::cigar,
+                .codec_id = Axf1CodecId::cigar_dict,
+                .payload = std::move(*dict)};
+    }
+    if (best_id == Axf1CodecId::cigar_token) {
         return {.column_id = Axf1ColumnId::cigar,
                 .codec_id = Axf1CodecId::cigar_token,
-                .payload = std::move(*encoded)};
+                .payload = std::move(*token)};
     }
-    return {.column_id = Axf1ColumnId::cigar, .codec_id = Axf1CodecId::raw, .payload = raw};
+    return {.column_id = Axf1ColumnId::cigar,
+            .codec_id = Axf1CodecId::raw,
+            .payload = std::move(raw)};
 }
 
 std::expected<std::uint8_t, std::string> encode_acgt_base_2bit(char base) {
@@ -1710,6 +1760,56 @@ decode_cigar_token_column(const std::vector<unsigned char>& bytes, std::uint32_t
     return values;
 }
 
+std::expected<std::vector<std::string>, std::string>
+decode_cigar_dict_column(const std::vector<unsigned char>& bytes, std::uint32_t record_count) {
+    Reader reader(bytes);
+
+    auto dict_size_val = reader.read_varint_u64();
+    if (!dict_size_val) {
+        return std::unexpected("AXF1 CIGAR dict: truncated dict_size");
+    }
+    const auto dict_size = static_cast<std::uint32_t>(*dict_size_val);
+    if (dict_size == 0) {
+        return std::unexpected("AXF1 CIGAR dict has zero entries");
+    }
+    if (dict_size > record_count) {
+        return std::unexpected("AXF1 CIGAR dict size exceeds record count");
+    }
+
+    std::vector<std::string> dictionary;
+    dictionary.reserve(dict_size);
+
+    for (std::uint32_t i = 0; i < dict_size; ++i) {
+        auto entry_len = reader.read_varint_u64();
+        if (!entry_len) {
+            return std::unexpected("AXF1 CIGAR dict: truncated entry length");
+        }
+        auto entry_str = reader.read_string(static_cast<std::uint32_t>(*entry_len));
+        if (!entry_str) {
+            return std::unexpected("AXF1 CIGAR dict: truncated entry");
+        }
+        dictionary.push_back(std::move(*entry_str));
+    }
+
+    std::vector<std::string> values;
+    values.reserve(record_count);
+    for (std::uint32_t j = 0; j < record_count; ++j) {
+        auto idx = reader.read_varint_u64();
+        if (!idx) {
+            return std::unexpected("AXF1 CIGAR dict: truncated index");
+        }
+        if (*idx >= dict_size) {
+            return std::unexpected("AXF1 CIGAR dict index out of range");
+        }
+        values.push_back(dictionary[static_cast<std::size_t>(*idx)]);
+    }
+
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 CIGAR dict column has trailing bytes");
+    }
+    return values;
+}
+
 std::expected<char, std::string> decode_acgt_base_2bit(std::uint8_t value) {
     switch (value) {
     case 0:
@@ -2053,6 +2153,7 @@ bool is_supported_column_codec(Axf1ColumnId column_id, Axf1CodecId codec_id) {
            (column_id == Axf1ColumnId::flag && codec_id == Axf1CodecId::flag_bitpack) ||
            (column_id == Axf1ColumnId::mapq && codec_id == Axf1CodecId::mapq_rle) ||
            (column_id == Axf1ColumnId::cigar && codec_id == Axf1CodecId::cigar_token) ||
+           (column_id == Axf1ColumnId::cigar && codec_id == Axf1CodecId::cigar_dict) ||
            (column_id == Axf1ColumnId::sequence && codec_id == Axf1CodecId::seq_2bit_literal) ||
            (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_rle) ||
            (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_pack) ||
@@ -2206,9 +2307,14 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
         break;
     }
     case Axf1ColumnId::cigar: {
-        auto values = entry.codec_id == Axf1CodecId::cigar_token
-                          ? decode_cigar_token_column(payload, record_count)
-                          : decode_string_column(payload, record_count);
+        std::expected<std::vector<std::string>, std::string> values;
+        if (entry.codec_id == Axf1CodecId::cigar_dict) {
+            values = decode_cigar_dict_column(payload, record_count);
+        } else if (entry.codec_id == Axf1CodecId::cigar_token) {
+            values = decode_cigar_token_column(payload, record_count);
+        } else {
+            values = decode_string_column(payload, record_count);
+        }
         if (!values) {
             return std::unexpected(values.error());
         }

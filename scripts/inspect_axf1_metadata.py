@@ -44,6 +44,7 @@ CODEC_NAMES = {
     8: "qual_pack_compressed",
     9: "qname_dict",
     10: "tags_per_stream",
+    11: "cigar_dict",
 }
 
 

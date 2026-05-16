@@ -163,7 +163,36 @@ deterministic, and easy to validate.
 - Remote HG002 smoke is run only after user confirmation and remains
   correctness-only, not benchmark/profiling.
 
+## Second Implementation: `cigar_dict`
+
+Status: implemented 2026-05-16.
+
+`cigar_dict` (codec ID 11) stores a sorted chunk-local dictionary of unique
+CIGAR strings plus a per-record varint index stream. The encoder tries raw,
+`cigar_token`, and `cigar_dict`, picking the smallest payload.
+
+```text
+CigarDictPayload:
+  dict_count          varint_u64
+  entry repeated dict_count:
+    entry_length      varint_u64
+    entry_bytes       entry_length bytes
+  index repeated record_count:
+    dict_index        varint_u64
+```
+
+No front compression — CIGAR strings do not share meaningful prefixes.
+
+`cigar_dict` is effective for Illumina-style data where many records share
+the same CIGAR pattern (e.g., `151M`). For PacBio long reads with unique
+CIGARs per record, `cigar_dict` is never smaller than `cigar_token` and the
+encoder falls back automatically.
+
+HG002 PacBio chr1:1M-2M smoke (2026-05-16): 324/324 chunks kept
+`cigar_token` as expected. Three-way SAM stdout SHA parity confirmed.
+
 ## Recommendation
 
-Implement `cigar_token` before any dictionary, delta, or reference-aware CIGAR
-codec. Keep raw fallback broad and preserve exact SAM CIGAR output semantics.
+Keep raw fallback broad and preserve exact SAM CIGAR output semantics.
+`cigar_token` handles per-record tokenization; `cigar_dict` handles
+repeated-pattern deduplication. Reference-delta CIGAR codecs remain deferred.

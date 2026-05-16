@@ -517,12 +517,10 @@ TEST(Axf1File, FallsBackToRawCigarForUnsupportedStrings) {
         ASSERT_TRUE(write) << write.error();
 
         auto data = read_bytes(path);
-        EXPECT_EQ(
-            read_u16_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnCodecOffset),
-            static_cast<std::uint16_t>(alignx::format::Axf1CodecId::raw));
-        EXPECT_EQ(
-            read_u64_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnLengthOffset),
-            4 + file.chunks[0].records[0].cigar.size() + 4 + fallback_cigar.size());
+        const auto codec =
+            read_u16_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnCodecOffset);
+        EXPECT_NE(codec, static_cast<std::uint16_t>(alignx::format::Axf1CodecId::cigar_token))
+            << "unsupported CIGAR '" << fallback_cigar << "' should not use cigar_token";
 
         auto read = alignx::format::read_axf1_file(path);
         ASSERT_TRUE(read) << read.error();
@@ -2431,6 +2429,227 @@ TEST(Axf1File, RejectsTagsPerStreamPresenceCountMismatch) {
     auto read = alignx::format::read_axf1_file(path);
     ASSERT_FALSE(read);
     EXPECT_NE(read.error().find("TAG stream"), std::string::npos) << read.error();
+
+    std::filesystem::remove(path);
+}
+
+// --- CIGAR dict tests ---
+
+TEST(Axf1File, CigarDictRoundTripsRepeatedCigars) {
+    const auto path = temp_path("alignx_axf1_cigar_dict_repeated");
+    auto file = make_file();
+    file.chunks[0].records.clear();
+    for (int i = 0; i < 4; ++i) {
+        file.chunks[0].records.push_back(
+            {.qname = "read" + std::to_string(i),
+             .flag = 0,
+             .pos = static_cast<std::int32_t>(100 + i),
+             .mapq = 60,
+             .cigar = (i % 2 == 0) ? "10M" : "5M1I4M",
+             .mate_reference = "*",
+             .mate_pos = 0,
+             .template_length = 0,
+             .sequence = "ACGTACGTAA",
+             .quality = "FFFFFFFFFF",
+             .tags = "NM:i:0"});
+    }
+    file.chunks[0].end_pos = 114;
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto codec =
+        read_u16_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnCodecOffset);
+    EXPECT_EQ(codec, static_cast<std::uint16_t>(alignx::format::Axf1CodecId::cigar_dict));
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks[0].records.size(), 4);
+    EXPECT_EQ(read->chunks[0].records[0].cigar, "10M");
+    EXPECT_EQ(read->chunks[0].records[1].cigar, "5M1I4M");
+    EXPECT_EQ(read->chunks[0].records[2].cigar, "10M");
+    EXPECT_EQ(read->chunks[0].records[3].cigar, "5M1I4M");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, CigarDictRoundTripsSingleUniqueCigar) {
+    const auto path = temp_path("alignx_axf1_cigar_dict_single");
+    auto file = make_file();
+    file.chunks[0].records.clear();
+    for (int i = 0; i < 8; ++i) {
+        file.chunks[0].records.push_back(
+            {.qname = "read" + std::to_string(i),
+             .flag = 0,
+             .pos = static_cast<std::int32_t>(100 + i),
+             .mapq = 60,
+             .cigar = "151M",
+             .mate_reference = "*",
+             .mate_pos = 0,
+             .template_length = 0,
+             .sequence = "ACGTACGTAA",
+             .quality = "FFFFFFFFFF",
+             .tags = "NM:i:0"});
+    }
+    file.chunks[0].end_pos = 118;
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto codec =
+        read_u16_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnCodecOffset);
+    EXPECT_EQ(codec, static_cast<std::uint16_t>(alignx::format::Axf1CodecId::cigar_dict));
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks[0].records.size(), 8);
+    for (int i = 0; i < 8; ++i) {
+        EXPECT_EQ(read->chunks[0].records[static_cast<std::size_t>(i)].cigar, "151M");
+    }
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, CigarDictFallsBackForUniqueCigars) {
+    const auto path = temp_path("alignx_axf1_cigar_dict_unique");
+    auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto codec =
+        read_u16_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnCodecOffset);
+    EXPECT_EQ(codec, static_cast<std::uint16_t>(alignx::format::Axf1CodecId::cigar_token));
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    EXPECT_EQ(read->chunks[0].records[0].cigar, "10M");
+    EXPECT_EQ(read->chunks[0].records[1].cigar, "5M1I4M");
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, CigarDictSmallerThanTokenForRepeatedCigars) {
+    const auto path = temp_path("alignx_axf1_cigar_dict_size");
+    auto file = make_file();
+    file.chunks[0].records.clear();
+    for (int i = 0; i < 16; ++i) {
+        file.chunks[0].records.push_back(
+            {.qname = "read" + std::to_string(i),
+             .flag = 0,
+             .pos = static_cast<std::int32_t>(100 + i),
+             .mapq = 60,
+             .cigar = (i % 2 == 0) ? "100M5I46M" : "151M",
+             .mate_reference = "*",
+             .mate_pos = 0,
+             .template_length = 0,
+             .sequence = "ACGTACGTAA",
+             .quality = "FFFFFFFFFF",
+             .tags = "NM:i:0"});
+    }
+    file.chunks[0].end_pos = 126;
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::cigar_dict));
+
+    const auto dict_length =
+        read_u64_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnLengthOffset);
+    std::uint64_t raw_total = 0;
+    for (const auto& record : file.chunks[0].records) {
+        raw_total += sizeof(std::uint32_t) + record.cigar.size();
+    }
+    EXPECT_LT(dict_length, raw_total);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks[0].records.size(), 16);
+    for (int i = 0; i < 16; ++i) {
+        const auto expected = (i % 2 == 0) ? "100M5I46M" : "151M";
+        EXPECT_EQ(read->chunks[0].records[static_cast<std::size_t>(i)].cigar, expected);
+    }
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsTruncatedCigarDict) {
+    const auto path = temp_path("alignx_axf1_truncated_cigar_dict");
+    auto file = make_file();
+    file.chunks[0].records.clear();
+    for (int i = 0; i < 4; ++i) {
+        file.chunks[0].records.push_back(
+            {.qname = "read" + std::to_string(i),
+             .flag = 0,
+             .pos = static_cast<std::int32_t>(100 + i),
+             .mapq = 60,
+             .cigar = "151M",
+             .mate_reference = "*",
+             .mate_pos = 0,
+             .template_length = 0,
+             .sequence = "ACGTACGTAA",
+             .quality = "FFFFFFFFFF",
+             .tags = "NM:i:0"});
+    }
+    file.chunks[0].end_pos = 114;
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::cigar_dict));
+    write_u64_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnLengthOffset, 1);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("CIGAR dict"), std::string::npos) << read.error();
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, RejectsCigarDictIndexOutOfRange) {
+    const auto path = temp_path("alignx_axf1_cigar_dict_bad_index");
+    auto file = make_file();
+    file.chunks[0].records.clear();
+    for (int i = 0; i < 4; ++i) {
+        file.chunks[0].records.push_back(
+            {.qname = "read" + std::to_string(i),
+             .flag = 0,
+             .pos = static_cast<std::int32_t>(100 + i),
+             .mapq = 60,
+             .cigar = "151M",
+             .mate_reference = "*",
+             .mate_pos = 0,
+             .template_length = 0,
+             .sequence = "ACGTACGTAA",
+             .quality = "FFFFFFFFFF",
+             .tags = "NM:i:0"});
+    }
+    file.chunks[0].end_pos = 114;
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    EXPECT_EQ(read_u16_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnCodecOffset),
+              static_cast<std::uint16_t>(alignx::format::Axf1CodecId::cigar_dict));
+
+    const auto payload_start = column_payload_offset(data, kCigarColumnIndex);
+    const auto payload_length =
+        read_u64_at(data, column_entry_offset(data, kCigarColumnIndex) + kColumnLengthOffset);
+    data.at(payload_start + payload_length - 1) = 99;
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("CIGAR dict"), std::string::npos) << read.error();
 
     std::filesystem::remove(path);
 }

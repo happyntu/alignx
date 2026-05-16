@@ -36,6 +36,7 @@ enum class Axf1CodecId : std::uint16_t {
     qual_pack_compressed = 8,
     qname_dict = 9,
     tags_per_stream = 10,
+    cigar_dict = 11,
 };
 
 enum class Axf1Compression {

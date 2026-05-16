@@ -170,7 +170,9 @@ and region-query correctness.
 **Deliverables:**
 
 - [ ] QUAL codec: stronger lossless model or compressed wrapper; lossy binning only under explicit lossy profile
-- [ ] CIGAR delta + op dictionary encoding
+- [x] CIGAR dictionary encoding
+  - `cigar_dict` codec (ID 11): sorted chunk-local dictionary of unique CIGAR strings + per-record varint index stream; encoder picks smallest of raw, `cigar_token`, and `cigar_dict`
+  - HG002 chr1:1M-2M smoke: 324/324 chunks remain `cigar_token` (PacBio CIGARs unique per read); designed for Illumina repeated-pattern benefit
 - [x] QNAME dictionary encoding
   - `qname_dict` codec (ID 9): sorted unique dictionary with front compression + per-record varint indices; raw fallback when dict is not smaller
   - Design: `docs/research/axf1-qname-codec-design.md`

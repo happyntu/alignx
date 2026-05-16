@@ -124,6 +124,8 @@ Completed:
 - AXF1 QNAME dict remote HG002 chr1 small-region correctness smoke verified stdout parity and `qname_dict` on all QNAME chunks
 - AXF1 TAG per-stream codec (`tags_per_stream`, codec ID 10): per-tag-key streams with zigzag varint for integer tags, presence bitmaps for partial tag presence, raw fallback for inconsistent tag order or non-beneficial encoding. Design: `docs/research/axf1-tag-codec-design.md`
 - AXF1 TAG per-stream remote HG002 chr1:1M-2M smoke verified stdout parity; 250/324 chunks use `tags_per_stream`, 74 fall back to raw
+- AXF1 CIGAR dictionary codec (`cigar_dict`, codec ID 11): sorted chunk-local dictionary of unique CIGAR strings + per-record varint index stream; encoder picks smallest of raw, `cigar_token`, and `cigar_dict`
+- AXF1 CIGAR dict remote HG002 chr1:1M-2M smoke verified stdout parity; 324/324 chunks remain `cigar_token` (PacBio CIGARs unique per read, dict not beneficial)
 
 ## Build & Test Commands
 
