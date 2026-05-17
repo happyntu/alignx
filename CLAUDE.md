@@ -8,7 +8,7 @@ alignx has reached **v1.0 — Full format + benchmark paper ready**.
 
 All v1.0 deliverables are complete: columnar AXF1 format with production codecs (POS delta-varint, FLAG bit-pack, MAPQ RLE, SEQ 2-bit, QUAL alphabet-pack + zstd, CIGAR token/dict, QNAME dict, TAG per-stream), parallel mmap-based region query (3.8x-5.4x faster than samtools view on PacBio, 3.0x-3.9x on Illumina), selective column I/O for pileup/coverage, BAM/CRAM round-trip, and comprehensive benchmarks on HG002 PacBio and Illumina data.
 
-Phase 2 complete: per-column zstd (1.02x BAM), SIMD AVX2 SEQ decode + FLAG bitpack, streaming pileup (3.0x-4.1x faster than samtools depth), reference-delta SEQ codec (ADR-007, `seq_ref_delta` codec ID 13, CIGAR-driven reconstruction with per-contig SHA-256 validation). Python bindings (pybind11) via `ALIGNX_BUILD_PYTHON=ON`: enums, structs, Axf1FileReader, high-level functions (view, coverage, convert, export_bam), BamReader/FastaReader with iterator + context manager; numpy/pandas integration (`CoverageResult.depth` as zero-copy numpy array, `Chunk.to_dataframe()`, `CoverageResult.to_series()`, `query_region()` region→DataFrame, `bam_to_dataframe()`); 57 pytest tests.
+Phase 2 complete: per-column zstd (1.02x BAM), SIMD AVX2 SEQ decode + FLAG bitpack, streaming pileup (3.0x-4.1x faster than samtools depth), reference-delta SEQ codec (ADR-007, `seq_ref_delta` codec ID 13, CIGAR-driven reconstruction with per-contig SHA-256 validation). Python bindings (pybind11) via `ALIGNX_BUILD_PYTHON=ON`: enums, structs, Axf1FileReader, high-level functions (view, coverage, convert, export_bam), BamReader/FastaReader with iterator + context manager; numpy/pandas integration (`CoverageResult.depth` as zero-copy numpy array, `Chunk.to_dataframe()`, `CoverageResult.to_series()`, `query_region()` region→DataFrame, `bam_to_dataframe()`); 57 pytest tests. Python packaging: `pyproject.toml` (scikit-build-core), `pip install .` from source, `_alignx.pyi` type stubs for IDE + mypy, PEP 561 `py.typed` marker.
 
 Completed:
 - HTSlib wrapper: `BamReader` with `open`, `fetch(region)`, `next_record`
@@ -148,6 +148,7 @@ Completed:
 - AXF1 reference-delta codec selection: encoder tries ref-delta before 2-bit literal when FASTA context available; per-contig pre-fetch into `unordered_map` for zero-lock parallel decode
 - AXF1 writer pre-fetches reference sequences and passes per-chunk ref context through `write_chunk` → `encode_columns` → `encode_sequence_column`; converter populates v3 extensions (ref_contig_sha256 + encode_reference_path) when `--reference` set
 - Python bindings (pybind11): `_alignx` C extension module via `ALIGNX_BUILD_PYTHON=ON`; binds enums, structs, `Axf1FileReader`, high-level functions (`view`, `coverage`, `convert`, `export_bam`), and HTSlib-gated `BamReader`/`FastaReader` with Python iterator + context manager patterns; numpy/pandas integration via `alignx` wrapper package (`CoverageResult.depth` zero-copy numpy array, `Chunk.column_array()` / `Chunk.to_dataframe()`, `CoverageResult.to_series()`, `query_region()`, `bam_to_dataframe()`); 57 pytest tests in `tests/python/`
+- Python packaging: `pyproject.toml` with scikit-build-core backend; `pip install .` builds from source (CMake + pybind11); `_alignx.pyi` type stubs for IDE autocompletion and mypy; PEP 561 `py.typed` marker; `__all__` re-export list in `alignx/__init__.py`; wheel layout: `_alignx.so` + `_alignx.pyi` at root, `alignx/` package with `__init__.py`, `_dataframe.py`, `py.typed`
 
 ## Build & Test Commands
 
@@ -180,6 +181,12 @@ ctest --preset linux-release --output-on-failure
 mamba run -n alignx-dev cmake --preset wsl-debug
 mamba run -n alignx-dev cmake --build --preset wsl-debug
 mamba run -n alignx-dev ctest --preset wsl-debug --output-on-failure
+```
+
+**Python package (pip install from source):**
+```bash
+mamba run -n alignx-dev python -m pip install -e . --no-build-isolation
+mamba run -n alignx-dev python -m pytest tests/python/ -v
 ```
 
 For commands that write binary genomics files to stdout (BAM/CRAM/BCF or compressed BGZF output), do not use `conda run ... > output.bam`; activate the environment in a shell first, then run the tool and redirect output. This avoids any risk of environment-wrapper text contaminating binary files.

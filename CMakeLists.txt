@@ -156,5 +156,13 @@ if(ALIGNX_BUILD_PYTHON AND TARGET alignx_lib)
       "${CMAKE_BINARY_DIR}/python/alignx"
     COMMENT "Copying alignx Python package to build directory"
   )
+  install(TARGETS _alignx
+    LIBRARY DESTINATION .
+    COMPONENT python
+  )
+  install(FILES src/python/_alignx.pyi
+    DESTINATION .
+    COMPONENT python
+  )
   message(STATUS "Python bindings enabled (pybind11 ${pybind11_VERSION})")
 endif()

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "alignx-bio"
+version = "0.1.0"
+description = "Columnar alignment format for selective-column I/O in bioinformatics"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = ["numpy>=1.22"]
+
+[project.optional-dependencies]
+pandas = ["pandas>=1.4"]
+dev = ["pytest>=7.0", "pandas>=1.4"]
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+cmake.args = ["-DALIGNX_BUILD_PYTHON=ON", "-DALIGNX_BUILD_TESTS=OFF"]
+wheel.packages = ["src/python/alignx"]
+install.components = ["python"]
