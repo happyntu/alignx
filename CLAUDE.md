@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 alignx has reached **v1.0 — Full format + benchmark paper ready**.
 
-All v1.0 deliverables are complete: columnar AXF1 format with production codecs (POS delta-varint, FLAG bit-pack, MAPQ RLE, SEQ 2-bit, QUAL alphabet-pack + zstd, CIGAR token/dict, QNAME dict, TAG per-stream), parallel mmap-based region query (3.8x-5.4x faster than samtools view), selective column I/O for pileup/coverage, BAM/CRAM round-trip, and comprehensive benchmarks on HG002 PacBio data.
+All v1.0 deliverables are complete: columnar AXF1 format with production codecs (POS delta-varint, FLAG bit-pack, MAPQ RLE, SEQ 2-bit, QUAL alphabet-pack + zstd, CIGAR token/dict, QNAME dict, TAG per-stream), parallel mmap-based region query (3.8x-5.4x faster than samtools view on PacBio, 3.0x-3.9x on Illumina), selective column I/O for pileup/coverage, BAM/CRAM round-trip, and comprehensive benchmarks on HG002 PacBio and Illumina data.
 
 Phase 2+ (SIMD AVX2/GPU CUDA decode, cloud range-query, Python bindings) is deferred.
 
@@ -132,6 +132,8 @@ Completed:
 - AXF1 QUAL lossy binning: Illumina 8-level quality binning as pre-processing under `--axf1-quality-lossy illumina8` opt-in; bins Phred Q0-41+ to 8 representative values before codec selection. Design: `docs/research/axf1-qual-lossy-binning-design.md`
 - AXF1 QUAL lossy binning remote HG002 chr1:1M-2M smoke verified record count parity (3143); quality codec shifts to `qual_rle` (295/324) + `qual_pack` (29/324) vs lossless `qual_pack` (324/324)
 - `scripts/smoke_axf1_codecs.sh` supports `--axf1-quality-lossy none|illumina8` for reusable lossy quality binning smoke checks
+- PNEXT 0-based/1-based fix: internal sentinel changed from 0 to -1 for "unavailable" mate position, fixing round-trip for Illumina paired-end records with mate at position 1
+- Illumina 300x benchmark: HG002 NIST 2x250bp (novoalign, GRCh38) across 3 regions; view **3.0x-3.9x faster** than samtools, pileup **0.92x-1.2x** (platform-dependent). See `docs/research/illumina-benchmark-results.md`
 
 ## Build & Test Commands
 

@@ -204,6 +204,12 @@ and region-query correctness.
   - See `docs/research/v1-query-benchmark-results.md`
 - [x] Draft methods section for benchmark paper
   - `docs/research/draft-methods-section.md`: AXF1 format design, v1.0 codec stack, benchmark setup, compression results (6 configs × 3 regions), query results (12 tool-filter combinations × 3 regions)
+- [x] Illumina short-read cross-platform validation
+  - HG002 NIST Illumina 2x250bp (300x, novoalign, GRCh38) across 3 regions
+  - View: **3.0x-3.9x faster** than samtools (vs PacBio 3.8x-5.4x)
+  - Pileup: **0.92x-1.2x** (minimal advantage due to simple CIGARs + high record density)
+  - PNEXT round-trip fix for Illumina paired-end mate position 1
+  - See `docs/research/illumina-benchmark-results.md`
 
 **Phase 2+ (post v1.0):**
 - SIMD AVX2/AVX-512 decompression paths

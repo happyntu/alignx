@@ -36,17 +36,24 @@ A lossy quality option is available under the `--axf1-quality-lossy illumina8` f
 
 ### Hardware and Data
 
-Benchmarks were run on a dedicated server with ZFS storage. The dataset was the Genome in a Bottle HG002 sample, PacBio SequelII 15 kb/20 kb merged, aligned to GRCh38 with pbmm2, haplotag phased at 10x coverage. The BAM file was indexed with a standard BAI index. CRAM comparisons used the GCA_000001405.15 GRCh38 no-alt analysis set reference FASTA. samtools version 1.23.1 was used as the comparison baseline for all workloads.
+Benchmarks were run on a dedicated server with ZFS storage. Two datasets from the Genome in a Bottle HG002 sample were used:
+
+1. **PacBio SequelII** 15 kb/20 kb merged, aligned to GRCh38 with pbmm2, haplotag phased at 10x coverage (~3,143 records per Mb euchromatic).
+2. **Illumina 2x250bp** paired-end (NIST), aligned to GRCh38 with novoalign, ~300x coverage (~271,381 mapped records per Mb euchromatic).
+
+BAM files were indexed with standard BAI indices. CRAM comparisons used the GCA_000001405.15 GRCh38 no-alt analysis set reference FASTA. samtools version 1.23.1 was used as the comparison baseline for all workloads.
+
+AXF1 stores mapped records only. For Illumina paired-end data, approximately 2.5% of records in a region are unmapped mates (FLAG & 0x4) positioned at the mapped mate's location. Correctness comparisons use `samtools view -F 4` to produce an equivalent mapped-only baseline.
 
 ### Regions
 
 Three genomic regions were selected to represent different data characteristics:
 
-| Region | Span | Records | Character |
-|:---|:---|---:|:---|
-| chr1:1,000,000-2,000,000 | 1 Mb | 3,143 | Typical euchromatic |
-| chrY:20,000,000-21,000,000 | 1 Mb | 2,034 | Y chromosome |
-| chr1:121,000,000-142,000,000 | 21 Mb | 58,168 | Centromeric |
+| Region | Span | PacBio Records | Illumina Mapped Records | Character |
+|:---|:---|---:|---:|:---|
+| chr1:1,000,000-2,000,000 | 1 Mb | 3,143 | 271,381 | Typical euchromatic |
+| chrY:20,000,000-21,000,000 | 1 Mb | 2,034 | 120,493 | Y chromosome |
+| chr1:121,000,000-142,000,000 | 21 Mb | 58,168 | 4,068,017 | Centromeric |
 
 ### Protocol
 
@@ -125,3 +132,36 @@ AXF1 pileup reads only POS and CIGAR columns, skipping QUAL, SEQ, QNAME, and TAG
 | alignx view AXF1 (filtered) | **42** | **32** | **500** |
 
 With mmap + thread pool + fused decode + worker-local buffers (8 workers), AXF1 view is **4.8x-5.4x faster than samtools on 1 Mb regions** (44 ms vs 236 ms on chr1:1M-2M, 35 ms vs 169 ms on chrY:20M-21M) and **3.8x faster on the centromeric 21 Mb region** (854 ms vs 3,223 ms). The fused decode path decodes all columns into columnar arrays and formats SAM directly without per-record struct allocation. Worker-local buffers reduce heap allocations from one per chunk (~6,878 on centromeric) to one per worker (8 total), eliminating the dominant deallocation overhead. The filtered path decodes all columns in a single pass, applies FLAG/MAPQ check inline, and formats only matched records — achieving **5.1x-5.3x faster** than samtools filtered. Filtered centromeric (500 ms) is faster than unfiltered (854 ms) because excluded records skip SAM formatting. Note: all numbers are from manual runs on an 88-core server; actual speedup depends on available cores.
+
+## Illumina Short-Read Cross-Platform Validation
+
+To assess generalizability beyond long-read data, the same three regions were benchmarked on HG002 NIST Illumina 2x250bp paired-end data (~300x coverage). Region BAM subsets were extracted from the NCBI-hosted full BAM via HTTP range requests (samtools + remote BAI). AXF1 conversion and correctness verification used `samtools view -F 4` as the mapped-only baseline.
+
+### View (Illumina)
+
+| Tool | chr1:1M-2M (ms) | chrY:20M-21M (ms) | chr1:121M-142M (ms) |
+|:---|---:|---:|---:|
+| samtools view -F4 | 438 | 190 | 6,339 |
+| alignx view (AXF1) | **137 (3.2x)** | **64 (3.0x)** | **1,642 (3.9x)** |
+
+AXF1 view on Illumina data achieves **3.0x-3.9x faster** than samtools. The slightly lower speedup compared to PacBio (3.8x-5.4x) reflects shorter per-record payloads: Illumina 2x250bp reads have ~500 bytes of SEQ+QUAL per record vs PacBio's ~30-40 KB, reducing the relative benefit of fused columnar decode over row-oriented parse. The centromeric region (3.9x) benefits from higher chunk count (~1000+ chunks) enabling effective parallel work-stealing.
+
+### Pileup (Illumina)
+
+| Tool | chr1:1M-2M (ms) | chrY:20M-21M (ms) | chr1:121M-142M (ms) |
+|:---|---:|---:|---:|
+| samtools depth | 372 | 230 | 4,955 |
+| alignx pileup (AXF1) | 305 (1.2x) | 249 (0.92x) | 5,337 (0.93x) |
+
+Illumina pileup shows minimal speedup (0.92x-1.2x) compared to PacBio (1.1x-1.4x on 1 Mb). The advantage of selective column I/O is attenuated by: (1) simple CIGARs (predominantly `250M` or `NM`-type patterns), minimizing the CIGAR parsing cost that column skipping avoids; (2) high record density (271K vs 3K records per Mb), shifting the bottleneck from I/O to per-record depth accumulation; (3) smaller per-record I/O savings (~500 bytes skipped vs ~30 KB for PacBio).
+
+### Cross-Platform Summary
+
+| Workload | PacBio 10x | Illumina 300x |
+|:---|:---|:---|
+| View (1 Mb) | 4.8x-5.4x | 3.0x-3.2x |
+| View (21 Mb) | 3.8x | 3.9x |
+| Pileup (1 Mb) | 1.1x-1.4x | 0.92x-1.2x |
+| Pileup (21 Mb) | 0.90x | 0.93x |
+
+The view speedup generalizes across sequencing platforms (3.0x-5.4x), confirming that the parallel fused decode path provides consistent advantage regardless of read length. Pileup advantage is data-dependent: long reads with complex CIGARs benefit more from selective column I/O than short reads with trivial alignment patterns.
