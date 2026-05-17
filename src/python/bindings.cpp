@@ -321,8 +321,11 @@ PYBIND11_MODULE(_alignx, m) {
         filter.min_mapq = min_mapq;
         std::optional<std::filesystem::path> ref_path;
         if (reference) ref_path = std::filesystem::path(*reference);
-        unwrap_void(alignx::query::write_axf1_region_sam(
-            std::filesystem::path(input), region, oss, filter, ref_path));
+        {
+            py::gil_scoped_release release;
+            unwrap_void(alignx::query::write_axf1_region_sam(
+                std::filesystem::path(input), region, oss, filter, ref_path));
+        }
         return oss.str();
     }, py::arg("input"), py::arg("region"),
        py::arg("reference") = py::none(),
@@ -335,6 +338,7 @@ PYBIND11_MODULE(_alignx, m) {
         RecordFilter filter;
         filter.flag_exclude = flag_exclude;
         filter.min_mapq = min_mapq;
+        py::gil_scoped_release release;
         return unwrap(alignx::query::compute_axf1_coverage(
             std::filesystem::path(input), region, filter));
     }, py::arg("input"), py::arg("region"),
@@ -360,8 +364,11 @@ PYBIND11_MODULE(_alignx, m) {
             throw std::invalid_argument("unsupported quality_lossy: " + quality_lossy);
         }
         if (reference) options.reference_fasta = std::filesystem::path(*reference);
-        unwrap_void(alignx::convert::convert_bam_to_axf1_mvp(
-            std::filesystem::path(input), std::filesystem::path(output), region, options));
+        {
+            py::gil_scoped_release release;
+            unwrap_void(alignx::convert::convert_bam_to_axf1_mvp(
+                std::filesystem::path(input), std::filesystem::path(output), region, options));
+        }
     }, py::arg("input"), py::arg("output"),
        py::arg("region") = py::none(),
        py::arg("compression") = "none",
@@ -371,6 +378,7 @@ PYBIND11_MODULE(_alignx, m) {
 
     m.def("export_bam", [](const std::string& input, const std::string& output,
                            std::optional<int> hts_threads) {
+        py::gil_scoped_release release;
         unwrap_void(alignx::convert::convert_axf1_to_bam(
             std::filesystem::path(input), std::filesystem::path(output), hts_threads));
     }, py::arg("input"), py::arg("output"),

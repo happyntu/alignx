@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <cstring>
 #include <fstream>
 #include <limits>
 #include <map>
+#include <thread>
 #include <unordered_map>
 #include <string_view>
 #include <utility>
@@ -4446,27 +4448,61 @@ std::expected<void, std::string> write_axf1_file(const Axf1File& file,
         }
     }
 
+    const std::size_t num_chunks = file.chunks.size();
+    constexpr std::size_t kParallelEncodeThreshold = 16;
+
+    std::vector<std::expected<std::vector<unsigned char>, std::string>> encoded(num_chunks);
+
+    if (num_chunks >= kParallelEncodeThreshold) {
+        const auto hw = std::thread::hardware_concurrency();
+        const std::size_t num_workers = std::min(hw ? hw : 4u, 8u);
+        std::atomic<std::size_t> next_idx{0};
+
+        auto worker_fn = [&](std::size_t) {
+            for (;;) {
+                auto idx = next_idx.fetch_add(1, std::memory_order_relaxed);
+                if (idx >= num_chunks) break;
+                const auto& chunk = file.chunks[idx];
+                const std::string* ref_seq = nullptr;
+                if (auto it = ref_sequences.find(chunk.ref_id); it != ref_sequences.end())
+                    ref_seq = &it->second;
+                encoded[idx] = write_chunk(chunk, options, ref_seq);
+            }
+        };
+
+        std::vector<std::thread> workers;
+        workers.reserve(num_workers);
+        for (std::size_t i = 0; i < num_workers; ++i)
+            workers.emplace_back(worker_fn, i);
+        for (auto& w : workers)
+            w.join();
+    } else {
+        for (std::size_t i = 0; i < num_chunks; ++i) {
+            const auto& chunk = file.chunks[i];
+            const std::string* ref_seq = nullptr;
+            if (auto it = ref_sequences.find(chunk.ref_id); it != ref_sequences.end())
+                ref_seq = &it->second;
+            encoded[i] = write_chunk(chunk, options, ref_seq);
+        }
+    }
+
     std::vector<unsigned char> chunk_bytes;
     std::vector<Axf1ChunkIndexEntry> index_entries;
     std::uint64_t chunk_offset = kHeaderSize + reference_bytes.size() + metadata_bytes.size();
-    for (const Axf1Chunk& chunk : file.chunks) {
-        const std::string* ref_seq = nullptr;
-        auto ref_it = ref_sequences.find(chunk.ref_id);
-        if (ref_it != ref_sequences.end()) {
-            ref_seq = &ref_it->second;
+    for (std::size_t i = 0; i < num_chunks; ++i) {
+        if (!encoded[i]) {
+            return std::unexpected(encoded[i].error());
         }
-        auto bytes = write_chunk(chunk, options, ref_seq);
-        if (!bytes) {
-            return std::unexpected(bytes.error());
-        }
+        const auto& bytes = *encoded[i];
+        const auto& chunk = file.chunks[i];
         index_entries.push_back({.ref_id = chunk.ref_id,
                                  .start_pos = chunk.start_pos,
                                  .end_pos = chunk.end_pos,
                                  .record_count = static_cast<std::uint32_t>(chunk.records.size()),
                                  .chunk_offset = chunk_offset,
-                                 .chunk_length = static_cast<std::uint64_t>(bytes->size())});
-        chunk_bytes.insert(chunk_bytes.end(), bytes->begin(), bytes->end());
-        chunk_offset += bytes->size();
+                                 .chunk_length = static_cast<std::uint64_t>(bytes.size())});
+        chunk_bytes.insert(chunk_bytes.end(), bytes.begin(), bytes.end());
+        chunk_offset += bytes.size();
     }
     const std::uint64_t index_offset = chunk_offset;
 
