@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdlib>
 #include <charconv>
 #include <cstring>
 #include <fstream>
@@ -4450,10 +4451,11 @@ std::expected<void, std::string> write_axf1_file(const Axf1File& file,
 
     const std::size_t num_chunks = file.chunks.size();
     constexpr std::size_t kParallelEncodeThreshold = 16;
+    const bool force_sequential = std::getenv("ALIGNX_SEQUENTIAL_ENCODE") != nullptr;
 
     std::vector<std::expected<std::vector<unsigned char>, std::string>> encoded(num_chunks);
 
-    if (num_chunks >= kParallelEncodeThreshold) {
+    if (!force_sequential && num_chunks >= kParallelEncodeThreshold) {
         const auto hw = std::thread::hardware_concurrency();
         const std::size_t num_workers = std::min(hw ? hw : 4u, 8u);
         std::atomic<std::size_t> next_idx{0};
