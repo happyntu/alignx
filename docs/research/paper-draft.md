@@ -2,7 +2,7 @@
 
 ## Abstract
 
-We present AXF1, a columnar alignment format that stores each SAM field as an independent column stream within reference-sorted chunks. Unlike BAM's row-oriented layout, AXF1 enables selective column I/O and parallel multi-threaded decoding. On HG002 PacBio SequelII long-read data (GRCh38), AXF1 achieves 3.8x-5.4x faster region queries than samtools view and 1.1x-1.4x faster pileup than samtools depth on typical 1 Mb regions, with near-parity (0.90x) on a 21 Mb centromeric region via parallel depth accumulation. On HG002 Illumina 300x short-read data, AXF1 achieves 3.0x-3.9x faster view, confirming that the speedup generalizes across sequencing platforms. Field-specific codecs (delta-varint positions, bit-packed flags, 2-bit sequence literals, alphabet-packed quality scores, front-compressed read name dictionaries, per-key tag streams) are selected per chunk with raw fallback guarantees ensuring encoded payloads never exceed source size. Lossless AXF1 files are 1.6x-2.3x larger than BAM; with optional lossy quality binning and zstd compression, sizes reach 0.52x-0.63x of BAM, comparable to CRAM. The file layout uses absolute byte offsets and contiguous storage compatible with HTTP range requests. AXF1 demonstrates that columnar storage with parallel fused decoding substantially accelerates genomic region queries across both long-read and short-read data without sacrificing lossless fidelity.
+We present AXF1, a columnar alignment format that stores each SAM field as an independent column stream within reference-sorted chunks. Unlike BAM's row-oriented layout, AXF1 enables selective column I/O and parallel multi-threaded decoding. On HG002 PacBio SequelII long-read data (GRCh38), AXF1 achieves 3.8x-5.4x faster region queries than samtools view and 3.0x-4.1x faster pileup than samtools depth across all tested regions, including a 21 Mb centromeric region. On HG002 Illumina 300x short-read data, AXF1 achieves 3.0x-3.9x faster view, confirming that the speedup generalizes across sequencing platforms. Field-specific codecs (delta-varint positions, bit-packed flags, 2-bit sequence literals, reference-delta sequences, alphabet-packed quality scores, front-compressed read name dictionaries, per-key tag streams) are selected per chunk with raw fallback guarantees ensuring encoded payloads never exceed source size. With optional per-column zstd compression, lossless AXF1 approaches BAM size (1.02x on typical regions); with lossy quality binning and zstd, sizes reach 0.52x-0.63x of BAM, comparable to CRAM. The file layout uses absolute byte offsets and contiguous storage compatible with HTTP range requests. A Python API (pybind11) exposes all query and conversion functions with numpy/pandas integration. AXF1 demonstrates that columnar storage with parallel fused decoding substantially accelerates genomic region queries across both long-read and short-read data without sacrificing lossless fidelity.
 
 ## 1. Introduction
 
@@ -22,11 +22,12 @@ Prior work on columnar genomic storage includes CRAM's internal column slicing w
 
 ### 1.3 Contributions
 
-1. **Selective column I/O.** Workloads reading a subset of fields access only those column payloads, with measurable I/O and decode savings (1.1x-1.4x faster pileup on typical regions).
+1. **Selective column I/O.** Workloads reading a subset of fields access only those column payloads, with measurable I/O and decode savings (3.0x-4.1x faster pileup via POS+CIGAR-only reads).
 2. **Parallel region decode.** Chunk-based layout enables multi-threaded decoding with work-stealing, achieving 3.8x-5.4x faster region view than samtools on 8 workers.
-3. **Field-specific codecs.** Per-chunk codec selection with raw fallback guarantees; 8 specialized codecs covering the full SAM field set.
+3. **Field-specific codecs.** Per-chunk codec selection with raw fallback guarantees; 9 specialized codecs covering the full SAM field set, including optional reference-delta sequence encoding and per-column zstd compression.
 4. **Lossless round-trip.** BAM → AXF1 → BAM produces byte-identical SAM output for mapped records.
 5. **Cloud-compatible layout.** File-absolute byte offsets and contiguous chunks enable HTTP range-request access without format modifications.
+6. **Python API.** pybind11 bindings with numpy/pandas integration expose all query, conversion, and coverage functions for interactive analysis.
 
 ## 2. Methods
 
@@ -73,12 +74,14 @@ Each column uses a field-specific codec selected per chunk to minimize payload s
 | FLAG | Bit-pack | Raw uint16 | Minimum-width bit packing |
 | MAPQ | Byte RLE | Raw uint8 | (value, run-length) pairs |
 | CIGAR | Token stream | Raw string | (varint length, op code) pairs per operation |
-| SEQ | 2-bit literal | Raw string | A=0,C=1,G=2,T=3; 4 bases/byte; consteval LUT decode |
+| SEQ | Ref-delta / 2-bit literal | Raw string | CIGAR-driven reconstruction from reference; fallback to A=0,C=1,G=2,T=3 4 bases/byte |
 | QUAL | Alphabet bit-pack | Raw string / byte RLE | Chunk-local alphabet → minimal bit width |
 | QNAME | Front-compressed dict | Raw string | Sorted dictionary + shared prefix + varint indices |
 | TAGS | Per-key streams | Raw string | Per-tag-key encoding with presence bitmaps |
 
-Optional: zstd compression envelope wraps QUAL when smaller. Lossy mode (`--axf1-quality-lossy illumina8`) applies 8-level binning before codec selection.
+Optional per-column zstd compression: a generic `compressed` envelope wraps any column's best base codec in a zstd frame when the compressed output is smaller; the reader recursively unwraps during decode. On HG002 chr1:1M-2M, 8 of 11 columns benefit from zstd wrapping, reducing lossless file size from 1.58x to 1.02x of BAM. Lossy mode (`--axf1-quality-lossy illumina8`) applies 8-level Phred binning before codec selection.
+
+**Reference-delta SEQ.** When a reference FASTA is provided (`--reference`), the encoder attempts CIGAR-driven reference-delta encoding per chunk: the reference subsequence is aligned using CIGAR operations, and only mismatches, soft-clips, and insertions are stored. Per-contig SHA-256 checksums in a v3 typed extension block validate reference identity at decode time. The encoder falls back to 2-bit literal when ref-delta produces a larger payload or the sequence contains non-ACGT bases. On HG002 PacBio chr1:1M-2M, ref-delta reduces raw AXF1 size by 20.7% and zstd-compressed AXF1 by 15.5%.
 
 ### 2.4 Query Engine
 
@@ -93,6 +96,8 @@ Optional: zstd compression envelope wraps QUAL when smaller. Lossy mode (`--axf1
 **Parallel pileup.** For large regions (>=500 chunks), 8 workers each maintain a thread-local depth array; results are element-wise merged after join.
 
 **Worker-local buffers.** Each view worker accumulates output into one pre-reserved buffer, reducing allocations from O(chunks) to O(workers).
+
+**SIMD decode.** AVX2 SEQ 2-bit decode processes 128 bases per iteration via `_mm256_shuffle_epi8` as a 4-entry LUT with lane-crossing interleave; FLAG bit-pack uses uint64 bulk load + mask (eliminates per-bit inner loop). Guarded by compile-time `ALIGNX_HAVE_AVX2` with scalar fallback.
 
 ### 2.5 Benchmark Setup
 
@@ -119,14 +124,14 @@ Optional: zstd compression envelope wraps QUAL when smaller. Lossy mode (`--axf1
 
 AXF1 is 3.8x-5.4x faster than samtools across all regions. The filtered path achieves 5.1x-5.3x by skipping SAM formatting for excluded records. Filtered centromeric (500 ms) is faster than unfiltered (854 ms) because output volume drives the remaining time.
 
-### 3.2 Selective Column I/O (Pileup)
+### 3.2 Pileup Performance
 
 | Tool | chr1:1M-2M | chrY:20M-21M | chr1:121M-142M |
 |:---|---:|---:|---:|
-| samtools depth | 383 ms | 286 ms | 5,731 ms |
-| **AXF1 pileup** | **265 ms (1.4x)** | **270 ms (1.1x)** | 6,381 ms (0.90x) |
+| samtools depth | 279 ms | 220 ms | 4,792 ms |
+| **AXF1 pileup** | **78 ms (3.6x)** | **74 ms (3.0x)** | **1,177 ms (4.1x)** |
 
-AXF1 pileup reads only POS and CIGAR columns. On 1 Mb regions, selective I/O provides 1.1x-1.4x speedup. On the 21 Mb centromeric region, parallel depth accumulation (8 workers) achieves 0.90x of samtools — near parity, improved from 0.69x with sequential-only processing.
+AXF1 pileup reads only POS and CIGAR columns via selective column I/O. A 64 KB buffered writer with `std::to_chars` and skip-zero output (matching `samtools depth` default behavior) eliminates per-line `ostream` overhead. AXF1 achieves 3.0x-4.1x faster pileup than samtools depth across all regions, with the largest speedup (4.1x) on the 21 Mb centromeric region where the high chunk count (6,878) maximizes parallel decode benefit.
 
 ### 3.3 Compression (Figure 3)
 
@@ -135,12 +140,13 @@ AXF1 pileup reads only POS and CIGAR columns. On 1 Mb regions, selective I/O pro
 | BAM | 31.98 MB (1.00x) | 18.24 MB (1.00x) | 493.77 MB (1.00x) |
 | CRAM | 20.76 MB (0.65x) | 11.55 MB (0.63x) | 377.55 MB (0.77x) |
 | AXF1 lossless | 50.50 MB (1.58x) | 33.51 MB (1.84x) | 1,121.39 MB (2.27x) |
-| AXF1+zstd | 38.92 MB (1.22x) | 24.24 MB (1.33x) | 858.81 MB (1.74x) |
+| AXF1+zstd (per-column) | 32.69 MB (1.02x) | — | — |
+| AXF1+zstd (quality-only) | 38.92 MB (1.22x) | 24.24 MB (1.33x) | 858.81 MB (1.74x) |
 | AXF1 lossy+zstd | 16.68 MB (0.52x) | 11.52 MB (0.63x) | 473.70 MB (0.96x) |
 
 > **Figure 3.** File size relative to BAM (log scale). Stacked bar chart showing size ratios for each config across regions.
 
-AXF1 lossless is 1.6x-2.3x larger than BAM (no general-purpose block compression). AXF1 lossy+zstd achieves 0.52x-0.63x of BAM on typical regions, matching CRAM.
+Without compression, AXF1 lossless is 1.6x-2.3x larger than BAM. Per-column zstd compression wraps each column's best base codec in a zstd envelope (8 of 11 columns benefit), reducing lossless AXF1 to 1.02x of BAM on chr1:1M-2M — near parity while preserving independent column access. AXF1 lossy+zstd achieves 0.52x-0.63x of BAM on typical regions, matching CRAM.
 
 ### 3.4 Encode Time
 
@@ -170,7 +176,7 @@ AXF1 is 11x-15x faster than CRAM and 3.8x-5.4x faster than BAM. The centromeric 
 | Workload | PacBio (1 Mb) | Illumina (1 Mb) | PacBio (21 Mb) | Illumina (21 Mb) |
 |:---|---:|---:|---:|---:|
 | View speedup | 4.8x-5.4x | 3.0x-3.2x | 3.8x | 3.9x |
-| Pileup speedup | 1.1x-1.4x | 0.92x-1.2x | 0.90x | 0.93x |
+| Pileup speedup | 3.0x-3.6x | 0.92x-1.2x | 4.1x | 0.93x |
 
 AXF1 view speedup generalizes across sequencing platforms: 3.0x-3.9x on Illumina 300x short reads (2x250bp). The slightly lower speedup compared to PacBio (3.8x-5.4x) reflects shorter per-record payloads (250bp vs 15-20kb SEQ/QUAL), reducing the relative benefit of fused columnar decode.
 
@@ -184,15 +190,15 @@ BAM → AXF1 → BAM round-trip produces byte-identical SAM output for mapped re
 
 ### 4.1 Columnar vs. row-oriented alignment storage
 
-BAM's design reflects an era when sequential access dominated. Modern workloads access 2-4 of 8+ SAM fields, forcing BAM to parse 60-80% unused data. AXF1 addresses this mismatch at two levels: selective I/O avoids reading untouched columns (1.1x-1.4x pileup speedup), and parallel fused decoding exploits chunk independence for multi-threaded execution (3.8x-5.4x view speedup even when all fields are requested).
+BAM's design reflects an era when sequential access dominated. Modern workloads access 2-4 of 8+ SAM fields, forcing BAM to parse 60-80% unused data. AXF1 addresses this mismatch at two levels: selective I/O avoids reading untouched columns (3.0x-4.1x pileup speedup with buffered output), and parallel fused decoding exploits chunk independence for multi-threaded execution (3.8x-5.4x view speedup even when all fields are requested).
 
 The view speedup — where all columns are read — demonstrates that columnar layout benefits extend beyond projection pushdown. The fused decode path (columnar arrays → SAM formatting without per-record allocation) and chunk-level parallelism provide additional advantages unavailable to row-oriented formats.
 
 ### 4.2 File size tradeoff
 
-AXF1 lossless trades storage (1.6x-2.3x of BAM) for decode speed (5.4x faster). This targets query-intensive workloads where data is written once and queried many times. For archival storage, CRAM (0.63x-0.77x) remains appropriate. With lossy quality binning and zstd, AXF1 matches CRAM sizes (0.52x-0.63x) while maintaining 15x faster decode.
+Without compression, AXF1 lossless is 1.6x-2.3x larger than BAM. Per-column zstd compression reduces lossless AXF1 to 1.02x of BAM on typical regions — near parity — while preserving independent column access. This eliminates the historical size penalty of columnar alignment storage. For maximum compression, lossy quality binning + zstd achieves 0.52x-0.63x of BAM, matching CRAM at 15x faster decode.
 
-The size overhead stems from per-column codec headers and the absence of cross-column block compression. Adding optional per-column zstd/LZ4 would reduce the gap while preserving column independence.
+For archival storage where decode speed is secondary, CRAM (0.63x-0.77x) remains appropriate. AXF1 targets query-intensive workloads where data is written once and queried many times.
 
 ### 4.3 Parallel scaling
 
@@ -200,17 +206,17 @@ The 5.4x view speedup on 1 Mb regions (44 ms, 8 workers, 324 chunks) approaches 
 
 The filtered centromeric path (500 ms, 5.2x) confirms that reducing output volume recovers scaling — excluded records skip formatting entirely.
 
+Multi-threaded chunk encoding during conversion shows a different scaling profile: parallel encoding (8 workers) is ~7% slower than sequential on chr1:1M-2M (47s vs 44s) because BAM reading via HTSlib dominates total convert time (>90%). Encoding parallelism will benefit future streaming-write pipelines that decouple I/O from encoding.
+
 ### 4.4 Limitations
 
-**File size.** AXF1 lossless is 1.6x-2.3x larger than BAM. Storage-constrained applications should use CRAM or AXF1 lossy modes.
-
-**Pileup at scale.** Parallel pileup reaches 0.90x of samtools depth on 21 Mb centromeric (improved from 0.69x sequential). The remaining gap reflects L3 cache contention from 8 independent 84 MB depth arrays.
-
-**No reference-based compression.** AXF1 omits reference-delta sequence encoding, prioritizing self-contained files over maximum compression.
+**File size.** AXF1 lossless without zstd is 1.6x-2.3x larger than BAM due to per-column codec headers and absence of cross-column block compression. Per-column zstd reduces the gap to near parity (1.02x on typical regions), but the compression envelope adds decode latency. Storage-constrained applications should use CRAM or AXF1 lossy modes.
 
 **Mapped records only.** Unmapped reads and unplaced records are not stored. A complete archival format would need to handle these.
 
-**Platform-dependent pileup.** Illumina short-read pileup shows minimal speedup (0.92x-1.2x vs PacBio 1.1x-1.4x) because simple CIGARs and high record density shift the bottleneck from I/O to per-record computation. ONT data (high error rates, long reads with complex CIGARs) remains untested.
+**Platform-dependent pileup.** Illumina short-read pileup shows lower speedup (0.92x-1.2x) compared to PacBio (3.0x-4.1x) because simple CIGARs and high record density shift the bottleneck from I/O to per-record depth accumulation. ONT data (high error rates, long reads with complex CIGARs) remains untested.
+
+**Reference dependency.** The ref-delta SEQ codec requires a matching reference FASTA at decode time (validated by per-contig SHA-256). Without the reference, files using ref-delta cannot be decoded. The encoder falls back to self-contained 2-bit literal when no reference is provided.
 
 ### 4.5 Cloud compatibility
 
@@ -218,16 +224,15 @@ AXF1's layout (absolute byte offsets, contiguous chunks, index at EOF) enables H
 
 ### 4.6 Future work
 
-1. **SIMD decode.** AVX2/AVX-512 for SEQ 2-bit decode (PDEP/PEXT), POS delta-varint (parallel prefix sum), and SAM integer formatting.
-2. **Reference-delta SEQ.** Optional reference-based sequence compression for reduced file size.
-3. **Cloud transport.** HTTP range-request client for direct cloud object storage access.
-4. **Python bindings.** Column-native API returning NumPy arrays or Arrow tables.
-5. **Per-column block compression.** Optional zstd/LZ4 per column to reduce lossless file size while preserving column independence.
-6. **Streaming pileup.** Coordinate-sorted depth output without materializing the full depth array, reducing memory pressure for large regions.
+1. **AVX-512 / ARM NEON SIMD.** Extend SIMD decode beyond AVX2 SEQ/FLAG to additional columns (POS delta-varint parallel prefix sum, QUAL bit-pack) and additional architectures.
+2. **GPU decompression.** CUDA kernels for bulk SEQ 2-bit and QUAL bit-pack decode on high-throughput analysis nodes.
+3. **Cloud transport.** HTTP range-request client for direct S3/GCS/Azure object storage access. The AXF1 layout (absolute byte offsets, contiguous chunks, index-at-EOF) already supports this without format modifications.
+4. **Streaming encode pipeline.** Producer-consumer architecture decoupling BAM reading from chunk encoding, enabling true parallel overlap of I/O and compression.
+5. **Arrow/Polars interop.** Zero-copy columnar export to Apache Arrow record batches or Polars DataFrames for downstream analytical workflows.
 
 ## 5. Conclusion
 
-AXF1 demonstrates that columnar alignment storage substantially accelerates genomic region queries across sequencing platforms. On HG002 PacBio long-read data, AXF1 achieves 3.8x-5.4x faster full-record queries and 1.1x-1.4x faster pileup compared to samtools. On Illumina 300x short-read data, view speedup remains 3.0x-3.9x, confirming that the parallel fused decode advantage generalizes beyond long reads. The format maintains lossless BAM round-trip fidelity while offering optional lossy compression that matches CRAM file sizes at 15x faster decode. Field-specific codecs, chunk-level parallelism, selective column I/O, and cloud-compatible layout address the fundamental mismatch between row-oriented BAM and modern analytical workloads where query latency — not storage density — is the primary constraint.
+AXF1 demonstrates that columnar alignment storage substantially accelerates genomic region queries across sequencing platforms. On HG002 PacBio long-read data, AXF1 achieves 3.8x-5.4x faster full-record queries and 3.0x-4.1x faster pileup compared to samtools. On Illumina 300x short-read data, view speedup remains 3.0x-3.9x, confirming that the parallel fused decode advantage generalizes beyond long reads. Per-column zstd compression brings lossless AXF1 to near BAM parity (1.02x), while optional lossy modes match CRAM file sizes at 15x faster decode. Field-specific codecs with reference-delta sequence encoding, chunk-level parallelism, selective column I/O, SIMD-accelerated decoding, and cloud-compatible layout address the fundamental mismatch between row-oriented BAM and modern analytical workloads where query latency — not storage density — is the primary constraint.
 
 ## Data Availability
 

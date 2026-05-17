@@ -86,11 +86,11 @@ def fig3_file_size():
     """Figure 3: File size relative to BAM."""
     fig, ax = plt.subplots(figsize=(6, 3.5))
 
-    configs = ['BAM', 'CRAM', 'AXF1\nlossless', 'AXF1\n+zstd', 'AXF1\nlossy+zstd']
+    configs = ['BAM', 'CRAM', 'AXF1\nlossless', 'AXF1\n+zstd\n(per-col)', 'AXF1\n+zstd\n(qual)', 'AXF1\nlossy+zstd']
     # chr1:1M-2M ratios
-    chr1 = [1.00, 0.65, 1.58, 1.22, 0.52]
-    chrY = [1.00, 0.63, 1.84, 1.33, 0.63]
-    centro = [1.00, 0.77, 2.27, 1.74, 0.96]
+    chr1 = [1.00, 0.65, 1.58, 1.02, 1.22, 0.52]
+    chrY = [1.00, 0.63, 1.84, np.nan, 1.33, 0.63]
+    centro = [1.00, 0.77, 2.27, np.nan, 1.74, 0.96]
 
     x = np.arange(len(configs))
     width = 0.25
@@ -156,10 +156,10 @@ def fig_s1_pileup_comparison():
     x = np.arange(len(regions))
     width = 0.35
 
-    # PacBio
+    # PacBio (streaming pileup: skip-zero + buffered writer)
     ax = axes[0]
-    samtools_pb = [383, 286, 5731]
-    axf1_pb = [265, 270, 6381]
+    samtools_pb = [279, 220, 4792]
+    axf1_pb = [78, 74, 1177]
     ax.bar(x - width/2, samtools_pb, width, label='samtools depth', color=COLORS['samtools'])
     ax.bar(x + width/2, axf1_pb, width, label='AXF1 pileup', color=COLORS['axf1'])
     ax.set_yscale('log')
@@ -228,7 +228,7 @@ def fig_s3_cross_platform_speedup():
     x = np.arange(len(categories))
     width = 0.35
 
-    pacbio = [5.1, 3.8, 1.25, 0.90]  # midpoint of ranges
+    pacbio = [5.1, 3.8, 3.3, 4.1]  # midpoint of ranges; pileup updated for streaming
     illumina = [3.1, 3.9, 1.06, 0.93]
 
     ax.bar(x - width/2, pacbio, width, label='PacBio 10x', color=COLORS['axf1'])
@@ -240,7 +240,7 @@ def fig_s3_cross_platform_speedup():
     ax.set_xticklabels(categories)
     ax.legend(loc='upper right')
     ax.set_title('Figure S3. Cross-Platform Speedup')
-    ax.set_ylim(0, 6)
+    ax.set_ylim(0, 6.5)
 
     plt.tight_layout()
     fig.savefig(OUTPUT_DIR / "fig_s3_cross_platform_speedup.png")
