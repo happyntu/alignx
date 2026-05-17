@@ -143,7 +143,7 @@ std::expected<format::Axf1Record, std::string> parse_axf1_record(std::string_vie
                               .mapq = *mapq,
                               .cigar = std::string(fields[5]),
                               .mate_reference = std::string(fields[6]),
-                              .mate_pos = *mate_pos == 0 ? 0 : *mate_pos - 1,
+                              .mate_pos = *mate_pos == 0 ? -1 : *mate_pos - 1,
                               .template_length = *template_length,
                               .sequence = std::string(fields[9]),
                               .quality = std::string(fields[10]),

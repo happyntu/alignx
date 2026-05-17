@@ -170,7 +170,7 @@ TEST(BamToAxf, ConvertsToyBamToAxf1Mvp) {
     EXPECT_EQ(axf->chunks[0].records[0].mapq, 60);
     EXPECT_EQ(axf->chunks[0].records[0].cigar, "10M");
     EXPECT_EQ(axf->chunks[0].records[0].mate_reference, "*");
-    EXPECT_EQ(axf->chunks[0].records[0].mate_pos, 0);
+    EXPECT_EQ(axf->chunks[0].records[0].mate_pos, -1);
     EXPECT_EQ(axf->chunks[0].records[0].template_length, 0);
     EXPECT_EQ(axf->chunks[0].records[0].sequence, "ACGTACGTAA");
     EXPECT_EQ(axf->chunks[0].records[0].quality, "FFFFFFFFFF");
@@ -182,7 +182,7 @@ TEST(BamToAxf, ConvertsToyBamToAxf1Mvp) {
     EXPECT_EQ(axf->chunks[0].records[1].mapq, 50);
     EXPECT_EQ(axf->chunks[0].records[1].cigar, "5M1I4M");
     EXPECT_EQ(axf->chunks[0].records[1].mate_reference, "*");
-    EXPECT_EQ(axf->chunks[0].records[1].mate_pos, 0);
+    EXPECT_EQ(axf->chunks[0].records[1].mate_pos, -1);
     EXPECT_EQ(axf->chunks[0].records[1].template_length, 0);
     EXPECT_EQ(axf->chunks[0].records[1].sequence, "TTTTACGGGA");
     EXPECT_EQ(axf->chunks[0].records[1].quality, "FFFFFFFFFF");

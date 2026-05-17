@@ -3569,7 +3569,7 @@ void append_record_from_columns(std::string& out, const ColumnarDecode& cols,
     out.push_back('\t');
     out.append(mate_ref.data(), mate_ref.size());
     out.push_back('\t');
-    append_int(cols.mate_positions[i] <= 0 ? 0 : cols.mate_positions[i] + 1);
+    append_int(cols.mate_positions[i] < 0 ? 0 : cols.mate_positions[i] + 1);
     out.push_back('\t');
     append_int(cols.template_lengths[i]);
     out.push_back('\t');
@@ -3608,7 +3608,7 @@ char* write_record_to_sam(char* dst, const ColumnarDecode& cols,
     *dst++ = '\t';
     write_sv(cols.mate_refs.at(i));
     *dst++ = '\t';
-    write_int(cols.mate_positions[i] <= 0 ? 0 : cols.mate_positions[i] + 1);
+    write_int(cols.mate_positions[i] < 0 ? 0 : cols.mate_positions[i] + 1);
     *dst++ = '\t';
     write_int(cols.template_lengths[i]);
     *dst++ = '\t';
@@ -4102,7 +4102,7 @@ std::string format_axf1_sam_record(const Axf1Record& record, const std::string& 
     line.push_back('\t');
     line.append(record.mate_reference);
     line.push_back('\t');
-    append_int(record.mate_pos <= 0 ? 0 : record.mate_pos + 1);
+    append_int(record.mate_pos < 0 ? 0 : record.mate_pos + 1);
     line.push_back('\t');
     append_int(record.template_length);
     line.push_back('\t');
@@ -4143,7 +4143,7 @@ void append_axf1_sam_record(std::string& output, const Axf1Record& record,
     output.push_back('\t');
     output.append(record.mate_reference);
     output.push_back('\t');
-    append_int(record.mate_pos <= 0 ? 0 : record.mate_pos + 1);
+    append_int(record.mate_pos < 0 ? 0 : record.mate_pos + 1);
     output.push_back('\t');
     append_int(record.template_length);
     output.push_back('\t');
