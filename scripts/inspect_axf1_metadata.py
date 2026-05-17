@@ -46,6 +46,7 @@ CODEC_NAMES = {
     10: "tags_per_stream",
     11: "cigar_dict",
     12: "compressed",
+    13: "seq_ref_delta",
 }
 
 
