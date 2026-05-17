@@ -2,7 +2,7 @@
 
 ## Abstract
 
-We present AXF1, a columnar alignment format that stores each SAM field as an independent column stream within reference-sorted chunks. Unlike BAM's row-oriented layout, AXF1 enables selective column I/O and parallel multi-threaded decoding. On HG002 PacBio SequelII long-read data (GRCh38), AXF1 achieves 3.8x-5.4x faster region queries than samtools view and 1.1x-1.4x faster pileup than samtools depth on typical 1 Mb regions, with near-parity (0.90x) on a 21 Mb centromeric region via parallel depth accumulation. Field-specific codecs (delta-varint positions, bit-packed flags, 2-bit sequence literals, alphabet-packed quality scores, front-compressed read name dictionaries, per-key tag streams) are selected per chunk with raw fallback guarantees ensuring encoded payloads never exceed source size. Lossless AXF1 files are 1.6x-2.3x larger than BAM; with optional lossy quality binning and zstd compression, sizes reach 0.52x-0.63x of BAM, comparable to CRAM. The file layout uses absolute byte offsets and contiguous storage compatible with HTTP range requests. AXF1 demonstrates that columnar storage with parallel fused decoding substantially accelerates genomic region queries without sacrificing lossless fidelity.
+We present AXF1, a columnar alignment format that stores each SAM field as an independent column stream within reference-sorted chunks. Unlike BAM's row-oriented layout, AXF1 enables selective column I/O and parallel multi-threaded decoding. On HG002 PacBio SequelII long-read data (GRCh38), AXF1 achieves 3.8x-5.4x faster region queries than samtools view and 1.1x-1.4x faster pileup than samtools depth on typical 1 Mb regions, with near-parity (0.90x) on a 21 Mb centromeric region via parallel depth accumulation. On HG002 Illumina 300x short-read data, AXF1 achieves 3.0x-3.9x faster view, confirming that the speedup generalizes across sequencing platforms. Field-specific codecs (delta-varint positions, bit-packed flags, 2-bit sequence literals, alphabet-packed quality scores, front-compressed read name dictionaries, per-key tag streams) are selected per chunk with raw fallback guarantees ensuring encoded payloads never exceed source size. Lossless AXF1 files are 1.6x-2.3x larger than BAM; with optional lossy quality binning and zstd compression, sizes reach 0.52x-0.63x of BAM, comparable to CRAM. The file layout uses absolute byte offsets and contiguous storage compatible with HTTP range requests. AXF1 demonstrates that columnar storage with parallel fused decoding substantially accelerates genomic region queries across both long-read and short-read data without sacrificing lossless fidelity.
 
 ## 1. Introduction
 
@@ -98,11 +98,11 @@ Optional: zstd compression envelope wraps QUAL when smaller. Lossy mode (`--axf1
 
 **Hardware.** Intel Xeon E5-2696 v4 (88 cores, 2.20 GHz), ZFS storage.
 
-**Data.** Genome in a Bottle HG002, PacBio SequelII 15 kb/20 kb merged, GRCh38, pbmm2, haplotag 10x. samtools 1.23.1 baseline.
+**Data.** (1) Genome in a Bottle HG002, PacBio SequelII 15 kb/20 kb merged, GRCh38, pbmm2, haplotag 10x (~10x coverage). (2) HG002 NIST Illumina 2x250bp paired-end, novoalign, GRCh38 (~300x coverage). samtools 1.23.1 baseline.
 
-**Regions.** chr1:1M-2M (1 Mb, 3,143 records, euchromatic), chrY:20M-21M (1 Mb, 2,034 records, Y chromosome), chr1:121M-142M (21 Mb, 58,168 records, centromeric).
+**Regions.** chr1:1M-2M (1 Mb, euchromatic), chrY:20M-21M (1 Mb, Y chromosome), chr1:121M-142M (21 Mb, centromeric). PacBio: 3,143/2,034/58,168 records. Illumina: 271,381/120,493/4,068,017 mapped records.
 
-**Protocol.** Warmup + 5-10 timed repeats. SHA-256 correctness verification before timing.
+**Protocol.** Warmup + 5 timed repeats. SHA-256 correctness verification before timing. Illumina comparison uses `samtools view -F 4` baseline (AXF1 stores mapped records only; ~2.5% of Illumina paired-end records are unmapped mates).
 
 ## 3. Results
 
@@ -165,9 +165,20 @@ AXF1 lossless encoding is comparable to BAM (1.1x-1.2x). AXF1 lossy is faster (0
 
 AXF1 is 11x-15x faster than CRAM and 3.8x-5.4x faster than BAM. The centromeric 21 Mb region (1.12 GB payload, 6,878 chunks) achieves ~1.31 GB/s effective throughput with 8 workers.
 
-### 3.6 Round-Trip Fidelity
+### 3.6 Illumina Short-Read Generalization
 
-BAM → AXF1 → BAM round-trip produces byte-identical SAM output for mapped records, verified by SHA-256 on both toy fixtures and HG002 real data. AXF1 stores mapped records only; unmapped records are excluded from comparison.
+| Workload | PacBio (1 Mb) | Illumina (1 Mb) | PacBio (21 Mb) | Illumina (21 Mb) |
+|:---|---:|---:|---:|---:|
+| View speedup | 4.8x-5.4x | 3.0x-3.2x | 3.8x | 3.9x |
+| Pileup speedup | 1.1x-1.4x | 0.92x-1.2x | 0.90x | 0.93x |
+
+AXF1 view speedup generalizes across sequencing platforms: 3.0x-3.9x on Illumina 300x short reads (2x250bp). The slightly lower speedup compared to PacBio (3.8x-5.4x) reflects shorter per-record payloads (250bp vs 15-20kb SEQ/QUAL), reducing the relative benefit of fused columnar decode.
+
+Pileup advantage is data-dependent: Illumina's simple CIGARs (predominantly `250M`) minimize the CIGAR parsing cost that selective column I/O avoids, and high record density (271K vs 3K per Mb) shifts the bottleneck from I/O to per-record depth accumulation.
+
+### 3.7 Round-Trip Fidelity
+
+BAM → AXF1 → BAM round-trip produces byte-identical SAM output for mapped records, verified by SHA-256 on both toy fixtures and HG002 real data (PacBio and Illumina). AXF1 stores mapped records only; unmapped records are excluded from comparison.
 
 ## 4. Discussion
 
@@ -199,7 +210,7 @@ The filtered centromeric path (500 ms, 5.2x) confirms that reducing output volum
 
 **Mapped records only.** Unmapped reads and unplaced records are not stored. A complete archival format would need to handle these.
 
-**Single dataset.** Results reflect PacBio SequelII long-read characteristics. Illumina short-read data (shorter records, repeated CIGARs, lower quality entropy) and ONT data (higher error rates) may show different codec selection patterns and relative performance.
+**Platform-dependent pileup.** Illumina short-read pileup shows minimal speedup (0.92x-1.2x vs PacBio 1.1x-1.4x) because simple CIGARs and high record density shift the bottleneck from I/O to per-record computation. ONT data (high error rates, long reads with complex CIGARs) remains untested.
 
 ### 4.5 Cloud compatibility
 
@@ -216,11 +227,11 @@ AXF1's layout (absolute byte offsets, contiguous chunks, index at EOF) enables H
 
 ## 5. Conclusion
 
-AXF1 demonstrates that columnar alignment storage substantially accelerates genomic region queries. On HG002 PacBio data, AXF1 achieves 3.8x-5.4x faster full-record queries and 1.1x-1.4x faster pileup compared to samtools, with parallel centromeric pileup reaching near-parity (0.90x). The format maintains lossless BAM round-trip fidelity while offering optional lossy compression that matches CRAM file sizes at 15x faster decode. Field-specific codecs, chunk-level parallelism, selective column I/O, and cloud-compatible layout address the fundamental mismatch between row-oriented BAM and modern analytical workloads where query latency — not storage density — is the primary constraint.
+AXF1 demonstrates that columnar alignment storage substantially accelerates genomic region queries across sequencing platforms. On HG002 PacBio long-read data, AXF1 achieves 3.8x-5.4x faster full-record queries and 1.1x-1.4x faster pileup compared to samtools. On Illumina 300x short-read data, view speedup remains 3.0x-3.9x, confirming that the parallel fused decode advantage generalizes beyond long reads. The format maintains lossless BAM round-trip fidelity while offering optional lossy compression that matches CRAM file sizes at 15x faster decode. Field-specific codecs, chunk-level parallelism, selective column I/O, and cloud-compatible layout address the fundamental mismatch between row-oriented BAM and modern analytical workloads where query latency — not storage density — is the primary constraint.
 
 ## Data Availability
 
-AXF1 source code, benchmark scripts, and toy test fixtures are available at https://github.com/happyntu/alignx. HG002 PacBio SequelII data is from the Genome in a Bottle Consortium (Zook et al., 2019).
+AXF1 source code, benchmark scripts, and toy test fixtures are available at https://github.com/happyntu/alignx. HG002 PacBio SequelII and Illumina 2x250bp data are from the Genome in a Bottle Consortium (Zook et al., 2019).
 
 ## References
 
