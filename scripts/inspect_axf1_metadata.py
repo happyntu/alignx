@@ -148,14 +148,24 @@ def read_metadata(path: Path) -> Axf1Metadata:
     source_path = ""
     conversion_region = ""
     is_subset = False
-    if version == 2:
+    if version >= 2:
         subset_flag, offset = read_u8(data, offset, "subset flag")
         if subset_flag > 1:
             raise ValueError("invalid AXF1 subset metadata flag")
         is_subset = subset_flag == 1
         source_path, offset = read_string(data, offset, "source path")
         conversion_region, offset = read_string(data, offset, "conversion region")
-    elif version != 1:
+    if version >= 3:
+        require_range(data, offset, 4, "extension entry count")
+        (ext_count,) = struct.unpack_from("<I", data, offset)
+        offset += 4
+        for _ in range(ext_count):
+            require_range(data, offset, 7, "extension entry header")
+            _key_id, _flags, val_len = struct.unpack_from("<HBI", data, offset)
+            offset += 7
+            require_range(data, offset, val_len, "extension entry value")
+            offset += val_len
+    if version not in (1, 2, 3):
         raise ValueError("unsupported AXF1 version")
     if offset > index_offset:
         raise ValueError("AXF1 metadata overlaps index")
