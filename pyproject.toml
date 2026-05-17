@@ -8,11 +8,26 @@ version = "0.1.0"
 description = "Columnar alignment format for selective-column I/O in bioinformatics"
 requires-python = ">=3.10"
 license = "MIT"
+authors = [{name = "happyntu", email = "happyntu@gmail.com"}]
+readme = "README.md"
+keywords = ["bioinformatics", "genomics", "alignment", "BAM", "columnar"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C++",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+]
 dependencies = ["numpy>=1.22"]
 
 [project.optional-dependencies]
 pandas = ["pandas>=1.4"]
 dev = ["pytest>=7.0", "pandas>=1.4"]
+
+# [project.urls]
+# Repository = "https://github.com/happyntu/alignx"
 
 [tool.scikit-build]
 cmake.build-type = "Release"

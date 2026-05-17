@@ -37,6 +37,10 @@ benchmarks/plots/
 *.axf
 *.axf.idx
 __pycache__/
+*.egg-info/
+*.egg
+dist/
+.eggs/
 tmp_*.sh
 .DS_Store
 Thumbs.db
