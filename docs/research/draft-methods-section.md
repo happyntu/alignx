@@ -96,12 +96,11 @@ AXF1 lossless encoding is comparable to BAM extraction (1.07x-1.18x). AXF1 lossy
 
 | Config | chr1:1M-2M (ms) | chrY:20M-21M (ms) | chr1:121M-142M (ms) |
 |:---|---:|---:|---:|
-| BAM (samtools) | 221 | 158 | 3,328 |
-| BAM (samtools -@8) | — | 134 | ~1,050 |
-| CRAM | 673 (2.7x) | 376 (2.1x) | 11,411 (2.9x) |
-| AXF1 (fused decode) | **56 (3.9x)** | **42 (3.8x)** | **1,064 (3.1x)** |
+| BAM (samtools) | 236 | 169 | 3,223 |
+| CRAM | 673 (0.35x) | 376 (0.45x) | 11,411 (0.28x) |
+| AXF1 (v1.0 final) | **44 (5.4x)** | **35 (4.8x)** | **854 (3.8x)** |
 
-AXF1 lossless full-record decode with mmap, thread pool, fused columnar-to-SAM formatting, and interior chunk skip is **3.1x-3.9x faster than samtools view** across all regions. The file is memory-mapped on Linux; a fixed pool of 8 worker threads reads directly from mapped memory via atomic work-stealing. The fused decode path decodes all columns into columnar arrays and formats SAM directly without intermediate per-record struct allocation. Interior chunks (fully contained within the query region) skip CIGAR-based overlap checking. On the centromeric 21 Mb region (6,878 chunks, 58,168 records, 1.12 GB payload), 8-thread fused decode achieves ~1.05 GB/s effective throughput.
+AXF1 lossless full-record decode is **3.8x-5.4x faster than samtools view** across all regions. The v1.0 decoder combines memory-mapped I/O (Linux `mmap` + `MADV_SEQUENTIAL`), a fixed pool of 8 worker threads with atomic work-stealing, fused columnar-to-SAM formatting (decode directly into columnar arrays, format SAM without intermediate per-record struct allocation), interior chunk skip (chunks fully contained within the query region bypass CIGAR overlap checks), worker-local buffer reuse (8 pre-reserved output buffers instead of one per chunk), branchless QUAL decode (direct bit-position calculation), and FlatColumn zero-copy string fields. On the centromeric 21 Mb region (6,878 chunks, 58,168 records, 1.12 GB payload), 8-thread fused decode achieves ~1.31 GB/s effective throughput.
 
 ## Query Benchmark
 

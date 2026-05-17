@@ -86,14 +86,19 @@
 - **AXF1 lossy + zstd** encode is faster than BAM across all regions (0.84x-0.93x) despite the zstd compression pass.
 - **AXF1 + zstd** encode is 1.62x slower on the centromeric region due to zstd compression cost on large lossless quality payloads, compared to 1.68x-1.80x on 1 Mb regions.
 
-### Decode Time
+### Decode Time (Full-Record View)
 
-**Update 2026-05-17:** AXF1 lossless decode times below are from the pre-optimization compression benchmark. Post-optimization query benchmark (same workload: `alignx view <axf1>`) shows AXF1 lossless decode at **461 ms** (chr1:1M-2M, was 1,426), **375 ms** (chrY:20M-21M, was 852), and **16,210 ms** (centromeric, was 27,005) — a 1.7x-3.1x improvement. Lossy and zstd config decode times have not been rerun but would see proportional improvement since the decoder optimizations (batch SEQ/QUAL/CIGAR codecs, zero-alloc SAM formatting) apply to all configs.
+**Update 2026-05-17 (final):** AXF1 lossless decode times updated to v1.0 final (mmap + thread pool + fused decode + worker-local buffers + branchless QUAL + FlatColumn). The original compression benchmark numbers (1,426 / 852 / 27,005 ms) reflected the unoptimized sequential decoder; final v1.0 achieves **3.8x-5.4x faster than samtools view**.
 
-- **BAM** decode (samtools view): 200-459 ms for 1 Mb regions, 7,493-8,874 ms for the centromeric 21 Mb region.
-- **AXF1 lossless** decode (post-optimization) achieves **parity with samtools view** on 1 Mb regions: 461 ms vs 459 ms (chr1:1M-2M), 375 ms vs 386 ms (chrY:20M-21M). The centromeric region is 0.55x of samtools (16,210 ms vs 8,874 ms).
-- **CRAM** decode is 1.5x-2.4x slower than BAM. The centromeric region (1.5x) shows better relative CRAM decode performance than 1 Mb regions (1.9x-2.4x) due to amortized startup.
-- **Key insight**: AXF1's full-record view decode has reached samtools parity on typical 1 Mb regions. Combined with its selective column I/O advantage for pileup/coverage (1.18x-1.61x faster), AXF1 is now competitive or faster across all query workloads on typical regions.
+| Config | chr1:1M-2M (ms) | chrY:20M-21M (ms) | chr1:121M-142M (ms) |
+|:---|---:|---:|---:|
+| BAM (samtools view) | 236 | 169 | 3,223 |
+| CRAM | 673 (0.35x) | 376 (0.45x) | 11,411 (0.28x) |
+| AXF1 lossless (v1.0) | **44 (5.4x)** | **35 (4.8x)** | **854 (3.8x)** |
+
+- **AXF1 lossless** full-record decode is **3.8x-5.4x faster than samtools view** across all regions. The v1.0 decoder uses memory-mapped I/O, 8-worker thread pool with atomic work-stealing, fused columnar-to-SAM formatting, interior chunk skip, worker-local buffer reuse, branchless QUAL decode, and FlatColumn zero-copy string access.
+- **CRAM** decode is 2.4x-3.6x slower than BAM (0.28x-0.45x of samtools speed).
+- **Key insight**: AXF1 has moved from samtools parity (batch 1) to decisively faster (5.4x on typical regions). Combined with selective column I/O for pileup/coverage (1.18x-1.61x faster on 1 Mb), AXF1 dominates all query workloads on typical regions.
 
 ### Encode-Size Tradeoff
 
