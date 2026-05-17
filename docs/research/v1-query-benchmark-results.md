@@ -172,10 +172,10 @@ Note: `samtools depth` uses `-G` for FLAG exclusion and `-Q` for MAPQ, whereas `
 |:---|:---|:---|
 | View (unfiltered) | **4.8x-5.4x (faster)** | **3.8x (faster)** |
 | View (filtered) | **5.1x-5.3x (faster)** | **5.2x (faster)** |
-| Pileup (unfiltered) | **1.18x-1.61x (faster)** | 0.69x (slower) |
-| Pileup (filtered) | **0.92x-1.49x** | 0.58x (slower) |
+| Pileup (unfiltered) | **1.1x-1.4x (faster)** | **0.90x (near-parity)** |
+| Pileup (filtered) | **0.92x-1.49x** | ~0.85x (estimated) |
 
-Note: View numbers are from batch 6 manual runs with mmap + thread pool + fused decode + worker-local buffers on 88-core server. Pileup numbers are from batch 1 formal benchmark (sequential path).
+Note: View numbers are from batch 6 manual runs with mmap + thread pool + fused decode + worker-local buffers on 88-core server. Pileup numbers updated post-parallel pileup (sequential on <500 chunks, parallel 8-worker thread pool on >=500 chunks).
 
 ### Key Insights
 

@@ -2,7 +2,7 @@
 
 ## Abstract
 
-The Binary Alignment Map (BAM) format stores alignment records in a row-oriented layout that requires full-record parsing even when only a subset of fields is needed. We present AXF1, a columnar alignment format that stores each SAM field as an independent column stream within reference-sorted chunks, enabling selective column I/O and parallel decoding. On HG002 PacBio SequelII long-read data aligned to GRCh38, AXF1 region queries are 3.8x-5.4x faster than samtools view across typical euchromatic, Y-chromosome, and centromeric regions, while pileup computations that read only position and CIGAR columns are 1.2x-1.6x faster than samtools depth. The format uses field-specific codecs (delta-varint positions, bit-packed flags, 2-bit sequence literals, alphabet-packed quality scores, front-compressed read name dictionaries, per-key tag streams) with per-chunk codec selection and raw fallback guarantees. AXF1 lossless files are 1.6x-2.3x larger than BAM due to the absence of general-purpose block compression; with optional lossy quality binning and zstd compression, file sizes reach 0.52x-0.63x of BAM on typical regions, comparable to CRAM. The file layout uses absolute byte offsets and contiguous chunk storage compatible with HTTP range requests. AXF1 demonstrates that columnar storage combined with parallel fused decoding can substantially accelerate genomic region queries without sacrificing lossless fidelity.
+The Binary Alignment Map (BAM) format stores alignment records in a row-oriented layout that requires full-record parsing even when only a subset of fields is needed. We present AXF1, a columnar alignment format that stores each SAM field as an independent column stream within reference-sorted chunks, enabling selective column I/O and parallel decoding. On HG002 PacBio SequelII long-read data aligned to GRCh38, AXF1 region queries are 3.8x-5.4x faster than samtools view across typical euchromatic, Y-chromosome, and centromeric regions, while pileup computations that read only position and CIGAR columns are 1.1x-1.4x faster than samtools depth on typical regions and reach near-parity (0.90x) on 21 Mb centromeric regions via parallel depth accumulation. The format uses field-specific codecs (delta-varint positions, bit-packed flags, 2-bit sequence literals, alphabet-packed quality scores, front-compressed read name dictionaries, per-key tag streams) with per-chunk codec selection and raw fallback guarantees. AXF1 lossless files are 1.6x-2.3x larger than BAM due to the absence of general-purpose block compression; with optional lossy quality binning and zstd compression, file sizes reach 0.52x-0.63x of BAM on typical regions, comparable to CRAM. The file layout uses absolute byte offsets and contiguous chunk storage compatible with HTTP range requests. AXF1 demonstrates that columnar storage combined with parallel fused decoding can substantially accelerate genomic region queries without sacrificing lossless fidelity.
 
 ## 1. Introduction
 
@@ -144,10 +144,10 @@ AXF1 region view is 3.8x-5.4x faster than samtools view across all tested region
 
 | Tool | chr1:1M-2M | chrY:20M-21M | chr1:121M-142M |
 |:---|---:|---:|---:|
-| samtools depth | 356 ms | 282 ms | 6,743 ms |
-| **AXF1 pileup** | **221 ms (1.6x)** | **239 ms (1.2x)** | 9,728 ms (0.7x) |
+| samtools depth | 383 ms | 286 ms | 5,731 ms |
+| **AXF1 pileup** | **265 ms (1.4x)** | **270 ms (1.1x)** | 6,381 ms (0.90x) |
 
-On 1 Mb regions, AXF1 pileup (POS+CIGAR only) is 1.2x-1.6x faster than samtools depth. On the 21 Mb centromeric region, samtools depth is faster (0.7x) because HTSlib's sequential parsing is highly optimized at scale and the per-chunk overhead of selective I/O becomes relatively larger. The AXF1 pileup path uses sequential processing (no thread pool); applying the parallel engine to pileup is future work.
+On 1 Mb regions, AXF1 pileup (POS+CIGAR only) is 1.1x-1.4x faster than samtools depth via selective column I/O (reads only POS and CIGAR payloads, skipping SEQ, QUAL, QNAME, TAGS). On the 21 Mb centromeric region (6,878 chunks), the parallel pileup engine (8-worker thread pool with per-worker depth arrays) achieves 0.90x of samtools depth — near parity compared to the sequential-only baseline of 0.69x. The remaining gap reflects the memory bandwidth cost of maintaining 8 independent 84 MB depth arrays competing for L3 cache.
 
 ### 3.3 Compression
 
@@ -218,7 +218,7 @@ The filtered centromeric path (500 ms, 5.2x) demonstrates that reducing output v
 
 **File size.** AXF1 lossless is larger than BAM. Applications constrained by storage cost should use CRAM or AXF1 lossy modes.
 
-**Sequential pileup at scale.** AXF1 pileup is slower than samtools depth on the 21 Mb centromeric region (0.7x). The current pileup path uses sequential processing; applying the thread pool to pileup is straightforward future work.
+**Pileup at scale.** AXF1 parallel pileup achieves 0.90x of samtools depth on the 21 Mb centromeric region. The remaining gap reflects memory bandwidth contention from 8 independent depth arrays (84 MB each) competing for shared L3 cache. Further improvement would require streaming pileup (coordinate-sorted output without full depth array) or NUMA-aware allocation.
 
 **No reference-based compression.** AXF1 does not implement reference-delta sequence encoding. CRAM's reference-based compression is superior for file size on long reads aligned to a known reference. AXF1 prioritizes self-contained files that decode without external reference access.
 
