@@ -23,6 +23,7 @@ option(ALIGNX_BUILD_TESTS  "Build alignx tests"              ON)
 option(ALIGNX_ENABLE_SIMD  "Enable AVX2 SIMD (Phase 2+)"    OFF)
 option(ALIGNX_ENABLE_CUDA  "Enable CUDA backend (Phase 3+)"  OFF)
 option(ALIGNX_ENABLE_ZSTD  "Enable zstd support for AXF1 compressed payloads" OFF)
+option(ALIGNX_BUILD_PYTHON "Build Python bindings via pybind11"               OFF)
 
 if(ALIGNX_ENABLE_CUDA)
   enable_language(CUDA)
@@ -138,4 +139,16 @@ endif()
 if(ALIGNX_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+# ── Python bindings ───────────────────────────────────────────────────────────
+if(ALIGNX_BUILD_PYTHON AND TARGET alignx_lib)
+  find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+  find_package(pybind11 CONFIG REQUIRED)
+  pybind11_add_module(_alignx src/python/bindings.cpp)
+  target_link_libraries(_alignx PRIVATE alignx_lib)
+  set_target_properties(_alignx PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python"
+  )
+  message(STATUS "Python bindings enabled (pybind11 ${pybind11_VERSION})")
 endif()

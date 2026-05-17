@@ -8,7 +8,7 @@ alignx has reached **v1.0 — Full format + benchmark paper ready**.
 
 All v1.0 deliverables are complete: columnar AXF1 format with production codecs (POS delta-varint, FLAG bit-pack, MAPQ RLE, SEQ 2-bit, QUAL alphabet-pack + zstd, CIGAR token/dict, QNAME dict, TAG per-stream), parallel mmap-based region query (3.8x-5.4x faster than samtools view on PacBio, 3.0x-3.9x on Illumina), selective column I/O for pileup/coverage, BAM/CRAM round-trip, and comprehensive benchmarks on HG002 PacBio and Illumina data.
 
-Phase 2 complete: per-column zstd (1.02x BAM), SIMD AVX2 SEQ decode + FLAG bitpack, streaming pileup (3.0x-4.1x faster than samtools depth), reference-delta SEQ codec (ADR-007, `seq_ref_delta` codec ID 13, CIGAR-driven reconstruction with per-contig SHA-256 validation).
+Phase 2 complete: per-column zstd (1.02x BAM), SIMD AVX2 SEQ decode + FLAG bitpack, streaming pileup (3.0x-4.1x faster than samtools depth), reference-delta SEQ codec (ADR-007, `seq_ref_delta` codec ID 13, CIGAR-driven reconstruction with per-contig SHA-256 validation). Python bindings (pybind11) via `ALIGNX_BUILD_PYTHON=ON`: enums, structs, Axf1FileReader, high-level functions (view, coverage, convert, export_bam), BamReader/FastaReader with iterator + context manager; 38 pytest tests.
 
 Completed:
 - HTSlib wrapper: `BamReader` with `open`, `fetch(region)`, `next_record`
@@ -147,6 +147,7 @@ Completed:
 - AXF1 reference-delta SEQ codec (`seq_ref_delta`, codec ID 13): CIGAR-driven reconstruction storing only mismatches, soft-clips, and insertions as delta from reference; per-chunk fallback to `seq_2bit_literal` when ref-delta is not smaller or sequence contains non-ACGT bases
 - AXF1 reference-delta codec selection: encoder tries ref-delta before 2-bit literal when FASTA context available; per-contig pre-fetch into `unordered_map` for zero-lock parallel decode
 - AXF1 writer pre-fetches reference sequences and passes per-chunk ref context through `write_chunk` → `encode_columns` → `encode_sequence_column`; converter populates v3 extensions (ref_contig_sha256 + encode_reference_path) when `--reference` set
+- Python bindings (pybind11): `_alignx` C extension module via `ALIGNX_BUILD_PYTHON=ON`; binds enums, structs, `Axf1FileReader`, high-level functions (`view`, `coverage`, `convert`, `export_bam`), and HTSlib-gated `BamReader`/`FastaReader` with Python iterator + context manager patterns; 38 pytest tests in `tests/python/`
 
 ## Build & Test Commands
 
