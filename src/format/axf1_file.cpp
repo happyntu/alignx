@@ -1763,6 +1763,160 @@ std::expected<char, std::string> decode_cigar_op(std::uint8_t op) {
     return std::unexpected("unknown AXF1 CIGAR token operation");
 }
 
+struct FlatColumn {
+    std::vector<char> data;
+    std::vector<std::uint32_t> offsets;
+    [[nodiscard]] std::string_view at(std::size_t i) const noexcept {
+        return {data.data() + offsets[i], offsets[i + 1] - offsets[i]};
+    }
+};
+
+FlatColumn vector_to_flat(std::vector<std::string>&& strings) {
+    FlatColumn col;
+    col.offsets.reserve(strings.size() + 1);
+    std::size_t total = 0;
+    for (const auto& s : strings) total += s.size();
+    col.data.reserve(total);
+    for (auto& s : strings) {
+        col.offsets.push_back(static_cast<std::uint32_t>(col.data.size()));
+        col.data.insert(col.data.end(), s.begin(), s.end());
+    }
+    col.offsets.push_back(static_cast<std::uint32_t>(col.data.size()));
+    return col;
+}
+
+std::expected<FlatColumn, std::string>
+decode_cigar_token_column_flat(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
+    Reader reader(data, size);
+    FlatColumn col;
+    col.offsets.reserve(record_count + 1);
+    col.data.reserve(size * 3);
+
+    for (std::uint32_t record_index = 0; record_index < record_count; ++record_index) {
+        auto op_count = read_varint_u64(reader, "truncated AXF1 CIGAR token op count",
+                                        "AXF1 CIGAR token op count overflow");
+        if (!op_count) {
+            return std::unexpected(op_count.error());
+        }
+        if (*op_count == 0) {
+            return std::unexpected("AXF1 CIGAR token op count is zero");
+        }
+        if (*op_count > static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())) {
+            return std::unexpected("AXF1 CIGAR token op count is too large");
+        }
+
+        col.offsets.push_back(static_cast<std::uint32_t>(col.data.size()));
+        for (std::uint64_t op_index = 0; op_index < *op_count; ++op_index) {
+            auto length = reader.read_varint_u64();
+            if (!length) {
+                return std::unexpected("truncated AXF1 CIGAR token length");
+            }
+            if (*length == 0) {
+                return std::unexpected("AXF1 CIGAR token length is zero");
+            }
+            auto op = reader.read_u8();
+            if (!op) {
+                return std::unexpected("truncated AXF1 CIGAR token operation");
+            }
+            if (*op >= 9) {
+                return std::unexpected("unknown AXF1 CIGAR token operation");
+            }
+            char int_buf[20];
+            auto [ptr, ec] = std::to_chars(int_buf, int_buf + sizeof(int_buf), *length);
+            col.data.insert(col.data.end(), int_buf, ptr);
+            col.data.push_back(kCigarOpTable[*op]);
+        }
+    }
+    col.offsets.push_back(static_cast<std::uint32_t>(col.data.size()));
+
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 CIGAR token column has trailing bytes");
+    }
+    return col;
+}
+
+std::expected<FlatColumn, std::string>
+decode_string_column_flat(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
+    Reader reader(data, size);
+    FlatColumn col;
+    col.offsets.reserve(record_count + 1);
+    col.data.reserve(size);
+    for (std::uint32_t index = 0; index < record_count; ++index) {
+        auto len = reader.read_u32();
+        if (!len) return std::unexpected("AXF1 column value count mismatch");
+        auto adv = reader.advance(*len);
+        if (!adv) return std::unexpected("AXF1 string column value is truncated");
+        const char* str_start = reinterpret_cast<const char*>(reader.current_ptr() - *len);
+        col.offsets.push_back(static_cast<std::uint32_t>(col.data.size()));
+        col.data.insert(col.data.end(), str_start, str_start + *len);
+    }
+    col.offsets.push_back(static_cast<std::uint32_t>(col.data.size()));
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 string column has trailing bytes");
+    }
+    return col;
+}
+
+std::expected<FlatColumn, std::string>
+decode_qname_dict_column_flat(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
+    Reader reader(data, size);
+
+    auto dict_size_val = reader.read_varint_u64();
+    if (!dict_size_val) return std::unexpected("AXF1 QNAME dict: truncated dict_size");
+    const auto dict_size = static_cast<std::uint32_t>(*dict_size_val);
+    if (dict_size == 0) return std::unexpected("AXF1 QNAME dict has zero entries");
+    if (dict_size > record_count) return std::unexpected("AXF1 QNAME dict size exceeds record count");
+
+    // Build dictionary as flat: one contiguous buffer + offsets
+    FlatColumn dict;
+    dict.offsets.reserve(dict_size + 1);
+
+    auto first_len = reader.read_varint_u64();
+    if (!first_len) return std::unexpected("AXF1 QNAME dict: truncated first entry length");
+    auto first_str = reader.read_string(static_cast<std::uint32_t>(*first_len));
+    if (!first_str) return std::unexpected("AXF1 QNAME dict: truncated first entry");
+    dict.offsets.push_back(0);
+    dict.data.insert(dict.data.end(), first_str->begin(), first_str->end());
+
+    for (std::uint32_t i = 1; i < dict_size; ++i) {
+        auto shared_len = reader.read_varint_u64();
+        if (!shared_len) return std::unexpected("AXF1 QNAME dict: truncated shared prefix length");
+        const auto prev_start = dict.offsets.back();
+        const auto prev_size = static_cast<std::size_t>(dict.data.size()) - prev_start;
+        if (*shared_len > prev_size) return std::unexpected("AXF1 QNAME dict shared prefix exceeds previous entry");
+        auto suffix_len = reader.read_varint_u64();
+        if (!suffix_len) return std::unexpected("AXF1 QNAME dict: truncated suffix length");
+        auto suffix = reader.read_string(static_cast<std::uint32_t>(*suffix_len));
+        if (!suffix) return std::unexpected("AXF1 QNAME dict: truncated suffix");
+        dict.offsets.push_back(static_cast<std::uint32_t>(dict.data.size()));
+        const auto new_entry_size = static_cast<std::size_t>(*shared_len) + suffix->size();
+        dict.data.reserve(dict.data.size() + new_entry_size);
+        dict.data.insert(dict.data.end(), dict.data.data() + prev_start,
+                         dict.data.data() + prev_start + static_cast<std::ptrdiff_t>(*shared_len));
+        dict.data.insert(dict.data.end(), suffix->begin(), suffix->end());
+    }
+    dict.offsets.push_back(static_cast<std::uint32_t>(dict.data.size()));
+
+    // Read indices and build output FlatColumn
+    FlatColumn col;
+    col.offsets.reserve(record_count + 1);
+    col.data.reserve(dict.data.size());
+    for (std::uint32_t j = 0; j < record_count; ++j) {
+        auto idx = reader.read_varint_u64();
+        if (!idx) return std::unexpected("AXF1 QNAME dict: truncated index");
+        if (*idx >= dict_size) return std::unexpected("AXF1 QNAME dict index out of range");
+        auto entry = dict.at(static_cast<std::size_t>(*idx));
+        col.offsets.push_back(static_cast<std::uint32_t>(col.data.size()));
+        col.data.insert(col.data.end(), entry.begin(), entry.end());
+    }
+    col.offsets.push_back(static_cast<std::uint32_t>(col.data.size()));
+
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 QNAME dict column has trailing bytes");
+    }
+    return col;
+}
+
 std::expected<std::vector<std::string>, std::string>
 decode_cigar_token_column(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
     Reader reader(data, size);
@@ -1863,6 +2017,13 @@ decode_cigar_dict_column(const unsigned char* data, std::size_t size, std::uint3
     return values;
 }
 
+std::expected<FlatColumn, std::string>
+decode_cigar_dict_column_flat(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
+    auto v = decode_cigar_dict_column(data, size, record_count);
+    if (!v) return std::unexpected(v.error());
+    return vector_to_flat(std::move(*v));
+}
+
 constexpr char kBase2bit[4] = {'A', 'C', 'G', 'T'};
 
 struct Seq2bitQuad {
@@ -1896,14 +2057,6 @@ std::expected<char, std::string> decode_acgt_base_2bit(std::uint8_t value) {
         return std::unexpected("invalid AXF1 SEQ 2-bit base");
     }
 }
-
-struct FlatColumn {
-    std::vector<char> data;
-    std::vector<std::uint32_t> offsets;
-    [[nodiscard]] std::string_view at(std::size_t i) const noexcept {
-        return {data.data() + offsets[i], offsets[i + 1] - offsets[i]};
-    }
-};
 
 std::expected<std::vector<std::string>, std::string>
 decode_seq_2bit_literal_column(const unsigned char* data, std::size_t size,
@@ -3191,17 +3344,17 @@ Axf1FileReader::decode_chunk_mapped(const unsigned char* data, std::uint64_t len
 namespace {
 
 struct ColumnarDecode {
-    std::vector<std::string> qnames;
+    FlatColumn qnames;
     std::vector<std::uint16_t> flags;
     std::vector<std::int32_t> positions;
     std::vector<std::uint8_t> mapqs;
-    std::vector<std::string> cigars;
-    std::vector<std::string> mate_refs;
+    FlatColumn cigars;
+    FlatColumn mate_refs;
     std::vector<std::int32_t> mate_positions;
     std::vector<std::int32_t> template_lengths;
     FlatColumn sequences;
     FlatColumn qualities;
-    std::vector<std::string> tags;
+    FlatColumn tags;
     std::uint32_t record_count = 0;
 };
 
@@ -3257,8 +3410,8 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
         switch (entry.column_id) {
         case Axf1ColumnId::qname: {
             auto v = entry.codec_id == Axf1CodecId::qname_dict
-                         ? decode_qname_dict_column(col_data, col_size, *record_count)
-                         : decode_string_column(col_data, col_size, *record_count);
+                         ? decode_qname_dict_column_flat(col_data, col_size, *record_count)
+                         : decode_string_column_flat(col_data, col_size, *record_count);
             if (!v) return std::unexpected(v.error());
             result.qnames = std::move(*v);
             break;
@@ -3291,19 +3444,19 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
             break;
         }
         case Axf1ColumnId::cigar: {
-            std::expected<std::vector<std::string>, std::string> v;
+            std::expected<FlatColumn, std::string> v;
             if (entry.codec_id == Axf1CodecId::cigar_dict)
-                v = decode_cigar_dict_column(col_data, col_size, *record_count);
+                v = decode_cigar_dict_column_flat(col_data, col_size, *record_count);
             else if (entry.codec_id == Axf1CodecId::cigar_token)
-                v = decode_cigar_token_column(col_data, col_size, *record_count);
+                v = decode_cigar_token_column_flat(col_data, col_size, *record_count);
             else
-                v = decode_string_column(col_data, col_size, *record_count);
+                v = decode_string_column_flat(col_data, col_size, *record_count);
             if (!v) return std::unexpected(v.error());
             result.cigars = std::move(*v);
             break;
         }
         case Axf1ColumnId::mate_reference: {
-            auto v = decode_string_column(col_data, col_size, *record_count);
+            auto v = decode_string_column_flat(col_data, col_size, *record_count);
             if (!v) return std::unexpected(v.error());
             result.mate_refs = std::move(*v);
             break;
@@ -3373,11 +3526,15 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
             break;
         }
         case Axf1ColumnId::tags: {
-            auto v = entry.codec_id == Axf1CodecId::tags_per_stream
-                         ? decode_tags_per_stream_column(col_data, col_size, *record_count)
-                         : decode_string_column(col_data, col_size, *record_count);
-            if (!v) return std::unexpected(v.error());
-            result.tags = std::move(*v);
+            if (entry.codec_id == Axf1CodecId::tags_per_stream) {
+                auto v = decode_tags_per_stream_column(col_data, col_size, *record_count);
+                if (!v) return std::unexpected(v.error());
+                result.tags = vector_to_flat(std::move(*v));
+            } else {
+                auto v = decode_string_column_flat(col_data, col_size, *record_count);
+                if (!v) return std::unexpected(v.error());
+                result.tags = std::move(*v);
+            }
             break;
         }
         }
@@ -3394,7 +3551,11 @@ void append_record_from_columns(std::string& out, const ColumnarDecode& cols,
         auto [end, ec] = std::to_chars(num_buf, num_buf + 20, value);
         out.append(num_buf, static_cast<std::size_t>(end - num_buf));
     };
-    out.append(cols.qnames[i]);
+    auto qname = cols.qnames.at(i);
+    auto cigar = cols.cigars.at(i);
+    auto mate_ref = cols.mate_refs.at(i);
+    auto tag = cols.tags.at(i);
+    out.append(qname.data(), qname.size());
     out.push_back('\t');
     append_int(cols.flags[i]);
     out.push_back('\t');
@@ -3404,9 +3565,9 @@ void append_record_from_columns(std::string& out, const ColumnarDecode& cols,
     out.push_back('\t');
     append_int(cols.mapqs[i]);
     out.push_back('\t');
-    out.append(cols.cigars[i]);
+    out.append(cigar.data(), cigar.size());
     out.push_back('\t');
-    out.append(cols.mate_refs[i]);
+    out.append(mate_ref.data(), mate_ref.size());
     out.push_back('\t');
     append_int(cols.mate_positions[i] <= 0 ? 0 : cols.mate_positions[i] + 1);
     out.push_back('\t');
@@ -3415,16 +3576,16 @@ void append_record_from_columns(std::string& out, const ColumnarDecode& cols,
     out.append(cols.sequences.at(i));
     out.push_back('\t');
     out.append(cols.qualities.at(i));
-    if (!cols.tags[i].empty()) {
+    if (!tag.empty()) {
         out.push_back('\t');
-        out.append(cols.tags[i]);
+        out.append(tag.data(), tag.size());
     }
     out.push_back('\n');
 }
 
 char* write_record_to_sam(char* dst, const ColumnarDecode& cols,
                           std::size_t i, const std::string& ref_name) {
-    auto write_str = [&](std::string_view sv) {
+    auto write_sv = [&](std::string_view sv) {
         std::memcpy(dst, sv.data(), sv.size());
         dst += sv.size();
     };
@@ -3433,30 +3594,31 @@ char* write_record_to_sam(char* dst, const ColumnarDecode& cols,
         dst = end;
     };
 
-    write_str(cols.qnames[i]);
+    write_sv(cols.qnames.at(i));
     *dst++ = '\t';
     write_int(cols.flags[i]);
     *dst++ = '\t';
-    write_str(ref_name);
+    write_sv(ref_name);
     *dst++ = '\t';
     write_int(cols.positions[i] + 1);
     *dst++ = '\t';
     write_int(cols.mapqs[i]);
     *dst++ = '\t';
-    write_str(cols.cigars[i]);
+    write_sv(cols.cigars.at(i));
     *dst++ = '\t';
-    write_str(cols.mate_refs[i]);
+    write_sv(cols.mate_refs.at(i));
     *dst++ = '\t';
     write_int(cols.mate_positions[i] <= 0 ? 0 : cols.mate_positions[i] + 1);
     *dst++ = '\t';
     write_int(cols.template_lengths[i]);
     *dst++ = '\t';
-    write_str(cols.sequences.at(i));
+    write_sv(cols.sequences.at(i));
     *dst++ = '\t';
-    write_str(cols.qualities.at(i));
-    if (!cols.tags[i].empty()) {
+    write_sv(cols.qualities.at(i));
+    auto tag_view = cols.tags.at(i);
+    if (!tag_view.empty()) {
         *dst++ = '\t';
-        write_str(cols.tags[i]);
+        write_sv(tag_view);
     }
     *dst++ = '\n';
     return dst;
@@ -3478,14 +3640,9 @@ Axf1FileReader::decode_chunk_to_sam_mapped(const unsigned char* data, std::uint6
     FusedDecodeResult result;
     const std::uint32_t n = cols->record_count;
 
-    // Compute upper-bound output size: sum all variable fields + fixed overhead per record
-    // 5 ints × 11 chars max + 10 tabs + 1 optional tab + 1 newline = 67 per record
-    std::size_t total_var = 0;
-    for (std::uint32_t i = 0; i < n; ++i) {
-        total_var += cols->qnames[i].size() + cols->cigars[i].size() +
-                     cols->mate_refs[i].size() + cols->tags[i].size();
-    }
-    total_var += cols->sequences.data.size() + cols->qualities.data.size();
+    const std::size_t total_var = cols->qnames.data.size() + cols->cigars.data.size() +
+        cols->mate_refs.data.size() + cols->tags.data.size() +
+        cols->sequences.data.size() + cols->qualities.data.size();
     const std::size_t upper_bound = total_var + n * (ref_name.size() + 67);
 
     if (is_interior_chunk) {
@@ -3503,7 +3660,7 @@ Axf1FileReader::decode_chunk_to_sam_mapped(const unsigned char* data, std::uint6
             [&](char* buf, [[maybe_unused]] std::size_t buf_size) -> std::size_t {
                 char* ptr = buf;
                 for (std::uint32_t i = 0; i < n; ++i) {
-                    auto span = query::cigar_reference_span(cols->cigars[i]);
+                    auto span = query::cigar_reference_span(cols->cigars.at(i));
                     if (!span) return static_cast<std::size_t>(ptr - buf);
                     const std::int32_t pos = cols->positions[i];
                     if (!query::half_open_intervals_overlap(
@@ -3532,12 +3689,9 @@ Axf1FileReader::decode_chunk_to_sam_append(const unsigned char* data, std::uint6
     }
 
     const std::uint32_t n = cols->record_count;
-    std::size_t total_var = 0;
-    for (std::uint32_t i = 0; i < n; ++i) {
-        total_var += cols->qnames[i].size() + cols->cigars[i].size() +
-                     cols->mate_refs[i].size() + cols->tags[i].size();
-    }
-    total_var += cols->sequences.data.size() + cols->qualities.data.size();
+    const std::size_t total_var = cols->qnames.data.size() + cols->cigars.data.size() +
+        cols->mate_refs.data.size() + cols->tags.data.size() +
+        cols->sequences.data.size() + cols->qualities.data.size();
     const std::size_t upper_bound = total_var + n * (ref_name.size() + 67);
 
     const std::size_t old_size = output.size();
@@ -3552,7 +3706,7 @@ Axf1FileReader::decode_chunk_to_sam_append(const unsigned char* data, std::uint6
         }
     } else {
         for (std::uint32_t i = 0; i < n; ++i) {
-            auto span = query::cigar_reference_span(cols->cigars[i]);
+            auto span = query::cigar_reference_span(cols->cigars.at(i));
             if (!span) {
                 output.resize(old_size);
                 return std::unexpected(span.error());
@@ -3589,7 +3743,7 @@ Axf1FileReader::decode_chunk_to_sam_append_filtered(
 
     for (std::uint32_t i = 0; i < n; ++i) {
         if (!is_interior_chunk) {
-            auto span = query::cigar_reference_span(cols->cigars[i]);
+            auto span = query::cigar_reference_span(cols->cigars.at(i));
             if (!span) {
                 return std::unexpected(span.error());
             }
