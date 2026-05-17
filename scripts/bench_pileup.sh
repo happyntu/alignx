@@ -12,6 +12,7 @@ WARMUP=0
 REPEATS=1
 ALIGNX_HTS_THREADS=""
 SKIP_CORRECTNESS=0
+ALL_POSITIONS=0
 
 usage() {
   cat <<'USAGE'
@@ -32,6 +33,8 @@ Options:
   --repeats <n>         measured iterations written to TSV (default: 1)
   --alignx-hts-threads <n>
                         pass --hts-threads <n> to alignx pileup (BAM path only)
+  --all-positions       use samtools depth -a and alignx pileup --all-positions
+                        (output all positions including zero depth)
   --skip-correctness    skip stdout parity check vs samtools depth
   -h, --help            show this help
 USAGE
@@ -49,6 +52,7 @@ while [[ $# -gt 0 ]]; do
     --warmup)         WARMUP="$2";              shift 2 ;;
     --repeats)        REPEATS="$2";             shift 2 ;;
     --alignx-hts-threads) ALIGNX_HTS_THREADS="$2"; shift 2 ;;
+    --all-positions)      ALL_POSITIONS=1;      shift ;;
     --skip-correctness)   SKIP_CORRECTNESS=1;   shift ;;
     -h|--help)        usage; exit 0 ;;
     *)                echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -232,12 +236,20 @@ alignx_axf1_stderr="$tmp_dir/alignx_axf1.err"
 if [[ "$SKIP_CORRECTNESS" -eq 0 ]]; then
   echo "Correctness preflight: samtools depth vs alignx pileup..." >&2
 
-  "$SAMTOOLS" depth -a -r "$REGION" "$INPUT_BAM" >"$samtools_stdout" 2>"$samtools_stderr"
+  samtools_depth_args=(depth -r "$REGION")
+  if [[ "$ALL_POSITIONS" -eq 1 ]]; then
+    samtools_depth_args+=(-a)
+  fi
+  samtools_depth_args+=("$INPUT_BAM")
+  "$SAMTOOLS" "${samtools_depth_args[@]}" >"$samtools_stdout" 2>"$samtools_stderr"
   if [[ -s "$samtools_stderr" ]]; then
     sed 's/^/samtools depth stderr: /' "$samtools_stderr" >&2
   fi
 
   alignx_bam_args=(pileup)
+  if [[ "$ALL_POSITIONS" -eq 1 ]]; then
+    alignx_bam_args+=(--all-positions)
+  fi
   if [[ -n "$ALIGNX_HTS_THREADS" ]]; then
     alignx_bam_args+=(--hts-threads "$ALIGNX_HTS_THREADS")
   fi
@@ -257,7 +269,12 @@ if [[ "$SKIP_CORRECTNESS" -eq 0 ]]; then
   echo "  alignx pileup (BAM) matches samtools depth  SHA=$samtools_sha" >&2
 
   if [[ "$HAS_AXF1" -eq 1 ]]; then
-    "$ALIGNX" pileup "$INPUT_AXF1" "$REGION" >"$alignx_axf1_stdout" 2>"$alignx_axf1_stderr"
+    alignx_axf1_preflight_args=(pileup)
+    if [[ "$ALL_POSITIONS" -eq 1 ]]; then
+      alignx_axf1_preflight_args+=(--all-positions)
+    fi
+    alignx_axf1_preflight_args+=("$INPUT_AXF1" "$REGION")
+    "$ALIGNX" "${alignx_axf1_preflight_args[@]}" >"$alignx_axf1_stdout" 2>"$alignx_axf1_stderr"
     if [[ -s "$alignx_axf1_stderr" ]]; then
       sed 's/^/alignx pileup (AXF1) stderr: /' "$alignx_axf1_stderr" >&2
     fi
@@ -293,9 +310,17 @@ run_triple() {
 
   local samtools_result alignx_bam_result alignx_axf1_result
 
-  samtools_result="$(run_timed "$run_id" samtools_depth "$SAMTOOLS" "$samtools_stdout" "$samtools_stderr" depth -a -r "$REGION" "$INPUT_BAM")"
+  local samtools_bench_args=(depth -r "$REGION")
+  if [[ "$ALL_POSITIONS" -eq 1 ]]; then
+    samtools_bench_args+=(-a)
+  fi
+  samtools_bench_args+=("$INPUT_BAM")
+  samtools_result="$(run_timed "$run_id" samtools_depth "$SAMTOOLS" "$samtools_stdout" "$samtools_stderr" "${samtools_bench_args[@]}")"
 
   local alignx_bam_args=(pileup)
+  if [[ "$ALL_POSITIONS" -eq 1 ]]; then
+    alignx_bam_args+=(--all-positions)
+  fi
   if [[ -n "$ALIGNX_HTS_THREADS" ]]; then
     alignx_bam_args+=(--hts-threads "$ALIGNX_HTS_THREADS")
   fi
@@ -304,7 +329,12 @@ run_triple() {
 
   if [[ "$HAS_AXF1" -eq 1 ]]; then
     : >"$alignx_axf1_stderr"
-    alignx_axf1_result="$(run_timed "$run_id" alignx_pileup_axf1 "$ALIGNX" "$alignx_axf1_stdout" "$alignx_axf1_stderr" pileup "$INPUT_AXF1" "$REGION")"
+    local alignx_axf1_args=(pileup)
+    if [[ "$ALL_POSITIONS" -eq 1 ]]; then
+      alignx_axf1_args+=(--all-positions)
+    fi
+    alignx_axf1_args+=("$INPUT_AXF1" "$REGION")
+    alignx_axf1_result="$(run_timed "$run_id" alignx_pileup_axf1 "$ALIGNX" "$alignx_axf1_stdout" "$alignx_axf1_stderr" "${alignx_axf1_args[@]}")"
   fi
 
   if [[ -s "$samtools_stderr" ]]; then

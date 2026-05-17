@@ -9,6 +9,7 @@ REGION=""
 WORK_DIR=""
 AXF1_QUALITY_COMPRESSION="none"
 AXF1_QUALITY_LOSSY="none"
+AXF1_COMPRESSION="none"
 EXPECT_CODECS=()
 
 usage() {
@@ -37,6 +38,9 @@ Options:
                       pass AXF1 quality lossy binning policy to alignx convert;
                       default is none; when set, SHA comparison is skipped
                       because quality values are modified
+  --axf1-compression <none|zstd>
+                      pass AXF1 per-column compression policy to alignx convert;
+                      default is none
   --expect-codec <column=codec>
                       require a column to use exactly one codec across all chunks;
                       may be repeated, for example --expect-codec cigar=cigar_token
@@ -78,6 +82,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --axf1-quality-lossy)
       AXF1_QUALITY_LOSSY="$2"
+      shift 2
+      ;;
+    --axf1-compression)
+      AXF1_COMPRESSION="$2"
       shift 2
       ;;
     --expect-codec)
@@ -159,6 +167,9 @@ fi
 if [[ "$AXF1_QUALITY_LOSSY" != "none" && "$AXF1_QUALITY_LOSSY" != "illumina8" ]]; then
   fail_usage "--axf1-quality-lossy must be none or illumina8"
 fi
+if [[ "$AXF1_COMPRESSION" != "none" && "$AXF1_COMPRESSION" != "zstd" ]]; then
+  fail_usage "--axf1-compression must be none or zstd"
+fi
 
 require_executable "$ALIGNX"
 require_executable "$SAMTOOLS"
@@ -198,6 +209,9 @@ if [[ "$AXF1_QUALITY_COMPRESSION" != "none" ]]; then
 fi
 if [[ "$AXF1_QUALITY_LOSSY" != "none" ]]; then
   convert_args+=(--axf1-quality-lossy "$AXF1_QUALITY_LOSSY")
+fi
+if [[ "$AXF1_COMPRESSION" != "none" ]]; then
+  convert_args+=(--axf1-compression "$AXF1_COMPRESSION")
 fi
 "$ALIGNX" "${convert_args[@]}" >/dev/null
 "$ALIGNX" view "$AXF1_FILE" "$REGION" >"$AXF1_SAM"

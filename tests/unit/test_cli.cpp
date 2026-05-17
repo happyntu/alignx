@@ -404,6 +404,42 @@ TEST(Cli, ConvertRejectsAxf1QualityCompressionForAxf0) {
     std::filesystem::remove_all(temp_dir);
 }
 
+TEST(Cli, ConvertRejectsInvalidAxf1Compression) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_invalid_compression");
+    const auto output = temp_dir / "toy.axf1";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "convert", toy_bam_path().string(), "-o", output.string(),
+                              "--format", "AXF1", "--axf1-compression", "lz4"},
+                             out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("--axf1-compression must be none or zstd"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(output));
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ConvertRejectsAxf1CompressionForAxf0) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_axf0_compression");
+    const auto output = temp_dir / "toy.axf";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "convert", toy_bam_path().string(), "-o", output.string(),
+                              "--format", "AXF0", "--axf1-compression", "zstd"},
+                             out, err);
+
+    EXPECT_NE(code, 0);
+    EXPECT_EQ(out.str(), "");
+    EXPECT_NE(err.str().find("--axf1-compression requires --format AXF1"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(output));
+
+    std::filesystem::remove_all(temp_dir);
+}
+
 #ifdef ALIGNX_HAVE_HTSLIB
 
 TEST(Cli, ConvertWritesToyAxfMvp) {
@@ -757,7 +793,7 @@ TEST(Cli, PileupOutputsTsv) {
     EXPECT_EQ(code, 0) << err.str();
     const std::string expected = "chrToy\t101\t1\nchrToy\t102\t1\nchrToy\t103\t1\nchrToy\t104\t1\n"
                                  "chrToy\t105\t1\nchrToy\t106\t1\nchrToy\t107\t1\nchrToy\t108\t1\n"
-                                 "chrToy\t109\t1\nchrToy\t110\t1\nchrToy\t111\t0\n";
+                                 "chrToy\t109\t1\nchrToy\t110\t1\n";
     EXPECT_EQ(out.str(), expected);
 }
 
@@ -771,7 +807,7 @@ TEST(Cli, PileupFlagExcludeFiltersRecords) {
     EXPECT_EQ(code, 0) << err.str();
     const std::string expected = "chrToy\t101\t1\nchrToy\t102\t1\nchrToy\t103\t1\nchrToy\t104\t1\n"
                                  "chrToy\t105\t1\nchrToy\t106\t1\nchrToy\t107\t1\nchrToy\t108\t1\n"
-                                 "chrToy\t109\t1\nchrToy\t110\t1\nchrToy\t111\t0\n";
+                                 "chrToy\t109\t1\nchrToy\t110\t1\n";
     EXPECT_EQ(out.str(), expected);
 }
 
@@ -781,7 +817,7 @@ TEST(Cli, PileupFullRangeFidelity) {
     //   read002: pos 150 (0-based), 5M1I4M → covers [150,155)+[155,159) → 1-based 151-159
     //   read003: unmapped, excluded
     // Query chrToy:101-160 spans both reads' full extent.
-    // Expected depth matches samtools depth baseline for this toy BAM.
+    // Default: skip zero-depth positions (matching samtools depth without -a).
     std::ostringstream out;
     std::ostringstream err;
     const int code =
@@ -794,16 +830,11 @@ TEST(Cli, PileupFullRangeFidelity) {
     for (int p = 101; p <= 110; ++p) {
         expected += "chrToy\t" + std::to_string(p) + "\t1\n";
     }
-    // gap: depth 0 at positions 111-150
-    for (int p = 111; p <= 150; ++p) {
-        expected += "chrToy\t" + std::to_string(p) + "\t0\n";
-    }
+    // gap: positions 111-150 have zero depth — skipped by default
     // read002: 5M1I4M → depth 1 at positions 151-159
     for (int p = 151; p <= 159; ++p) {
         expected += "chrToy\t" + std::to_string(p) + "\t1\n";
     }
-    // depth 0 at position 160
-    expected += "chrToy\t160\t0\n";
 
     EXPECT_EQ(out.str(), expected);
 }
@@ -864,11 +895,96 @@ TEST(Cli, PileupAxf1FilterMatchesBamFilter) {
     EXPECT_EQ(axf1_code, 0) << axf1_err.str();
     EXPECT_EQ(axf1_out.str(), bam_out.str());
 
-    // Verify read002's positions are now depth 0
-    EXPECT_NE(axf1_out.str().find("chrToy\t151\t0"), std::string::npos);
-    EXPECT_NE(axf1_out.str().find("chrToy\t155\t0"), std::string::npos);
+    // With --flag-exclude 16, read002 is excluded; only read001 (101-110) has coverage.
+    // Zero-depth positions (including 151-159) are skipped by default.
+    EXPECT_EQ(axf1_out.str().find("chrToy\t151\t"), std::string::npos);
+    EXPECT_EQ(axf1_out.str().find("chrToy\t155\t"), std::string::npos);
 
     std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, PileupAllPositionsFlag) {
+    // --all-positions / -a restores the old behavior: output all positions including zero depth
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli(
+        {"alignx", "pileup", "--all-positions", toy_bam_path().string(), "chrToy:101-160"}, out,
+        err);
+
+    EXPECT_EQ(code, 0) << err.str();
+
+    std::string expected;
+    for (int p = 101; p <= 110; ++p) {
+        expected += "chrToy\t" + std::to_string(p) + "\t1\n";
+    }
+    for (int p = 111; p <= 150; ++p) {
+        expected += "chrToy\t" + std::to_string(p) + "\t0\n";
+    }
+    for (int p = 151; p <= 159; ++p) {
+        expected += "chrToy\t" + std::to_string(p) + "\t1\n";
+    }
+    expected += "chrToy\t160\t0\n";
+
+    EXPECT_EQ(out.str(), expected);
+}
+
+TEST(Cli, PileupSkipZerosAxf1MatchesBam) {
+    const auto temp_dir = make_temp_dir("alignx_cli_pileup_skipzero_axf1");
+    const auto axf1_path = temp_dir / "toy.axf1";
+
+    std::ostringstream convert_out;
+    std::ostringstream convert_err;
+    const int convert_code = run_cli(
+        {"alignx", "convert", toy_bam_path().string(), "-o", axf1_path.string(), "--format", "AXF1"},
+        convert_out, convert_err);
+    ASSERT_EQ(convert_code, 0) << convert_err.str();
+
+    std::ostringstream bam_out;
+    std::ostringstream bam_err;
+    const int bam_code =
+        run_cli({"alignx", "pileup", toy_bam_path().string(), "chrToy:101-160"}, bam_out, bam_err);
+    ASSERT_EQ(bam_code, 0) << bam_err.str();
+
+    std::ostringstream axf1_out;
+    std::ostringstream axf1_err;
+    const int axf1_code =
+        run_cli({"alignx", "pileup", axf1_path.string(), "chrToy:101-160"}, axf1_out, axf1_err);
+
+    EXPECT_EQ(axf1_code, 0) << axf1_err.str();
+    EXPECT_EQ(axf1_out.str(), bam_out.str());
+    // Verify zeros are skipped: no \t0\n in output
+    EXPECT_EQ(axf1_out.str().find("\t0\n"), std::string::npos);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, CoverageTsvSkipZeros) {
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli(
+        {"alignx", "coverage", "--output-mode", "tsv", toy_bam_path().string(), "chrToy:101-160"},
+        out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    // Default: skip zeros — no \t0\n in output
+    EXPECT_EQ(out.str().find("\t0\n"), std::string::npos);
+    // But covered positions must be present
+    EXPECT_NE(out.str().find("chrToy\t101\t1\n"), std::string::npos);
+    EXPECT_NE(out.str().find("chrToy\t151\t1\n"), std::string::npos);
+}
+
+TEST(Cli, CoverageTsvAllPositions) {
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli(
+        {"alignx", "coverage", "--output-mode", "tsv", "--all-positions", toy_bam_path().string(),
+         "chrToy:101-160"},
+        out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    // --all-positions: zero-depth positions are present
+    EXPECT_NE(out.str().find("chrToy\t111\t0\n"), std::string::npos);
+    EXPECT_NE(out.str().find("chrToy\t160\t0\n"), std::string::npos);
 }
 
 TEST(Cli, ExportToyAxf1OutputsBam) {

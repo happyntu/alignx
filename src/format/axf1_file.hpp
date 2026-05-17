@@ -37,6 +37,7 @@ enum class Axf1CodecId : std::uint16_t {
     qname_dict = 9,
     tags_per_stream = 10,
     cigar_dict = 11,
+    compressed = 12,
 };
 
 enum class Axf1Compression {
@@ -51,6 +52,7 @@ enum class Axf1QualityLossy {
 
 struct Axf1WriteOptions {
     Axf1Compression quality_compression = Axf1Compression::none;
+    Axf1Compression column_compression = Axf1Compression::none;
     Axf1QualityLossy quality_lossy = Axf1QualityLossy::none;
 };
 

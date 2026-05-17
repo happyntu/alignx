@@ -212,7 +212,10 @@ and region-query correctness.
   - See `docs/research/illumina-benchmark-results.md`
 
 **Phase 2+ (post v1.0):**
-- SIMD AVX2/AVX-512 decompression paths
+- [x] Per-column zstd compression: generic `compressed` codec (ID 12) wraps any column's best base codec in a zstd envelope; writer keeps compressed only when smaller; reader unwraps recursively. CLI: `--axf1-compression zstd`. HG002 chr1:1M-2M result: lossless AXF1 shrinks from 1.58x BAM to **1.02x BAM** with zstd per-column wrapping (8/11 columns use `compressed`).
+- [x] SIMD AVX2 SEQ 2-bit decode + FLAG bitpack optimization: `decode_seq_2bit_avx2()` processes 128 bases per AVX2 iteration via shuffle-based LUT; FLAG bitpack uses uint64 load + mask (eliminates per-bit inner loop). Guarded by `ALIGNX_ENABLE_SIMD=ON`. SHA-verified on HG002 chr1:1M-2M. SAM formatting remains the bottleneck per profiling — `std::to_chars` is already near-optimal.
+- [x] Streaming pileup: skip-zero output + fast buffered TSV formatting. Default behavior now matches `samtools depth` (skip zero-depth positions); `--all-positions` / `-a` flag restores full output. `write_coverage_tsv()` replaced with 64 KB buffered `std::to_chars` writer. Remote HG002 verified: AXF1 pileup **3.0x-4.1x faster** than samtools depth (centromeric: 1177 ms vs 4792 ms, previously 0.82x slower).
+- SIMD AVX-512 decompression paths (future)
 - GPU CUDA decompression (experimental)
 - Cloud object storage range-query client
 - Python bindings (pybind11)

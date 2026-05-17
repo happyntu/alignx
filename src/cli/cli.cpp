@@ -4,6 +4,7 @@
 #include <array>
 #include <charconv>
 #include <cctype>
+#include <cstring>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -384,6 +385,7 @@ int run_stats(const std::filesystem::path& input, std::ostream& out, std::ostrea
 int run_convert(const std::filesystem::path& input, const std::filesystem::path& output,
                 const std::optional<std::string>& region, std::string_view format,
                 std::string_view axf1_quality_compression, std::string_view axf1_quality_lossy,
+                std::string_view axf1_compression,
                 std::ostream& out, std::ostream& err) {
     std::string normalized_format(format);
     std::transform(normalized_format.begin(), normalized_format.end(), normalized_format.begin(),
@@ -419,6 +421,19 @@ int run_convert(const std::filesystem::path& input, const std::filesystem::path&
         return 1;
     }
 
+    std::string normalized_compression(axf1_compression);
+    std::transform(normalized_compression.begin(), normalized_compression.end(),
+                   normalized_compression.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (normalized_compression != "none" && normalized_compression != "zstd") {
+        err << "alignx convert: --axf1-compression must be none or zstd\n";
+        return 1;
+    }
+    if (normalized_format != "AXF1" && normalized_compression != "none") {
+        err << "alignx convert: --axf1-compression requires --format AXF1\n";
+        return 1;
+    }
+
     convert::Axf1ChunkPolicy chunk_policy;
     if (has_axf1_chunk_policy_env_override()) {
         auto override_or_error = read_axf1_chunk_policy_override_from_env();
@@ -441,6 +456,9 @@ int run_convert(const std::filesystem::path& input, const std::filesystem::path&
     if (normalized_quality_lossy == "illumina8") {
         axf1_options.quality_lossy = format::Axf1QualityLossy::illumina8;
     }
+    if (normalized_compression == "zstd") {
+        axf1_options.column_compression = format::Axf1Compression::zstd;
+    }
 
     auto conversion = normalized_format == "AXF1"
                           ? convert::convert_bam_to_axf1_mvp(input, output, region, axf1_options,
@@ -460,6 +478,7 @@ int run_convert(const std::filesystem::path& input, const std::filesystem::path&
     if (normalized_format == "AXF1") {
         out << "axf1_quality_compression\t" << normalized_quality_compression << '\n';
         out << "axf1_quality_lossy\t" << normalized_quality_lossy << '\n';
+        out << "axf1_compression\t" << normalized_compression << '\n';
     }
     return 0;
 }
@@ -644,10 +663,32 @@ void write_bam_coverage_profile(const query::BamCoverageProfile& profile,
         << milliseconds(total_time) << '\n';
 }
 
-void write_coverage_tsv(const analysis::CoverageResult& result, std::ostream& out) {
+void write_coverage_tsv(const analysis::CoverageResult& result, std::ostream& out,
+                        bool skip_zeros) {
+    constexpr std::size_t kBufSize = 65536;
+    constexpr std::size_t kMaxLineLen = 256;
+    std::vector<char> storage(kBufSize);
+    char* buf = storage.data();
+    char* ptr = buf;
+    char* const end = buf + kBufSize;
+    const std::string_view ref = result.reference;
+
     for (std::size_t i = 0; i < result.depth.size(); ++i) {
-        const auto pos_1based = result.start + static_cast<std::int32_t>(i) + 1;
-        out << result.reference << '\t' << pos_1based << '\t' << result.depth[i] << '\n';
+        if (skip_zeros && result.depth[i] == 0) continue;
+        if (static_cast<std::size_t>(end - ptr) < kMaxLineLen) {
+            out.write(buf, ptr - buf);
+            ptr = buf;
+        }
+        std::memcpy(ptr, ref.data(), ref.size());
+        ptr += ref.size();
+        *ptr++ = '\t';
+        ptr = std::to_chars(ptr, end, result.start + static_cast<std::int32_t>(i) + 1).ptr;
+        *ptr++ = '\t';
+        ptr = std::to_chars(ptr, end, result.depth[i]).ptr;
+        *ptr++ = '\n';
+    }
+    if (ptr != buf) {
+        out.write(buf, ptr - buf);
     }
 }
 
@@ -675,8 +716,9 @@ void write_coverage_summary(const analysis::CoverageResult& result, std::ostream
 }
 
 int run_coverage(const std::filesystem::path& input, const std::string& region,
-                 std::string_view output_mode, std::optional<int> hts_threads,
-                 const query::RecordFilter& filter, std::ostream& out, std::ostream& err) {
+                 std::string_view output_mode, bool all_positions,
+                 std::optional<int> hts_threads, const query::RecordFilter& filter,
+                 std::ostream& out, std::ostream& err) {
     const bool profile_enabled = coverage_profile_enabled();
     const auto total_start = profile_enabled ? Clock::now() : Clock::time_point{};
 
@@ -691,7 +733,7 @@ int run_coverage(const std::filesystem::path& input, const std::string& region,
             return 1;
         }
         if (output_mode == "tsv") {
-            write_coverage_tsv(*result, out);
+            write_coverage_tsv(*result, out, !all_positions);
         } else {
             write_coverage_summary(*result, out);
         }
@@ -716,7 +758,7 @@ int run_coverage(const std::filesystem::path& input, const std::string& region,
         return 1;
     }
     if (output_mode == "tsv") {
-        write_coverage_tsv(*result, out);
+        write_coverage_tsv(*result, out, !all_positions);
     } else {
         write_coverage_summary(*result, out);
     }
@@ -761,6 +803,7 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     std::string convert_format = "AXF0";
     std::string convert_axf1_quality_compression = "none";
     std::string convert_axf1_quality_lossy = "none";
+    std::string convert_axf1_compression = "none";
     auto* convert_cmd = app.add_subcommand("convert", "Convert BAM to AXF MVP format");
     convert_cmd->add_option("input", convert_input, "Input BAM file")
         ->required()
@@ -773,10 +816,13 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
                             "AXF1 quality payload compression: none or zstd");
     convert_cmd->add_option("--axf1-quality-lossy", convert_axf1_quality_lossy,
                             "AXF1 lossy quality binning: none or illumina8");
+    convert_cmd->add_option("--axf1-compression", convert_axf1_compression,
+                            "AXF1 per-column compression: none or zstd");
 
     std::filesystem::path coverage_input;
     std::string coverage_region;
     std::string coverage_output_mode = "summary";
+    bool coverage_all_positions = false;
     int coverage_hts_threads = -1;
     std::uint16_t coverage_flag_exclude = 0;
     std::uint8_t coverage_min_mapq = 0;
@@ -789,6 +835,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
         ->required();
     coverage_cmd->add_option("--output-mode", coverage_output_mode,
                              "Output format: summary or tsv");
+    coverage_cmd->add_flag("--all-positions,-a", coverage_all_positions,
+                           "Output all positions including zero depth (default: skip zeros)");
     coverage_cmd->add_option("--hts-threads", coverage_hts_threads,
                              "HTSlib worker threads for BAM I/O");
     coverage_cmd->add_option("--flag-exclude", coverage_flag_exclude,
@@ -798,6 +846,7 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
 
     std::filesystem::path pileup_input;
     std::string pileup_region;
+    bool pileup_all_positions = false;
     int pileup_hts_threads = -1;
     std::uint16_t pileup_flag_exclude = 0;
     std::uint8_t pileup_min_mapq = 0;
@@ -808,6 +857,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
         ->check(::CLI::ExistingFile);
     pileup_cmd->add_option("region", pileup_region, "Genomic region, for example chr1:1-1000")
         ->required();
+    pileup_cmd->add_flag("--all-positions,-a", pileup_all_positions,
+                         "Output all positions including zero depth (default: skip zeros)");
     pileup_cmd->add_option("--hts-threads", pileup_hts_threads,
                            "HTSlib worker threads for BAM I/O");
     pileup_cmd->add_option("--flag-exclude", pileup_flag_exclude,
@@ -855,7 +906,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     }
     if (*convert_cmd) {
         return run_convert(convert_input, convert_output, convert_region, convert_format,
-                           convert_axf1_quality_compression, convert_axf1_quality_lossy, out, err);
+                           convert_axf1_quality_compression, convert_axf1_quality_lossy,
+                           convert_axf1_compression, out, err);
     }
     if (*coverage_cmd) {
         if (coverage_output_mode != "summary" && coverage_output_mode != "tsv") {
@@ -870,8 +922,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
             coverage_hts_threads >= 0 ? std::optional<int>{coverage_hts_threads} : std::nullopt;
         const query::RecordFilter coverage_filter{.flag_exclude = coverage_flag_exclude,
                                                   .min_mapq = coverage_min_mapq};
-        return run_coverage(coverage_input, coverage_region, coverage_output_mode, hts_threads,
-                            coverage_filter, out, err);
+        return run_coverage(coverage_input, coverage_region, coverage_output_mode,
+                            coverage_all_positions, hts_threads, coverage_filter, out, err);
     }
     if (*pileup_cmd) {
         if (pileup_hts_threads < -1) {
@@ -882,8 +934,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
             pileup_hts_threads >= 0 ? std::optional<int>{pileup_hts_threads} : std::nullopt;
         const query::RecordFilter pileup_filter{.flag_exclude = pileup_flag_exclude,
                                                 .min_mapq = pileup_min_mapq};
-        return run_coverage(pileup_input, pileup_region, "tsv", hts_threads, pileup_filter, out,
-                            err);
+        return run_coverage(pileup_input, pileup_region, "tsv", pileup_all_positions,
+                            hts_threads, pileup_filter, out, err);
     }
     if (*index_cmd) {
         return run_index(index_input, index_output, out, err);

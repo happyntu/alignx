@@ -22,6 +22,10 @@
 #include <zstd.h>
 #endif
 
+#ifdef ALIGNX_HAVE_AVX2
+#include <immintrin.h>
+#endif
+
 namespace alignx::format {
 namespace {
 
@@ -1159,6 +1163,19 @@ encode_compressed_payload_envelope(Axf1CodecId base_codec_id, Axf1Compression co
 #endif
 }
 
+EncodedColumn try_compress_column(EncodedColumn best, Axf1Compression compression) {
+    if (compression != Axf1Compression::zstd) return best;
+#ifdef ALIGNX_HAVE_ZSTD
+    auto envelope = encode_compressed_payload_envelope(best.codec_id, compression, best.payload);
+    if (!envelope || envelope->size() >= best.payload.size()) return best;
+    return EncodedColumn{.column_id = best.column_id,
+                         .codec_id = Axf1CodecId::compressed,
+                         .payload = std::move(*envelope)};
+#else
+    return best;
+#endif
+}
+
 std::expected<EncodedColumn, std::string>
 encode_quality_column(const std::vector<Axf1Record>& records, const Axf1WriteOptions& options) {
     const std::vector<Axf1Record>* source = &records;
@@ -1374,24 +1391,29 @@ encode_columns(const Axf1Chunk& chunk, const Axf1WriteOptions& options) {
     if (!quality_column) {
         return std::unexpected(quality_column.error());
     }
+    const auto cc = options.column_compression;
+    auto qual_col = std::move(*quality_column);
+    if (cc == Axf1Compression::zstd && options.quality_compression == Axf1Compression::none) {
+        qual_col = try_compress_column(std::move(qual_col), cc);
+    }
     return std::vector<EncodedColumn>{
-        encode_qname_column(chunk.records),
-        std::move(flag_column),
-        encode_pos_column(chunk.records),
-        std::move(mapq_column),
-        std::move(cigar_column),
-        {.column_id = Axf1ColumnId::mate_reference,
-         .codec_id = Axf1CodecId::raw,
-         .payload = encode_strings(chunk.records, &Axf1Record::mate_reference)},
-        {.column_id = Axf1ColumnId::mate_pos,
-         .codec_id = Axf1CodecId::raw,
-         .payload = encode_i32(chunk.records, &Axf1Record::mate_pos)},
-        {.column_id = Axf1ColumnId::template_length,
-         .codec_id = Axf1CodecId::raw,
-         .payload = encode_i32(chunk.records, &Axf1Record::template_length)},
-        std::move(sequence_column),
-        std::move(*quality_column),
-        encode_tags_column(chunk.records)};
+        try_compress_column(encode_qname_column(chunk.records), cc),
+        try_compress_column(std::move(flag_column), cc),
+        try_compress_column(encode_pos_column(chunk.records), cc),
+        try_compress_column(std::move(mapq_column), cc),
+        try_compress_column(std::move(cigar_column), cc),
+        try_compress_column({.column_id = Axf1ColumnId::mate_reference,
+                             .codec_id = Axf1CodecId::raw,
+                             .payload = encode_strings(chunk.records, &Axf1Record::mate_reference)}, cc),
+        try_compress_column({.column_id = Axf1ColumnId::mate_pos,
+                             .codec_id = Axf1CodecId::raw,
+                             .payload = encode_i32(chunk.records, &Axf1Record::mate_pos)}, cc),
+        try_compress_column({.column_id = Axf1ColumnId::template_length,
+                             .codec_id = Axf1CodecId::raw,
+                             .payload = encode_i32(chunk.records, &Axf1Record::template_length)}, cc),
+        try_compress_column(std::move(sequence_column), cc),
+        std::move(qual_col),
+        try_compress_column(encode_tags_column(chunk.records), cc)};
 }
 
 std::expected<std::vector<unsigned char>, std::string>
@@ -1580,17 +1602,16 @@ decode_flag_bitpack_column(const unsigned char* data, std::size_t size,
 
     std::vector<std::uint16_t> values;
     values.reserve(record_count);
+    const std::uint64_t value_mask = (std::uint64_t{1} << bit_width) - 1;
     std::size_t bit_offset = 0;
     for (std::uint32_t index = 0; index < record_count; ++index) {
-        std::uint16_t value = 0;
-        for (std::uint8_t bit = 0; bit < bit_width; ++bit) {
-            const auto byte = data[1 + bit_offset / 8U];
-            if (((byte >> (bit_offset % 8U)) & 1U) != 0) {
-                value |= static_cast<std::uint16_t>(1U << bit);
-            }
-            ++bit_offset;
-        }
-        values.push_back(value);
+        const std::size_t byte_pos = bit_offset / 8U;
+        const std::size_t bit_pos = bit_offset % 8U;
+        std::uint64_t word = 0;
+        std::memcpy(&word, data + 1 + byte_pos,
+                    std::min(std::size_t{8}, size - 1 - byte_pos));
+        values.push_back(static_cast<std::uint16_t>((word >> bit_pos) & value_mask));
+        bit_offset += bit_width;
     }
     return values;
 }
@@ -2112,6 +2133,69 @@ decode_seq_2bit_literal_column(const unsigned char* data, std::size_t size,
     return values;
 }
 
+#ifdef ALIGNX_HAVE_AVX2
+void decode_seq_2bit_avx2(const unsigned char* src, char* dst, std::size_t full_bytes) {
+    // LUT: 2-bit code -> ASCII: 0='A'(65), 1='C'(67), 2='G'(71), 3='T'(84)
+    const __m256i lut = _mm256_setr_epi8(
+        'A', 'C', 'G', 'T', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        'A', 'C', 'G', 'T', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    const __m256i mask2 = _mm256_set1_epi8(0x03);
+
+    std::size_t i = 0;
+    for (; i + 32 <= full_bytes; i += 32) {
+        __m256i packed = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
+
+        // Extract 4 planes of 2-bit values from each byte
+        __m256i b0 = _mm256_and_si256(packed, mask2);
+        __m256i b1 = _mm256_and_si256(_mm256_srli_epi16(packed, 2), mask2);
+        __m256i b2 = _mm256_and_si256(_mm256_srli_epi16(packed, 4), mask2);
+        __m256i b3 = _mm256_and_si256(_mm256_srli_epi16(packed, 6), mask2);
+
+        // LUT lookup: 2-bit index -> ASCII base
+        __m256i c0 = _mm256_shuffle_epi8(lut, b0);
+        __m256i c1 = _mm256_shuffle_epi8(lut, b1);
+        __m256i c2 = _mm256_shuffle_epi8(lut, b2);
+        __m256i c3 = _mm256_shuffle_epi8(lut, b3);
+
+        // Interleave: for each source byte, output bases[0],bases[1],bases[2],bases[3]
+        // c0 has bases[0] for all 32 bytes, c1 has bases[1], etc.
+        // Need to interleave: b0[0],b1[0],b2[0],b3[0], b0[1],b1[1],b2[1],b3[1], ...
+        __m256i lo01 = _mm256_unpacklo_epi8(c0, c1);
+        __m256i hi01 = _mm256_unpackhi_epi8(c0, c1);
+        __m256i lo23 = _mm256_unpacklo_epi8(c2, c3);
+        __m256i hi23 = _mm256_unpackhi_epi8(c2, c3);
+
+        __m256i lo0123_lo = _mm256_unpacklo_epi16(lo01, lo23);
+        __m256i lo0123_hi = _mm256_unpackhi_epi16(lo01, lo23);
+        __m256i hi0123_lo = _mm256_unpacklo_epi16(hi01, hi23);
+        __m256i hi0123_hi = _mm256_unpackhi_epi16(hi01, hi23);
+
+        // AVX2 lanes are 128-bit: need to permute across lanes
+        // After unpack, data is in: [lane0_low, lane1_low] pattern
+        // Use permute2x128 to get final contiguous output
+        __m256i out0 = _mm256_permute2x128_si256(lo0123_lo, lo0123_hi, 0x20);
+        __m256i out1 = _mm256_permute2x128_si256(lo0123_lo, lo0123_hi, 0x31);
+        __m256i out2 = _mm256_permute2x128_si256(hi0123_lo, hi0123_hi, 0x20);
+        __m256i out3 = _mm256_permute2x128_si256(hi0123_lo, hi0123_hi, 0x31);
+
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(dst), out0);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(dst + 32), out2);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(dst + 64), out1);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(dst + 96), out3);
+        dst += 128;
+    }
+    // Scalar tail
+    for (; i < full_bytes; ++i) {
+        const auto& quad = kSeq2bitLut[src[i]];
+        dst[0] = quad.bases[0];
+        dst[1] = quad.bases[1];
+        dst[2] = quad.bases[2];
+        dst[3] = quad.bases[3];
+        dst += 4;
+    }
+}
+#endif
+
 std::expected<FlatColumn, std::string>
 decode_seq_2bit_literal_flat(const unsigned char* data, std::size_t size,
                              std::uint32_t record_count) {
@@ -2137,6 +2221,10 @@ decode_seq_2bit_literal_flat(const unsigned char* data, std::size_t size,
         col.data.resize(col.data.size() + seq_len);
         char* dst = col.data.data() + col.offsets.back();
 
+#ifdef ALIGNX_HAVE_AVX2
+        decode_seq_2bit_avx2(src, dst, full_bytes);
+        dst += full_bytes * 4;
+#else
         for (std::size_t i = 0; i < full_bytes; ++i) {
             const auto& quad = kSeq2bitLut[src[i]];
             dst[0] = quad.bases[0];
@@ -2145,6 +2233,7 @@ decode_seq_2bit_literal_flat(const unsigned char* data, std::size_t size,
             dst[3] = quad.bases[3];
             dst += 4;
         }
+#endif
         if (remaining_bases > 0) {
             const auto& quad = kSeq2bitLut[src[full_bytes]];
             for (std::size_t r = 0; r < remaining_bases; ++r) {
@@ -2591,7 +2680,7 @@ bool is_known_column(Axf1ColumnId column_id) {
 }
 
 bool is_supported_column_codec(Axf1ColumnId column_id, Axf1CodecId codec_id) {
-    if (codec_id == Axf1CodecId::raw) {
+    if (codec_id == Axf1CodecId::raw || codec_id == Axf1CodecId::compressed) {
         return true;
     }
     return (column_id == Axf1ColumnId::qname && codec_id == Axf1CodecId::qname_dict) ||
@@ -2605,6 +2694,11 @@ bool is_supported_column_codec(Axf1ColumnId column_id, Axf1CodecId codec_id) {
            (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_pack) ||
            (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_pack_compressed) ||
            (column_id == Axf1ColumnId::tags && codec_id == Axf1CodecId::tags_per_stream);
+}
+
+bool is_valid_base_codec_for_column(Axf1ColumnId column_id, Axf1CodecId base_codec_id) {
+    if (base_codec_id == Axf1CodecId::compressed) return false;
+    return is_supported_column_codec(column_id, base_codec_id);
 }
 
 bool contains_column(const std::vector<Axf1ColumnId>& columns, Axf1ColumnId column_id) {
@@ -2683,6 +2777,17 @@ std::expected<void, std::string>
 decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
                          const ColumnEntry& entry,
                          const unsigned char* payload_data, std::size_t payload_size) {
+    if (entry.codec_id == Axf1CodecId::compressed) {
+        auto envelope = decode_compressed_payload_envelope(payload_data, payload_size);
+        if (!envelope) return std::unexpected(envelope.error());
+        if (!is_valid_base_codec_for_column(entry.column_id, envelope->base_codec_id)) {
+            return std::unexpected("invalid base codec in compressed AXF1 column");
+        }
+        ColumnEntry unwrapped = entry;
+        unwrapped.codec_id = envelope->base_codec_id;
+        return decode_column_into_chunk(chunk, record_count, unwrapped,
+                                        envelope->payload.data(), envelope->payload.size());
+    }
     switch (entry.column_id) {
     case Axf1ColumnId::qname: {
         auto values = entry.codec_id == Axf1CodecId::qname_dict
@@ -3405,11 +3510,25 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
             return std::unexpected(slice.error());
         }
         const unsigned char* col_data = slice->data;
-        const std::size_t col_size = slice->size;
+        std::size_t col_size = slice->size;
+
+        std::vector<unsigned char> decompressed_storage;
+        Axf1CodecId effective_codec = entry.codec_id;
+        if (entry.codec_id == Axf1CodecId::compressed) {
+            auto envelope = decode_compressed_payload_envelope(col_data, col_size);
+            if (!envelope) return std::unexpected(envelope.error());
+            if (!is_valid_base_codec_for_column(entry.column_id, envelope->base_codec_id)) {
+                return std::unexpected("invalid base codec in compressed AXF1 column");
+            }
+            effective_codec = envelope->base_codec_id;
+            decompressed_storage = std::move(envelope->payload);
+            col_data = decompressed_storage.data();
+            col_size = decompressed_storage.size();
+        }
 
         switch (entry.column_id) {
         case Axf1ColumnId::qname: {
-            auto v = entry.codec_id == Axf1CodecId::qname_dict
+            auto v = effective_codec == Axf1CodecId::qname_dict
                          ? decode_qname_dict_column_flat(col_data, col_size, *record_count)
                          : decode_string_column_flat(col_data, col_size, *record_count);
             if (!v) return std::unexpected(v.error());
@@ -3417,7 +3536,7 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
             break;
         }
         case Axf1ColumnId::flag: {
-            auto v = entry.codec_id == Axf1CodecId::flag_bitpack
+            auto v = effective_codec == Axf1CodecId::flag_bitpack
                          ? decode_flag_bitpack_column(col_data, col_size, *record_count)
                          : decode_fixed_column<std::uint16_t>(col_data, col_size, *record_count,
                                                               &Reader::read_u16);
@@ -3426,7 +3545,7 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
             break;
         }
         case Axf1ColumnId::pos: {
-            auto v = entry.codec_id == Axf1CodecId::pos_delta_varint
+            auto v = effective_codec == Axf1CodecId::pos_delta_varint
                          ? decode_pos_delta_varint_column(col_data, col_size, *record_count)
                          : decode_fixed_column<std::int32_t>(col_data, col_size, *record_count,
                                                              &Reader::read_i32);
@@ -3435,7 +3554,7 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
             break;
         }
         case Axf1ColumnId::mapq: {
-            auto v = entry.codec_id == Axf1CodecId::mapq_rle
+            auto v = effective_codec == Axf1CodecId::mapq_rle
                          ? decode_mapq_rle_column(col_data, col_size, *record_count)
                          : decode_fixed_column<std::uint8_t>(col_data, col_size, *record_count,
                                                              &Reader::read_u8);
@@ -3445,9 +3564,9 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
         }
         case Axf1ColumnId::cigar: {
             std::expected<FlatColumn, std::string> v;
-            if (entry.codec_id == Axf1CodecId::cigar_dict)
+            if (effective_codec == Axf1CodecId::cigar_dict)
                 v = decode_cigar_dict_column_flat(col_data, col_size, *record_count);
-            else if (entry.codec_id == Axf1CodecId::cigar_token)
+            else if (effective_codec == Axf1CodecId::cigar_token)
                 v = decode_cigar_token_column_flat(col_data, col_size, *record_count);
             else
                 v = decode_string_column_flat(col_data, col_size, *record_count);
@@ -3476,7 +3595,7 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
             break;
         }
         case Axf1ColumnId::sequence: {
-            if (entry.codec_id == Axf1CodecId::seq_2bit_literal) {
+            if (effective_codec == Axf1CodecId::seq_2bit_literal) {
                 auto v = decode_seq_2bit_literal_flat(col_data, col_size, *record_count);
                 if (!v) return std::unexpected(v.error());
                 result.sequences = std::move(*v);
@@ -3495,11 +3614,11 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
             break;
         }
         case Axf1ColumnId::quality: {
-            if (entry.codec_id == Axf1CodecId::qual_pack) {
+            if (effective_codec == Axf1CodecId::qual_pack) {
                 auto v = decode_qual_pack_flat(col_data, col_size, *record_count);
                 if (!v) return std::unexpected(v.error());
                 result.qualities = std::move(*v);
-            } else if (entry.codec_id == Axf1CodecId::qual_pack_compressed) {
+            } else if (effective_codec == Axf1CodecId::qual_pack_compressed) {
                 auto base = decode_compressed_base_payload(col_data, col_size,
                     Axf1CodecId::qual_pack, "unsupported AXF1 compressed QUAL base codec");
                 if (!base) return std::unexpected(base.error());
@@ -3509,7 +3628,7 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
             } else {
                 std::expected<std::vector<std::string>, std::string> v =
                     std::unexpected("unsupported AXF1 QUAL codec");
-                if (entry.codec_id == Axf1CodecId::qual_rle)
+                if (effective_codec == Axf1CodecId::qual_rle)
                     v = decode_qual_rle_column(col_data, col_size, *record_count);
                 else
                     v = decode_string_column(col_data, col_size, *record_count);
@@ -3526,7 +3645,7 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
             break;
         }
         case Axf1ColumnId::tags: {
-            if (entry.codec_id == Axf1CodecId::tags_per_stream) {
+            if (effective_codec == Axf1CodecId::tags_per_stream) {
                 auto v = decode_tags_per_stream_column(col_data, col_size, *record_count);
                 if (!v) return std::unexpected(v.error());
                 result.tags = vector_to_flat(std::move(*v));

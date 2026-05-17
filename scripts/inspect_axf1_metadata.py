@@ -45,6 +45,7 @@ CODEC_NAMES = {
     9: "qname_dict",
     10: "tags_per_stream",
     11: "cigar_dict",
+    12: "compressed",
 }
 
 

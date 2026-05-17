@@ -2767,3 +2767,125 @@ TEST(Axf1File, QualityLossyIllumina8ReducesAlphabetSize) {
 
     std::filesystem::remove(path);
 }
+
+TEST(Axf1File, WriterGenericCompressedRoundTrip) {
+#ifdef ALIGNX_HAVE_ZSTD
+    const auto path = temp_path("alignx_axf1_generic_compressed_roundtrip");
+    auto file = make_repeated_quality_file(100, 50);
+    alignx::format::Axf1WriteOptions options;
+    options.column_compression = alignx::format::Axf1Compression::zstd;
+
+    auto write = alignx::format::write_axf1_file(file, path, options);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1);
+    ASSERT_EQ(read->chunks[0].records.size(), file.chunks[0].records.size());
+    for (std::size_t i = 0; i < file.chunks[0].records.size(); ++i) {
+        EXPECT_EQ(read->chunks[0].records[i].qname, file.chunks[0].records[i].qname);
+        EXPECT_EQ(read->chunks[0].records[i].flag, file.chunks[0].records[i].flag);
+        EXPECT_EQ(read->chunks[0].records[i].pos, file.chunks[0].records[i].pos);
+        EXPECT_EQ(read->chunks[0].records[i].mapq, file.chunks[0].records[i].mapq);
+        EXPECT_EQ(read->chunks[0].records[i].cigar, file.chunks[0].records[i].cigar);
+        EXPECT_EQ(read->chunks[0].records[i].sequence, file.chunks[0].records[i].sequence);
+        EXPECT_EQ(read->chunks[0].records[i].quality, file.chunks[0].records[i].quality);
+        EXPECT_EQ(read->chunks[0].records[i].tags, file.chunks[0].records[i].tags);
+    }
+    std::filesystem::remove(path);
+#else
+    GTEST_SKIP() << "ALIGNX_ENABLE_ZSTD=OFF";
+#endif
+}
+
+TEST(Axf1File, WriterGenericCompressedFallsBackWhenNotSmaller) {
+#ifdef ALIGNX_HAVE_ZSTD
+    const auto path = temp_path("alignx_axf1_generic_compressed_fallback");
+    auto file = make_file();
+    alignx::format::Axf1WriteOptions options;
+    options.column_compression = alignx::format::Axf1Compression::zstd;
+
+    auto write = alignx::format::write_axf1_file(file, path, options);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    for (std::size_t col = 0; col < 11; ++col) {
+        auto codec = read_u16_at(data, column_entry_offset(data, col) + kColumnCodecOffset);
+        (void)codec;
+    }
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks[0].records.size(), file.chunks[0].records.size());
+    for (std::size_t i = 0; i < file.chunks[0].records.size(); ++i) {
+        EXPECT_EQ(read->chunks[0].records[i].qname, file.chunks[0].records[i].qname);
+        EXPECT_EQ(read->chunks[0].records[i].sequence, file.chunks[0].records[i].sequence);
+        EXPECT_EQ(read->chunks[0].records[i].quality, file.chunks[0].records[i].quality);
+    }
+    std::filesystem::remove(path);
+#else
+    GTEST_SKIP() << "ALIGNX_ENABLE_ZSTD=OFF";
+#endif
+}
+
+TEST(Axf1File, ReaderRejectsNestedCompression) {
+    const auto path = temp_path("alignx_axf1_nested_compression");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    std::vector<unsigned char> envelope;
+    append_varint_u64(envelope,
+                      static_cast<std::uint16_t>(alignx::format::Axf1CodecId::compressed));
+    append_varint_u64(envelope, 0);
+    append_varint_u64(envelope, 4);
+    append_varint_u64(envelope, 4);
+    envelope.push_back(1);
+    envelope.push_back('F');
+    envelope.push_back(10);
+    envelope.push_back(10);
+
+    write_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::compressed));
+    replace_column_payload(data, kQualColumnIndex, envelope);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    EXPECT_FALSE(read);
+    EXPECT_NE(read.error().find("invalid base codec"), std::string::npos);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, ReaderRejectsInvalidBaseCodecForColumn) {
+    const auto path = temp_path("alignx_axf1_invalid_base_codec_column");
+    const auto file = make_file();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    std::vector<unsigned char> envelope;
+    append_varint_u64(envelope,
+                      static_cast<std::uint16_t>(alignx::format::Axf1CodecId::seq_2bit_literal));
+    append_varint_u64(envelope, 0);
+    append_varint_u64(envelope, 4);
+    append_varint_u64(envelope, 4);
+    envelope.push_back(1);
+    envelope.push_back('F');
+    envelope.push_back(10);
+    envelope.push_back(10);
+
+    write_u16_at(data, column_entry_offset(data, kQualColumnIndex) + kColumnCodecOffset,
+                 static_cast<std::uint16_t>(alignx::format::Axf1CodecId::compressed));
+    replace_column_payload(data, kQualColumnIndex, envelope);
+    write_bytes(path, data);
+
+    auto read = alignx::format::read_axf1_file(path);
+    EXPECT_FALSE(read);
+    EXPECT_NE(read.error().find("invalid base codec"), std::string::npos);
+
+    std::filesystem::remove(path);
+}

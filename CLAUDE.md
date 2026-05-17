@@ -8,7 +8,7 @@ alignx has reached **v1.0 — Full format + benchmark paper ready**.
 
 All v1.0 deliverables are complete: columnar AXF1 format with production codecs (POS delta-varint, FLAG bit-pack, MAPQ RLE, SEQ 2-bit, QUAL alphabet-pack + zstd, CIGAR token/dict, QNAME dict, TAG per-stream), parallel mmap-based region query (3.8x-5.4x faster than samtools view on PacBio, 3.0x-3.9x on Illumina), selective column I/O for pileup/coverage, BAM/CRAM round-trip, and comprehensive benchmarks on HG002 PacBio and Illumina data.
 
-Phase 2+ (SIMD AVX2/GPU CUDA decode, cloud range-query, Python bindings) is deferred.
+Phase 2 in progress: per-column zstd complete (1.02x BAM), SIMD AVX2 SEQ decode + FLAG bitpack optimization done, streaming pileup complete (3.0x-4.1x faster than samtools depth).
 
 Completed:
 - HTSlib wrapper: `BamReader` with `open`, `fetch(region)`, `next_record`
@@ -134,6 +134,10 @@ Completed:
 - `scripts/smoke_axf1_codecs.sh` supports `--axf1-quality-lossy none|illumina8` for reusable lossy quality binning smoke checks
 - PNEXT 0-based/1-based fix: internal sentinel changed from 0 to -1 for "unavailable" mate position, fixing round-trip for Illumina paired-end records with mate at position 1
 - Illumina 300x benchmark: HG002 NIST 2x250bp (novoalign, GRCh38) across 3 regions; view **3.0x-3.9x faster** than samtools, pileup **0.92x-1.2x** (platform-dependent). See `docs/research/illumina-benchmark-results.md`
+- AXF1 per-column zstd compression: generic `compressed` codec (ID 12) wraps any column's best base codec in a zstd envelope via `try_compress_column()`; reader recursively unwraps in `decode_column_into_chunk()` and `decode_all_columns_mapped()`; CLI `--axf1-compression none|zstd`; HG002 chr1:1M-2M: 8/11 columns use `compressed`, lossless size drops from 1.58x BAM to **1.02x BAM**
+- AXF1 SIMD AVX2 SEQ 2-bit decode: `decode_seq_2bit_avx2()` processes 32 packed bytes (128 bases) per iteration using `_mm256_shuffle_epi8` as a 4-entry LUT with lane-crossing interleave; guarded by `#ifdef ALIGNX_HAVE_AVX2` with scalar LUT fallback. FLAG bitpack: uint64 load + mask replaces per-bit inner loop. Both verified SHA-identical on remote HG002 chr1:1M-2M.
+- Streaming pileup optimization: default pileup/coverage TSV output now skips zero-depth positions (matching `samtools depth` without `-a`); `--all-positions` / `-a` flag restores full output. `write_coverage_tsv()` replaced with 64 KB buffered `std::to_chars` writer eliminating per-line `ostream <<` overhead. `scripts/bench_pileup.sh` updated with `--all-positions` flag for legacy comparison mode.
+- Streaming pileup remote HG002 benchmark: correctness verified (6/6 SHA checks pass across 3 regions × 2 modes). Performance: AXF1 pileup **3.0x-4.1x faster** than samtools depth (74 ms vs 220 ms chrY, 78 ms vs 279 ms chr1:1M-2M, 1177 ms vs 4792 ms centromeric). Previous centromeric result was 0.82x slower; buffered writer + skip-zeros produces **4.1x faster**.
 
 ## Build & Test Commands
 
