@@ -14,6 +14,7 @@
 #include "format/axf1_file.hpp"
 #include "format/axf_file.hpp"
 #include "io/bam_reader.hpp"
+#include "io/fasta_reader.hpp"
 #include "query/region.hpp"
 
 namespace alignx::convert {
@@ -306,6 +307,46 @@ std::expected<void, std::string> convert_bam_to_axf1_mvp(const std::filesystem::
     file.metadata.source_path = input_bam.string();
     file.metadata.conversion_region = region.value_or("");
     file.metadata.is_subset = region.has_value();
+
+    if (options.reference_fasta.has_value()) {
+        auto fasta = io::FastaReader::open(*options.reference_fasta);
+        if (!fasta) {
+            return std::unexpected("failed to open reference FASTA: " + fasta.error());
+        }
+        auto contigs = fasta->contigs();
+        if (!contigs) {
+            return std::unexpected("failed to read reference contigs: " + contigs.error());
+        }
+
+        std::vector<std::pair<std::uint32_t, std::array<unsigned char, 32>>> checksums;
+        for (std::size_t i = 0; i < references->size(); ++i) {
+            const auto& ref_name = references->at(i).name;
+            bool found = false;
+            for (const auto& contig : *contigs) {
+                if (contig.name == ref_name) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                continue;
+            }
+            auto sha = fasta->compute_contig_sha256(ref_name);
+            if (!sha) {
+                return std::unexpected("failed to compute SHA-256 for contig " + ref_name +
+                                       ": " + sha.error());
+            }
+            checksums.push_back({static_cast<std::uint32_t>(i), *sha});
+        }
+
+        if (!checksums.empty()) {
+            file.metadata.extensions.push_back(
+                format::make_ref_contig_sha256_entry(checksums));
+        }
+        file.metadata.extensions.push_back(
+            format::make_encode_reference_path_entry(options.reference_fasta->string()));
+    }
+
     file.references.reserve(references->size());
     for (const io::BamReference& reference : *references) {
         file.references.push_back({.name = reference.name, .length = reference.length});

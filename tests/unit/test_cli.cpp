@@ -24,6 +24,10 @@ std::filesystem::path toy_cram_path() {
     return std::filesystem::path(TEST_DATA_DIR) / "toy_alignment.sorted.cram";
 }
 
+std::filesystem::path toy_ref_path() {
+    return std::filesystem::path(TEST_DATA_DIR) / "toy_ref.fa";
+}
+
 std::filesystem::path toy_bai_path() {
     return std::filesystem::path(TEST_DATA_DIR) / "toy_alignment.sorted.bam.bai";
 }
@@ -640,6 +644,108 @@ TEST(Cli, ConvertRegionWritesEmptyAxfForNoHitToyRegion) {
     EXPECT_EQ(view_code, 0) << view_err.str();
     EXPECT_EQ(view_out.str(), "");
     EXPECT_EQ(view_err.str(), "");
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ConvertWithValidReferenceSucceeds) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_with_ref");
+    const auto output = temp_dir / "toy.axf1";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "convert", toy_bam_path().string(), "-o", output.string(),
+                              "--format", "AXF1", "--reference", toy_ref_path().string()},
+                             out, err);
+
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_EQ(err.str(), "");
+    ASSERT_TRUE(std::filesystem::is_regular_file(output));
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ConvertWithInvalidReferenceErrors) {
+    const auto temp_dir = make_temp_dir("alignx_cli_convert_bad_ref");
+    const auto output = temp_dir / "toy.axf1";
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code = run_cli({"alignx", "convert", toy_bam_path().string(), "-o", output.string(),
+                              "--format", "AXF1", "--reference", "/nonexistent/ref.fa"},
+                             out, err);
+
+    EXPECT_NE(code, 0);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ViewV3WithoutRequiredRef_Errors) {
+    const auto temp_dir = make_temp_dir("alignx_cli_view_v3_no_ref");
+    const auto axf1_path = temp_dir / "toy_v3_req.axf1";
+
+    {
+        const auto convert_out_path = temp_dir / "toy_base.axf1";
+        std::ostringstream cout_ignore;
+        std::ostringstream cerr_ignore;
+        run_cli({"alignx", "convert", toy_bam_path().string(), "-o",
+                 convert_out_path.string(), "--format", "AXF1", "--reference",
+                 toy_ref_path().string()},
+                cout_ignore, cerr_ignore);
+
+        auto file = alignx::format::read_axf1_file(convert_out_path);
+        ASSERT_TRUE(file) << file.error();
+        for (auto& ext : file->metadata.extensions) {
+            if (ext.key_id == alignx::format::extension_key::kRefContigSha256) {
+                ext.flags = alignx::format::kExtFlagRequired;
+            }
+        }
+        auto write = alignx::format::write_axf1_file(*file, axf1_path);
+        ASSERT_TRUE(write) << write.error();
+    }
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code =
+        run_cli({"alignx", "view", axf1_path.string(), "chrToy:1-250"}, out, err);
+    EXPECT_NE(code, 0);
+    EXPECT_NE(err.str().find("requires reference FASTA"), std::string::npos);
+
+    std::filesystem::remove_all(temp_dir);
+}
+
+TEST(Cli, ViewV3WithCorrectRef_Succeeds) {
+    const auto temp_dir = make_temp_dir("alignx_cli_view_v3_with_ref");
+    const auto axf1_path = temp_dir / "toy_v3_req.axf1";
+
+    {
+        const auto convert_out_path = temp_dir / "toy_base.axf1";
+        std::ostringstream cout_ignore;
+        std::ostringstream cerr_ignore;
+        run_cli({"alignx", "convert", toy_bam_path().string(), "-o",
+                 convert_out_path.string(), "--format", "AXF1", "--reference",
+                 toy_ref_path().string()},
+                cout_ignore, cerr_ignore);
+
+        auto file = alignx::format::read_axf1_file(convert_out_path);
+        ASSERT_TRUE(file) << file.error();
+        for (auto& ext : file->metadata.extensions) {
+            if (ext.key_id == alignx::format::extension_key::kRefContigSha256) {
+                ext.flags = alignx::format::kExtFlagRequired;
+            }
+        }
+        auto write = alignx::format::write_axf1_file(*file, axf1_path);
+        ASSERT_TRUE(write) << write.error();
+    }
+
+    std::ostringstream out;
+    std::ostringstream err;
+    const int code =
+        run_cli({"alignx", "view", axf1_path.string(), "chrToy:1-250", "--reference",
+                 toy_ref_path().string()},
+                out, err);
+    EXPECT_EQ(code, 0) << err.str();
+    EXPECT_FALSE(out.str().empty());
 
     std::filesystem::remove_all(temp_dir);
 }

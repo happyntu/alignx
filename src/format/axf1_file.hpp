@@ -1,11 +1,14 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace alignx::format {
@@ -38,6 +41,7 @@ enum class Axf1CodecId : std::uint16_t {
     tags_per_stream = 10,
     cigar_dict = 11,
     compressed = 12,
+    seq_ref_delta = 13,
 };
 
 enum class Axf1Compression {
@@ -54,6 +58,7 @@ struct Axf1WriteOptions {
     Axf1Compression quality_compression = Axf1Compression::none;
     Axf1Compression column_compression = Axf1Compression::none;
     Axf1QualityLossy quality_lossy = Axf1QualityLossy::none;
+    std::optional<std::filesystem::path> reference_fasta;
 };
 
 struct Axf1Reference {
@@ -82,10 +87,28 @@ struct Axf1Chunk {
     std::vector<Axf1Record> records;
 };
 
+struct MetadataEntry {
+    std::uint16_t key_id = 0;
+    std::uint8_t flags = 0;
+    std::vector<unsigned char> value;
+};
+
+namespace extension_key {
+constexpr std::uint16_t kRefAssemblyName = 1;
+constexpr std::uint16_t kRefContigTable = 2;
+constexpr std::uint16_t kRefContigSha256 = 3;
+constexpr std::uint16_t kRefFastaUri = 4;
+constexpr std::uint16_t kBamHeaderSha256 = 5;
+constexpr std::uint16_t kEncodeReferencePath = 6;
+} // namespace extension_key
+
+constexpr std::uint8_t kExtFlagRequired = 0x01;
+
 struct Axf1FileMetadata {
     std::string source_path;
     std::string conversion_region;
     bool is_subset = false;
+    std::vector<MetadataEntry> extensions;
 };
 
 struct Axf1File {
@@ -98,6 +121,7 @@ struct Axf1FileIndexMetadata {
     std::string source_path;
     std::string conversion_region;
     bool is_subset = false;
+    std::vector<MetadataEntry> extensions;
 };
 
 struct Axf1ChunkIndexEntry {
@@ -264,5 +288,14 @@ read_axf1_chunk_columns_profiled(const std::filesystem::path& path,
 
 void append_axf1_sam_record(std::string& output, const Axf1Record& record,
                             const std::string& reference);
+
+MetadataEntry make_ref_contig_sha256_entry(
+    const std::vector<std::pair<std::uint32_t, std::array<unsigned char, 32>>>& checksums,
+    std::uint8_t flags = 0);
+
+MetadataEntry make_encode_reference_path_entry(std::string_view path);
+
+std::vector<std::pair<std::uint32_t, std::array<unsigned char, 32>>>
+parse_ref_contig_sha256_entry(const MetadataEntry& entry);
 
 } // namespace alignx::format

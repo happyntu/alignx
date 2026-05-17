@@ -8,7 +8,7 @@ alignx has reached **v1.0 — Full format + benchmark paper ready**.
 
 All v1.0 deliverables are complete: columnar AXF1 format with production codecs (POS delta-varint, FLAG bit-pack, MAPQ RLE, SEQ 2-bit, QUAL alphabet-pack + zstd, CIGAR token/dict, QNAME dict, TAG per-stream), parallel mmap-based region query (3.8x-5.4x faster than samtools view on PacBio, 3.0x-3.9x on Illumina), selective column I/O for pileup/coverage, BAM/CRAM round-trip, and comprehensive benchmarks on HG002 PacBio and Illumina data.
 
-Phase 2 in progress: per-column zstd complete (1.02x BAM), SIMD AVX2 SEQ decode + FLAG bitpack optimization done, streaming pileup complete (3.0x-4.1x faster than samtools depth).
+Phase 2 complete: per-column zstd (1.02x BAM), SIMD AVX2 SEQ decode + FLAG bitpack, streaming pileup (3.0x-4.1x faster than samtools depth), reference-delta SEQ codec (ADR-007, `seq_ref_delta` codec ID 13, CIGAR-driven reconstruction with per-contig SHA-256 validation).
 
 Completed:
 - HTSlib wrapper: `BamReader` with `open`, `fetch(region)`, `next_record`
@@ -138,6 +138,15 @@ Completed:
 - AXF1 SIMD AVX2 SEQ 2-bit decode: `decode_seq_2bit_avx2()` processes 32 packed bytes (128 bases) per iteration using `_mm256_shuffle_epi8` as a 4-entry LUT with lane-crossing interleave; guarded by `#ifdef ALIGNX_HAVE_AVX2` with scalar LUT fallback. FLAG bitpack: uint64 load + mask replaces per-bit inner loop. Both verified SHA-identical on remote HG002 chr1:1M-2M.
 - Streaming pileup optimization: default pileup/coverage TSV output now skips zero-depth positions (matching `samtools depth` without `-a`); `--all-positions` / `-a` flag restores full output. `write_coverage_tsv()` replaced with 64 KB buffered `std::to_chars` writer eliminating per-line `ostream <<` overhead. `scripts/bench_pileup.sh` updated with `--all-positions` flag for legacy comparison mode.
 - Streaming pileup remote HG002 benchmark: correctness verified (6/6 SHA checks pass across 3 regions × 2 modes). Performance: AXF1 pileup **3.0x-4.1x faster** than samtools depth (74 ms vs 220 ms chrY, 78 ms vs 279 ms chr1:1M-2M, 1177 ms vs 4792 ms centromeric). Previous centromeric result was 0.82x slower; buffered writer + skip-zeros produces **4.1x faster**.
+- ADR-007 reference identity metadata: typed v3 extension block (`entry_count u32` + per-entry `{key_id u16, flags u8, value_length u32, value bytes}`), version dispatch (v3 when extensions non-empty, v2 otherwise), required/optional entry semantics
+- FASTA reader (`src/io/fasta_reader.hpp/cpp`): HTSlib `faidx_t*` RAII wrapper with `open()`, `contigs()`, `fetch_sequence()`, `fetch_contig()`, `compute_contig_sha256()`
+- Self-contained SHA-256 (`src/io/sha256.hpp/cpp`): RFC 6234 / FIPS 180-4, no external dependency
+- `--reference <fasta>` CLI opt-in for convert/view/coverage/pileup/export; env var fallback `ALIGNX_REFERENCE`
+- Per-contig SHA-256 reference identity: extension key IDs 1-6, `make_ref_contig_sha256_entry()` + `parse_ref_contig_sha256_entry()` + `make_encode_reference_path_entry()`
+- Reference validator (`src/io/reference_validator.hpp/cpp`): decode-time per-contig SHA-256 comparison with caching; `require_reference_for_extensions()` hard error for required entries without `--reference`
+- AXF1 reference-delta SEQ codec (`seq_ref_delta`, codec ID 13): CIGAR-driven reconstruction storing only mismatches, soft-clips, and insertions as delta from reference; per-chunk fallback to `seq_2bit_literal` when ref-delta is not smaller or sequence contains non-ACGT bases
+- AXF1 reference-delta codec selection: encoder tries ref-delta before 2-bit literal when FASTA context available; per-contig pre-fetch into `unordered_map` for zero-lock parallel decode
+- AXF1 writer pre-fetches reference sequences and passes per-chunk ref context through `write_chunk` → `encode_columns` → `encode_sequence_column`; converter populates v3 extensions (ref_contig_sha256 + encode_reference_path) when `--reference` set
 
 ## Build & Test Commands
 
@@ -236,6 +245,7 @@ Current decisions:
 - Language and build: `docs/adr/adr-001-language-and-build.md`
 - AXF format design: `docs/adr/adr-002-axf-format-design.md`
 - Index design: `docs/adr/adr-003-index-design.md`
+- Reference identity metadata: `docs/adr/adr-007-reference-identity-metadata.md`
 - Roadmap phases: `docs/roadmap.md`
 - Developer workflow: `docs/dev/README.md`
 

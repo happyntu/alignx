@@ -29,6 +29,7 @@
 #include "index/bam_index_projection.hpp"
 #include "index/csi_reader.hpp"
 #include "io/bam_reader.hpp"
+#include "io/reference_validator.hpp"
 #include "query/axf1_coverage.hpp"
 #include "query/axf1_view.hpp"
 #include "query/axf_view.hpp"
@@ -166,6 +167,18 @@ bool has_axf1_chunk_policy_env_override() {
            get_env_value("ALIGNX_AXF1_MAX_GENOMIC_SPAN").has_value();
 }
 
+std::optional<std::filesystem::path>
+resolve_reference_path(const std::filesystem::path& cli_value) {
+    if (!cli_value.empty()) {
+        return cli_value;
+    }
+    auto env = get_env_value("ALIGNX_REFERENCE");
+    if (env && !env->empty()) {
+        return std::filesystem::path(*env);
+    }
+    return std::nullopt;
+}
+
 void write_view_profile(const ViewProfile& profile, Clock::duration total_time, std::ostream& err) {
     err << "profile\trecords\topen_ms\theader_ms\tindex_ms\tfetch_ms\tread_ms\tformat_ms\twrite_ms"
            "\ttotal_ms\tstdout_bytes\n";
@@ -239,7 +252,32 @@ int run_axf_view(const std::filesystem::path& input, const std::string& region, 
 }
 
 int run_axf1_view(const std::filesystem::path& input, const std::string& region,
-                  const query::RecordFilter& filter, std::ostream& out, std::ostream& err) {
+                  const query::RecordFilter& filter,
+                  const std::optional<std::filesystem::path>& reference,
+                  std::ostream& out, std::ostream& err) {
+    auto index_meta = format::read_axf1_index_metadata(input);
+    if (index_meta) {
+        auto ref_check =
+            io::require_reference_for_extensions(index_meta->metadata.extensions, reference);
+        if (!ref_check) {
+            err << "alignx view: " << ref_check.error() << '\n';
+            return 1;
+        }
+        if (reference.has_value()) {
+            auto validator = io::ReferenceValidator::create(
+                *reference, index_meta->metadata.extensions, index_meta->references);
+            if (validator && validator->has_checksums()) {
+                for (std::uint32_t i = 0; i < index_meta->references.size(); ++i) {
+                    auto v = validator->validate_contig(i);
+                    if (!v) {
+                        err << "alignx view: " << v.error() << '\n';
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+
     const bool profile_enabled = axf1_view_profile_enabled();
     const auto total_start = profile_enabled ? Clock::now() : Clock::time_point{};
 
@@ -259,13 +297,14 @@ int run_axf1_view(const std::filesystem::path& input, const std::string& region,
 }
 
 int run_view(const std::filesystem::path& input, const std::string& region,
-             std::optional<int> hts_threads, const query::RecordFilter& filter, std::ostream& out,
-             std::ostream& err) {
+             std::optional<int> hts_threads, const query::RecordFilter& filter,
+             const std::optional<std::filesystem::path>& reference,
+             std::ostream& out, std::ostream& err) {
     switch (detect_view_input_format(input)) {
     case ViewInputFormat::axf0:
         return run_axf_view(input, region, out, err);
     case ViewInputFormat::axf1:
-        return run_axf1_view(input, region, filter, out, err);
+        return run_axf1_view(input, region, filter, reference, out, err);
     case ViewInputFormat::unsupported_axf:
         err << "alignx view: unsupported AXF file magic\n";
         return 1;
@@ -386,6 +425,7 @@ int run_convert(const std::filesystem::path& input, const std::filesystem::path&
                 const std::optional<std::string>& region, std::string_view format,
                 std::string_view axf1_quality_compression, std::string_view axf1_quality_lossy,
                 std::string_view axf1_compression,
+                const std::optional<std::filesystem::path>& reference,
                 std::ostream& out, std::ostream& err) {
     std::string normalized_format(format);
     std::transform(normalized_format.begin(), normalized_format.end(), normalized_format.begin(),
@@ -458,6 +498,11 @@ int run_convert(const std::filesystem::path& input, const std::filesystem::path&
     }
     if (normalized_compression == "zstd") {
         axf1_options.column_compression = format::Axf1Compression::zstd;
+    }
+    axf1_options.reference_fasta = reference;
+    if (reference.has_value() && !std::filesystem::is_regular_file(*reference)) {
+        err << "alignx convert: --reference file not found: " << reference->string() << '\n';
+        return 1;
     }
 
     auto conversion = normalized_format == "AXF1"
@@ -779,6 +824,7 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     int view_hts_threads = -1;
     std::uint16_t view_flag_exclude = 0;
     std::uint8_t view_min_mapq = 0;
+    std::filesystem::path view_reference;
 
     auto* view = app.add_subcommand("view", "Output SAM records for a BAM or AXF region");
     view->add_option("input", view_input, "Input BAM or AXF file")
@@ -790,6 +836,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     view->add_option("--flag-exclude", view_flag_exclude,
                      "Exclude records with any of these FLAG bits set");
     view->add_option("--min-mapq", view_min_mapq, "Exclude records below this MAPQ value");
+    view->add_option("--reference", view_reference,
+                     "Reference FASTA for decoding ref-delta codecs; overrides ALIGNX_REFERENCE");
 
     std::filesystem::path stats_input;
     auto* stats = app.add_subcommand("stats", "Output basic BAM statistics as TSV");
@@ -804,6 +852,7 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     std::string convert_axf1_quality_compression = "none";
     std::string convert_axf1_quality_lossy = "none";
     std::string convert_axf1_compression = "none";
+    std::filesystem::path convert_reference;
     auto* convert_cmd = app.add_subcommand("convert", "Convert BAM to AXF MVP format");
     convert_cmd->add_option("input", convert_input, "Input BAM file")
         ->required()
@@ -818,6 +867,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
                             "AXF1 lossy quality binning: none or illumina8");
     convert_cmd->add_option("--axf1-compression", convert_axf1_compression,
                             "AXF1 per-column compression: none or zstd");
+    convert_cmd->add_option("--reference", convert_reference,
+                            "Reference FASTA for ref-delta SEQ codec; overrides ALIGNX_REFERENCE");
 
     std::filesystem::path coverage_input;
     std::string coverage_region;
@@ -826,6 +877,7 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     int coverage_hts_threads = -1;
     std::uint16_t coverage_flag_exclude = 0;
     std::uint8_t coverage_min_mapq = 0;
+    std::filesystem::path coverage_reference;
     auto* coverage_cmd =
         app.add_subcommand("coverage", "Compute per-base coverage for a BAM or AXF1 region");
     coverage_cmd->add_option("input", coverage_input, "Input BAM or AXF1 file")
@@ -843,6 +895,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
                              "Exclude records with any of these FLAG bits set");
     coverage_cmd->add_option("--min-mapq", coverage_min_mapq,
                              "Exclude records below this MAPQ value");
+    coverage_cmd->add_option("--reference", coverage_reference,
+                             "Reference FASTA for decoding ref-delta codecs; overrides ALIGNX_REFERENCE");
 
     std::filesystem::path pileup_input;
     std::string pileup_region;
@@ -850,6 +904,7 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     int pileup_hts_threads = -1;
     std::uint16_t pileup_flag_exclude = 0;
     std::uint8_t pileup_min_mapq = 0;
+    std::filesystem::path pileup_reference;
     auto* pileup_cmd =
         app.add_subcommand("pileup", "Compute per-base pileup depth for a BAM or AXF1 region");
     pileup_cmd->add_option("input", pileup_input, "Input BAM or AXF1 file")
@@ -865,6 +920,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
                            "Exclude records with any of these FLAG bits set");
     pileup_cmd->add_option("--min-mapq", pileup_min_mapq,
                            "Exclude records below this MAPQ value");
+    pileup_cmd->add_option("--reference", pileup_reference,
+                           "Reference FASTA for decoding ref-delta codecs; overrides ALIGNX_REFERENCE");
 
     std::filesystem::path index_input;
     std::filesystem::path index_output;
@@ -877,12 +934,15 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     std::filesystem::path export_input;
     std::filesystem::path export_output;
     int export_hts_threads = -1;
+    std::filesystem::path export_reference;
     auto* export_cmd = app.add_subcommand("export", "Export AXF1 to BAM");
     export_cmd->add_option("input", export_input, "Input AXF1 file")
         ->required()
         ->check(::CLI::ExistingFile);
     export_cmd->add_option("-o,--output", export_output, "Output BAM file")->required();
     export_cmd->add_option("--hts-threads", export_hts_threads, "HTSlib worker threads");
+    export_cmd->add_option("--reference", export_reference,
+                           "Reference FASTA for decoding ref-delta codecs; overrides ALIGNX_REFERENCE");
 
     try {
         app.parse(argc, argv);
@@ -899,7 +959,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
             view_hts_threads >= 0 ? std::optional<int>{view_hts_threads} : std::nullopt;
         const query::RecordFilter view_filter{.flag_exclude = view_flag_exclude,
                                               .min_mapq = view_min_mapq};
-        return run_view(view_input, view_region, hts_threads, view_filter, out, err);
+        return run_view(view_input, view_region, hts_threads, view_filter,
+                        resolve_reference_path(view_reference), out, err);
     }
     if (*stats) {
         return run_stats(stats_input, out, err);
@@ -907,7 +968,8 @@ int run(int argc, char** argv, std::ostream& out, std::ostream& err) {
     if (*convert_cmd) {
         return run_convert(convert_input, convert_output, convert_region, convert_format,
                            convert_axf1_quality_compression, convert_axf1_quality_lossy,
-                           convert_axf1_compression, out, err);
+                           convert_axf1_compression,
+                           resolve_reference_path(convert_reference), out, err);
     }
     if (*coverage_cmd) {
         if (coverage_output_mode != "summary" && coverage_output_mode != "tsv") {

@@ -145,6 +145,14 @@ std::uint16_t read_u16_at(const std::vector<unsigned char>& data, std::size_t of
     return value;
 }
 
+std::uint32_t read_u32_at(const std::vector<unsigned char>& data, std::size_t offset) {
+    std::uint32_t value = 0;
+    for (std::size_t byte = 0; byte < sizeof(value); ++byte) {
+        value |= static_cast<std::uint32_t>(data.at(offset + byte)) << (byte * 8U);
+    }
+    return value;
+}
+
 std::uint64_t read_varint_at(const std::vector<unsigned char>& data, std::size_t& offset) {
     std::uint64_t value = 0;
     std::uint8_t shift = 0;
@@ -1171,6 +1179,375 @@ TEST(Axf1File, RejectsMetadataOverlappingIndex) {
             write_u64_at(data, kIndexOffsetFieldOffset, kMetadataOffset + 1);
         },
         "AXF1 metadata overlaps index");
+}
+
+TEST(Axf1File, V3EmptyExtensionsWritesV2) {
+    const auto path = temp_path("alignx_axf1_v3_empty_ext");
+    auto file = make_file();
+    file.metadata.extensions.clear();
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto version = read_u32_at(data, kVersionFieldOffset);
+    EXPECT_EQ(version, 2u);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    EXPECT_TRUE(read->metadata.extensions.empty());
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, V3SingleOptionalExtensionRoundTrip) {
+    const auto path = temp_path("alignx_axf1_v3_single_ext");
+    auto file = make_file();
+    file.metadata.source_path = "/data/test.bam";
+    file.metadata.extensions.push_back(
+        {.key_id = 4, .flags = 0, .value = {'/', 'r', 'e', 'f', '.', 'f', 'a'}});
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto data = read_bytes(path);
+    const auto version = read_u32_at(data, kVersionFieldOffset);
+    EXPECT_EQ(version, 3u);
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    EXPECT_EQ(read->metadata.source_path, "/data/test.bam");
+    ASSERT_EQ(read->metadata.extensions.size(), 1u);
+    EXPECT_EQ(read->metadata.extensions[0].key_id, 4u);
+    EXPECT_EQ(read->metadata.extensions[0].flags, 0u);
+    const std::vector<unsigned char> expected_value{'/', 'r', 'e', 'f', '.', 'f', 'a'};
+    EXPECT_EQ(read->metadata.extensions[0].value, expected_value);
+
+    ASSERT_EQ(read->chunks.size(), 1u);
+    ASSERT_EQ(read->chunks[0].records.size(), 2u);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, V3MultipleExtensionsRoundTrip) {
+    const auto path = temp_path("alignx_axf1_v3_multi_ext");
+    auto file = make_file();
+    file.metadata.extensions.push_back({.key_id = 1, .flags = 0, .value = {'G', 'R', 'C', 'h', '3', '8'}});
+    file.metadata.extensions.push_back({.key_id = 5, .flags = 0, .value = std::vector<unsigned char>(32, 0xAB)});
+    file.metadata.extensions.push_back({.key_id = 6, .flags = 0, .value = {'/', 'p', 'a', 't', 'h'}});
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->metadata.extensions.size(), 3u);
+    EXPECT_EQ(read->metadata.extensions[0].key_id, 1u);
+    EXPECT_EQ(read->metadata.extensions[1].key_id, 5u);
+    EXPECT_EQ(read->metadata.extensions[1].value.size(), 32u);
+    EXPECT_EQ(read->metadata.extensions[2].key_id, 6u);
+
+    auto index = alignx::format::read_axf1_index_metadata(path);
+    ASSERT_TRUE(index) << index.error();
+    ASSERT_EQ(index->metadata.extensions.size(), 3u);
+    EXPECT_EQ(index->metadata.extensions[0].key_id, 1u);
+    EXPECT_EQ(index->metadata.extensions[2].key_id, 6u);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, V3RequiredUnknownKeyRejects) {
+    const auto path = temp_path("alignx_axf1_v3_req_unknown");
+    auto file = make_file();
+    file.metadata.extensions.push_back({.key_id = 999, .flags = 0x01, .value = {0x42}});
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_FALSE(read);
+    EXPECT_NE(read.error().find("unsupported required AXF1 extension key ID"), std::string::npos);
+
+    auto index = alignx::format::read_axf1_index_metadata(path);
+    ASSERT_FALSE(index);
+    EXPECT_NE(index.error().find("unsupported required AXF1 extension key ID"), std::string::npos);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, V3OptionalUnknownKeyIgnored) {
+    const auto path = temp_path("alignx_axf1_v3_opt_unknown");
+    auto file = make_file();
+    file.metadata.extensions.push_back({.key_id = 999, .flags = 0x00, .value = {0x42, 0x43}});
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->metadata.extensions.size(), 1u);
+    EXPECT_EQ(read->metadata.extensions[0].key_id, 999u);
+    EXPECT_EQ(read->metadata.extensions[0].flags, 0u);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, V3RequiredKnownKeyAccepted) {
+    const auto path = temp_path("alignx_axf1_v3_req_known");
+    auto file = make_file();
+    file.metadata.extensions.push_back(
+        {.key_id = 3, .flags = 0x01, .value = std::vector<unsigned char>(36, 0x00)});
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->metadata.extensions.size(), 1u);
+    EXPECT_EQ(read->metadata.extensions[0].key_id, 3u);
+    EXPECT_EQ(read->metadata.extensions[0].flags, 0x01);
+
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, V3RefContigSha256RoundTrip) {
+    const auto path = temp_path("alignx_axf1_v3_sha256_rt");
+    auto file = make_file();
+
+    std::vector<std::pair<std::uint32_t, std::array<unsigned char, 32>>> checksums;
+    std::array<unsigned char, 32> hash1{};
+    hash1[0] = 0xAB;
+    hash1[31] = 0xCD;
+    checksums.push_back({0, hash1});
+
+    file.metadata.extensions.push_back(
+        alignx::format::make_ref_contig_sha256_entry(checksums, alignx::format::kExtFlagRequired));
+    file.metadata.extensions.push_back(
+        alignx::format::make_encode_reference_path_entry("/path/to/ref.fa"));
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->metadata.extensions.size(), 2u);
+
+    EXPECT_EQ(read->metadata.extensions[0].key_id,
+              alignx::format::extension_key::kRefContigSha256);
+    EXPECT_EQ(read->metadata.extensions[0].flags, alignx::format::kExtFlagRequired);
+    auto parsed = alignx::format::parse_ref_contig_sha256_entry(read->metadata.extensions[0]);
+    ASSERT_EQ(parsed.size(), 1u);
+    EXPECT_EQ(parsed[0].first, 0u);
+    EXPECT_EQ(parsed[0].second[0], 0xAB);
+    EXPECT_EQ(parsed[0].second[31], 0xCD);
+
+    EXPECT_EQ(read->metadata.extensions[1].key_id,
+              alignx::format::extension_key::kEncodeReferencePath);
+    std::string ref_path(read->metadata.extensions[1].value.begin(),
+                         read->metadata.extensions[1].value.end());
+    EXPECT_EQ(ref_path, "/path/to/ref.fa");
+
+    std::filesystem::remove(path);
+}
+
+std::string make_toy_ref_seq() {
+    std::string ref(200, 'A');
+    // read001: pos=100, cigar=10M, seq=ACGTACGTAA → ref[100..110) = ACGTACGTAA
+    ref[100] = 'A'; ref[101] = 'C'; ref[102] = 'G'; ref[103] = 'T';
+    ref[104] = 'A'; ref[105] = 'C'; ref[106] = 'G'; ref[107] = 'T';
+    ref[108] = 'A'; ref[109] = 'A';
+    // read002: pos=150, cigar=5M1I4M, seq=TTTTACGGGA
+    // 5M: query[0..5)=TTTAC vs ref[150..155)
+    // 1I: query[5]=G (inserted)
+    // 4M: query[6..10)=GGGA vs ref[155..159)
+    ref[150] = 'T'; ref[151] = 'T'; ref[152] = 'T'; ref[153] = 'A'; ref[154] = 'C';
+    ref[155] = 'G'; ref[156] = 'G'; ref[157] = 'G'; ref[158] = 'A';
+    return ref;
+}
+
+TEST(Axf1File, SeqRefDelta_PerfectMatchRoundTrip) {
+    const auto path = temp_path("alignx_axf1_refdelta_perfect");
+    alignx::format::Axf1File file;
+    file.references.push_back({.name = "chrToy", .length = 200});
+    auto ref_seq = make_toy_ref_seq();
+    file.chunks.push_back({.ref_id = 0,
+                           .start_pos = 100,
+                           .end_pos = 110,
+                           .records = {{.qname = "read001",
+                                        .flag = 0,
+                                        .pos = 100,
+                                        .mapq = 60,
+                                        .cigar = "10M",
+                                        .mate_reference = "*",
+                                        .mate_pos = -1,
+                                        .template_length = 0,
+                                        .sequence = "ACGTACGTAA",
+                                        .quality = "FFFFFFFFFF",
+                                        .tags = "NM:i:0"}}});
+
+    alignx::format::Axf1WriteOptions options;
+    // Create a temp FASTA to test through the writer
+    // Instead, directly check the encode-decode by writing with ref context
+    // Use the internal write path that accepts ref_seq
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1u);
+    ASSERT_EQ(read->chunks[0].records.size(), 1u);
+    EXPECT_EQ(read->chunks[0].records[0].sequence, "ACGTACGTAA");
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, SeqRefDelta_InsertionRoundTrip) {
+    const auto path = temp_path("alignx_axf1_refdelta_ins");
+    alignx::format::Axf1File file;
+    file.references.push_back({.name = "chrToy", .length = 200});
+    auto ref_seq = make_toy_ref_seq();
+    file.chunks.push_back({.ref_id = 0,
+                           .start_pos = 150,
+                           .end_pos = 160,
+                           .records = {{.qname = "read002",
+                                        .flag = 16,
+                                        .pos = 150,
+                                        .mapq = 50,
+                                        .cigar = "5M1I4M",
+                                        .mate_reference = "*",
+                                        .mate_pos = -1,
+                                        .template_length = 0,
+                                        .sequence = "TTTTACGGGA",
+                                        .quality = "FFFFFFFFFF",
+                                        .tags = "NM:i:1"}}});
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1u);
+    ASSERT_EQ(read->chunks[0].records.size(), 1u);
+    EXPECT_EQ(read->chunks[0].records[0].sequence, "TTTTACGGGA");
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, SeqRefDelta_MismatchRoundTrip) {
+    const auto path = temp_path("alignx_axf1_refdelta_mismatch");
+    alignx::format::Axf1File file;
+    file.references.push_back({.name = "chrToy", .length = 200});
+    // ref[100..110) = ACGTACGTAA, but sequence has mismatches
+    file.chunks.push_back({.ref_id = 0,
+                           .start_pos = 100,
+                           .end_pos = 110,
+                           .records = {{.qname = "read_mm",
+                                        .flag = 0,
+                                        .pos = 100,
+                                        .mapq = 60,
+                                        .cigar = "10M",
+                                        .mate_reference = "*",
+                                        .mate_pos = -1,
+                                        .template_length = 0,
+                                        .sequence = "TCGTACGTAA", // A→T at pos 0
+                                        .quality = "FFFFFFFFFF",
+                                        .tags = "NM:i:1"}}});
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1u);
+    ASSERT_EQ(read->chunks[0].records.size(), 1u);
+    EXPECT_EQ(read->chunks[0].records[0].sequence, "TCGTACGTAA");
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, SeqRefDelta_DeletionRoundTrip) {
+    const auto path = temp_path("alignx_axf1_refdelta_del");
+    alignx::format::Axf1File file;
+    file.references.push_back({.name = "chrToy", .length = 200});
+    // 5M1D5M: 5 match, 1 deletion, 5 match — query has 10 bases, ref consumed 11
+    // ref[100..105) + ref[106..111) used for alignment
+    file.chunks.push_back({.ref_id = 0,
+                           .start_pos = 100,
+                           .end_pos = 111,
+                           .records = {{.qname = "read_del",
+                                        .flag = 0,
+                                        .pos = 100,
+                                        .mapq = 60,
+                                        .cigar = "5M1D5M",
+                                        .mate_reference = "*",
+                                        .mate_pos = -1,
+                                        .template_length = 0,
+                                        .sequence = "ACGTAACGTA", // ref[100..105)=ACGTA, skip 1, ref[106..111)=CGTAA → but wait
+                                        .quality = "FFFFFFFFFF",
+                                        .tags = "NM:i:1"}}});
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1u);
+    ASSERT_EQ(read->chunks[0].records.size(), 1u);
+    EXPECT_EQ(read->chunks[0].records[0].sequence, "ACGTAACGTA");
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, SeqRefDelta_SoftClipRoundTrip) {
+    const auto path = temp_path("alignx_axf1_refdelta_sc");
+    alignx::format::Axf1File file;
+    file.references.push_back({.name = "chrToy", .length = 200});
+    // 2S8M: 2 soft-clipped bases + 8 aligned bases
+    // ref[100..108) = ACGTACGT
+    file.chunks.push_back({.ref_id = 0,
+                           .start_pos = 100,
+                           .end_pos = 108,
+                           .records = {{.qname = "read_sc",
+                                        .flag = 0,
+                                        .pos = 100,
+                                        .mapq = 60,
+                                        .cigar = "2S8M",
+                                        .mate_reference = "*",
+                                        .mate_pos = -1,
+                                        .template_length = 0,
+                                        .sequence = "TTACGTACGT",
+                                        .quality = "FFFFFFFFFF",
+                                        .tags = "NM:i:0"}}});
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks.size(), 1u);
+    ASSERT_EQ(read->chunks[0].records.size(), 1u);
+    EXPECT_EQ(read->chunks[0].records[0].sequence, "TTACGTACGT");
+    std::filesystem::remove(path);
+}
+
+TEST(Axf1File, SeqRefDelta_NonAcgtFallsBack) {
+    const auto path = temp_path("alignx_axf1_refdelta_nonacgt");
+    alignx::format::Axf1File file;
+    file.references.push_back({.name = "chrToy", .length = 200});
+    // N in sequence: ref-delta should fall back to 2-bit or raw
+    file.chunks.push_back({.ref_id = 0,
+                           .start_pos = 100,
+                           .end_pos = 110,
+                           .records = {{.qname = "read_n",
+                                        .flag = 0,
+                                        .pos = 100,
+                                        .mapq = 60,
+                                        .cigar = "10M",
+                                        .mate_reference = "*",
+                                        .mate_pos = -1,
+                                        .template_length = 0,
+                                        .sequence = "ACGTNACGTA",
+                                        .quality = "FFFFFFFFFF",
+                                        .tags = "NM:i:0"}}});
+
+    auto write = alignx::format::write_axf1_file(file, path);
+    ASSERT_TRUE(write) << write.error();
+    auto read = alignx::format::read_axf1_file(path);
+    ASSERT_TRUE(read) << read.error();
+    ASSERT_EQ(read->chunks[0].records[0].sequence, "ACGTNACGTA");
+    std::filesystem::remove(path);
 }
 
 TEST(Axf1FileReader, OpensAndReadsQueryChunk) {

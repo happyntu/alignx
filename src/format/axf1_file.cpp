@@ -7,9 +7,11 @@
 #include <fstream>
 #include <limits>
 #include <map>
+#include <unordered_map>
 #include <string_view>
 #include <utility>
 
+#include "io/fasta_reader.hpp"
 #include "query/sam_utils.hpp"
 
 #ifndef _WIN32
@@ -32,6 +34,7 @@ namespace {
 constexpr std::array<unsigned char, 4> kMagic{'A', 'X', 'F', '1'};
 constexpr std::uint32_t kVersionV1 = 1;
 constexpr std::uint32_t kVersion = 2;
+constexpr std::uint32_t kVersionV3 = 3;
 constexpr std::uint64_t kHeaderSize = kMagic.size() + sizeof(std::uint32_t) +
                                       sizeof(std::uint32_t) + sizeof(std::uint64_t) +
                                       sizeof(std::uint64_t);
@@ -488,15 +491,26 @@ std::expected<void, std::string> validate_file(const Axf1File& file) {
     return {};
 }
 
-std::vector<unsigned char> encode_file_metadata(const Axf1FileMetadata& metadata) {
+std::vector<unsigned char> encode_file_metadata(const Axf1FileMetadata& metadata,
+                                                std::uint32_t version) {
     std::vector<unsigned char> bytes;
     append_u8(bytes, metadata.is_subset ? 1 : 0);
     append_metadata_string(bytes, metadata.source_path);
     append_metadata_string(bytes, metadata.conversion_region);
+    if (version >= kVersionV3) {
+        append_u32(bytes, static_cast<std::uint32_t>(metadata.extensions.size()));
+        for (const MetadataEntry& entry : metadata.extensions) {
+            append_u16(bytes, entry.key_id);
+            append_u8(bytes, entry.flags);
+            append_u32(bytes, static_cast<std::uint32_t>(entry.value.size()));
+            bytes.insert(bytes.end(), entry.value.begin(), entry.value.end());
+        }
+    }
     return bytes;
 }
 
-std::expected<Axf1FileMetadata, std::string> read_file_metadata(Reader& reader) {
+std::expected<Axf1FileMetadata, std::string> read_file_metadata(Reader& reader,
+                                                               std::uint32_t version) {
     auto is_subset = reader.read_u8();
     if (!is_subset) {
         return std::unexpected("truncated AXF1 metadata");
@@ -523,12 +537,54 @@ std::expected<Axf1FileMetadata, std::string> read_file_metadata(Reader& reader) 
         return std::unexpected("truncated AXF1 metadata");
     }
 
-    return Axf1FileMetadata{.source_path = std::move(*source_path),
-                            .conversion_region = std::move(*conversion_region),
-                            .is_subset = *is_subset == 1};
+    Axf1FileMetadata metadata{.source_path = std::move(*source_path),
+                              .conversion_region = std::move(*conversion_region),
+                              .is_subset = *is_subset == 1};
+
+    if (version >= kVersionV3) {
+        auto entry_count = reader.read_u32();
+        if (!entry_count) {
+            return std::unexpected("truncated AXF1 extension block");
+        }
+        metadata.extensions.reserve(*entry_count);
+        for (std::uint32_t i = 0; i < *entry_count; ++i) {
+            auto key_id = reader.read_u16();
+            if (!key_id) {
+                return std::unexpected("truncated AXF1 extension entry");
+            }
+            auto flags = reader.read_u8();
+            if (!flags) {
+                return std::unexpected("truncated AXF1 extension entry");
+            }
+            auto value_length = reader.read_u32();
+            if (!value_length) {
+                return std::unexpected("truncated AXF1 extension entry");
+            }
+            if (*value_length > reader.size() - reader.offset()) {
+                return std::unexpected("truncated AXF1 extension entry value");
+            }
+            std::vector<unsigned char> value(*value_length);
+            for (std::uint32_t j = 0; j < *value_length; ++j) {
+                auto byte = reader.read_u8();
+                if (!byte) {
+                    return std::unexpected("truncated AXF1 extension entry value");
+                }
+                value[j] = *byte;
+            }
+            if ((*flags & 0x01) != 0 && *key_id > 6) {
+                return std::unexpected("unsupported required AXF1 extension key ID " +
+                                       std::to_string(*key_id));
+            }
+            metadata.extensions.push_back(
+                {.key_id = *key_id, .flags = *flags, .value = std::move(value)});
+        }
+    }
+
+    return metadata;
 }
 
-std::expected<Axf1FileIndexMetadata, std::string> read_file_index_metadata(StreamReader& reader) {
+std::expected<Axf1FileIndexMetadata, std::string> read_file_index_metadata(StreamReader& reader,
+                                                                           std::uint32_t version) {
     auto is_subset = reader.read_u8();
     if (!is_subset) {
         return std::unexpected("truncated AXF1 metadata");
@@ -555,9 +611,47 @@ std::expected<Axf1FileIndexMetadata, std::string> read_file_index_metadata(Strea
         return std::unexpected("truncated AXF1 metadata");
     }
 
-    return Axf1FileIndexMetadata{.source_path = std::move(*source_path),
-                                 .conversion_region = std::move(*conversion_region),
-                                 .is_subset = *is_subset == 1};
+    Axf1FileIndexMetadata metadata{.source_path = std::move(*source_path),
+                                   .conversion_region = std::move(*conversion_region),
+                                   .is_subset = *is_subset == 1};
+
+    if (version >= kVersionV3) {
+        auto entry_count = reader.read_u32();
+        if (!entry_count) {
+            return std::unexpected("truncated AXF1 extension block");
+        }
+        metadata.extensions.reserve(*entry_count);
+        for (std::uint32_t i = 0; i < *entry_count; ++i) {
+            auto key_id = reader.read_u16();
+            if (!key_id) {
+                return std::unexpected("truncated AXF1 extension entry");
+            }
+            auto flags = reader.read_u8();
+            if (!flags) {
+                return std::unexpected("truncated AXF1 extension entry");
+            }
+            auto value_length = reader.read_u32();
+            if (!value_length) {
+                return std::unexpected("truncated AXF1 extension entry");
+            }
+            std::vector<unsigned char> value(*value_length);
+            for (std::uint32_t j = 0; j < *value_length; ++j) {
+                auto byte = reader.read_u8();
+                if (!byte) {
+                    return std::unexpected("truncated AXF1 extension entry value");
+                }
+                value[j] = *byte;
+            }
+            if ((*flags & 0x01) != 0 && *key_id > 6) {
+                return std::unexpected("unsupported required AXF1 extension key ID " +
+                                       std::to_string(*key_id));
+            }
+            metadata.extensions.push_back(
+                {.key_id = *key_id, .flags = *flags, .value = std::move(value)});
+        }
+    }
+
+    return metadata;
 }
 
 std::vector<unsigned char> encode_strings(const std::vector<Axf1Record>& records,
@@ -975,10 +1069,172 @@ encode_seq_2bit_literal_payload(const std::vector<Axf1Record>& records) {
     return bytes;
 }
 
-EncodedColumn encode_sequence_column(const std::vector<Axf1Record>& records) {
+bool is_acgt_only(const std::string& seq) {
+    for (char c : seq) {
+        if (c != 'A' && c != 'C' && c != 'G' && c != 'T') return false;
+    }
+    return true;
+}
+
+void pack_2bit_bases(std::vector<unsigned char>& bytes, const char* bases, std::size_t count) {
+    std::uint8_t packed = 0;
+    std::uint8_t in_byte = 0;
+    for (std::size_t i = 0; i < count; ++i) {
+        std::uint8_t code = 0;
+        switch (bases[i]) {
+        case 'A': code = 0; break;
+        case 'C': code = 1; break;
+        case 'G': code = 2; break;
+        case 'T': code = 3; break;
+        default: code = 0; break;
+        }
+        packed |= static_cast<std::uint8_t>(code << (in_byte * 2U));
+        ++in_byte;
+        if (in_byte == 4) {
+            bytes.push_back(packed);
+            packed = 0;
+            in_byte = 0;
+        }
+    }
+    if (in_byte != 0) bytes.push_back(packed);
+}
+
+std::expected<std::vector<unsigned char>, std::string>
+encode_seq_ref_delta_payload(const std::vector<Axf1Record>& records,
+                             const std::string& ref_seq) {
+    std::vector<unsigned char> bytes;
+    for (const Axf1Record& record : records) {
+        if (record.sequence.empty() || record.sequence == "*") {
+            return std::unexpected("ref-delta requires concrete sequence");
+        }
+        if (!is_acgt_only(record.sequence)) {
+            return std::unexpected("ref-delta requires ACGT-only sequence");
+        }
+        if (record.cigar.empty() || record.cigar == "*") {
+            return std::unexpected("ref-delta requires concrete CIGAR");
+        }
+        if (record.pos < 0) {
+            return std::unexpected("ref-delta requires mapped position");
+        }
+
+        auto tokens = parse_cigar_tokens(record.cigar);
+        if (!tokens) {
+            return std::unexpected("ref-delta CIGAR parse failed: " + tokens.error());
+        }
+
+        std::vector<std::pair<std::size_t, char>> mismatches;
+        std::string soft_clips;
+        std::string insertions;
+        std::vector<std::size_t> insertion_lengths;
+
+        auto ref_pos = static_cast<std::size_t>(record.pos);
+        std::size_t query_pos = 0;
+
+        for (const auto& [op_len, op_code] : *tokens) {
+            const auto len = static_cast<std::size_t>(op_len);
+            switch (op_code) {
+            case 0: // M
+            case 7: // =
+            case 8: // X
+                for (std::size_t i = 0; i < len; ++i) {
+                    if (query_pos + i >= record.sequence.size()) {
+                        return std::unexpected("ref-delta query overrun");
+                    }
+                    char query_base = record.sequence[query_pos + i];
+                    char ref_base = (ref_pos + i < ref_seq.size())
+                                        ? static_cast<char>(ref_seq[ref_pos + i] >= 'a'
+                                              ? ref_seq[ref_pos + i] - 32
+                                              : ref_seq[ref_pos + i])
+                                        : 'N';
+                    if (query_base != ref_base) {
+                        mismatches.emplace_back(query_pos + i, query_base);
+                    }
+                }
+                ref_pos += len;
+                query_pos += len;
+                break;
+            case 1: // I
+                for (std::size_t i = 0; i < len; ++i) {
+                    if (query_pos + i >= record.sequence.size()) {
+                        return std::unexpected("ref-delta insertion overrun");
+                    }
+                    insertions.push_back(record.sequence[query_pos + i]);
+                }
+                insertion_lengths.push_back(len);
+                query_pos += len;
+                break;
+            case 2: // D
+            case 3: // N
+                ref_pos += len;
+                break;
+            case 4: // S
+                for (std::size_t i = 0; i < len; ++i) {
+                    if (query_pos + i >= record.sequence.size()) {
+                        return std::unexpected("ref-delta soft-clip overrun");
+                    }
+                    soft_clips.push_back(record.sequence[query_pos + i]);
+                }
+                query_pos += len;
+                break;
+            case 5: // H
+            case 6: // P
+                break;
+            default:
+                return std::unexpected("ref-delta unknown CIGAR op");
+            }
+        }
+
+        append_varint_u64(bytes, record.sequence.size());
+        append_varint_u64(bytes, mismatches.size());
+        std::size_t prev_offset = 0;
+        for (const auto& [offset, base] : mismatches) {
+            append_varint_u64(bytes, offset - prev_offset);
+            std::uint8_t code = 0;
+            switch (base) {
+            case 'A': code = 0; break;
+            case 'C': code = 1; break;
+            case 'G': code = 2; break;
+            case 'T': code = 3; break;
+            default: return std::unexpected("ref-delta non-ACGT mismatch");
+            }
+            append_u8(bytes, code);
+            prev_offset = offset;
+        }
+        append_varint_u64(bytes, soft_clips.size());
+        if (!soft_clips.empty()) {
+            pack_2bit_bases(bytes, soft_clips.data(), soft_clips.size());
+        }
+        append_varint_u64(bytes, insertion_lengths.size());
+        for (std::size_t i = 0, base_offset = 0; i < insertion_lengths.size(); ++i) {
+            append_varint_u64(bytes, insertion_lengths[i]);
+            pack_2bit_bases(bytes, insertions.data() + base_offset, insertion_lengths[i]);
+            base_offset += insertion_lengths[i];
+        }
+    }
+    return bytes;
+}
+
+EncodedColumn encode_sequence_column(const std::vector<Axf1Record>& records,
+                                     const std::string* ref_seq = nullptr) {
     const auto raw = encode_strings(records, &Axf1Record::sequence);
     auto encoded = encode_seq_2bit_literal_payload(records);
-    if (encoded && encoded->size() < raw.size()) {
+    std::size_t best_size = raw.size();
+    Axf1CodecId best_id = Axf1CodecId::raw;
+    if (encoded && encoded->size() < best_size) {
+        best_size = encoded->size();
+        best_id = Axf1CodecId::seq_2bit_literal;
+    }
+
+    if (ref_seq != nullptr) {
+        auto ref_delta = encode_seq_ref_delta_payload(records, *ref_seq);
+        if (ref_delta && ref_delta->size() < best_size) {
+            return {.column_id = Axf1ColumnId::sequence,
+                    .codec_id = Axf1CodecId::seq_ref_delta,
+                    .payload = std::move(*ref_delta)};
+        }
+    }
+
+    if (best_id == Axf1CodecId::seq_2bit_literal) {
         return {.column_id = Axf1ColumnId::sequence,
                 .codec_id = Axf1CodecId::seq_2bit_literal,
                 .payload = std::move(*encoded)};
@@ -1382,11 +1638,12 @@ EncodedColumn encode_tags_column(const std::vector<Axf1Record>& records) {
 }
 
 std::expected<std::vector<EncodedColumn>, std::string>
-encode_columns(const Axf1Chunk& chunk, const Axf1WriteOptions& options) {
+encode_columns(const Axf1Chunk& chunk, const Axf1WriteOptions& options,
+               const std::string* ref_seq = nullptr) {
     auto flag_column = encode_flag_column(chunk.records);
     auto mapq_column = encode_mapq_column(chunk.records);
     auto cigar_column = encode_cigar_column(chunk.records);
-    auto sequence_column = encode_sequence_column(chunk.records);
+    auto sequence_column = encode_sequence_column(chunk.records, ref_seq);
     auto quality_column = encode_quality_column(chunk.records, options);
     if (!quality_column) {
         return std::unexpected(quality_column.error());
@@ -1417,8 +1674,9 @@ encode_columns(const Axf1Chunk& chunk, const Axf1WriteOptions& options) {
 }
 
 std::expected<std::vector<unsigned char>, std::string>
-write_chunk(const Axf1Chunk& chunk, const Axf1WriteOptions& options) {
-    auto encoded_columns = encode_columns(chunk, options);
+write_chunk(const Axf1Chunk& chunk, const Axf1WriteOptions& options,
+            const std::string* ref_seq = nullptr) {
+    auto encoded_columns = encode_columns(chunk, options, ref_seq);
     if (!encoded_columns) {
         return std::unexpected(encoded_columns.error());
     }
@@ -2249,6 +2507,153 @@ decode_seq_2bit_literal_flat(const unsigned char* data, std::size_t size,
     return col;
 }
 
+void unpack_2bit_bases(Reader& reader, char* dst, std::size_t count) {
+    std::size_t full_bytes = count / 4;
+    std::size_t remaining = count % 4;
+    for (std::size_t i = 0; i < full_bytes; ++i) {
+        auto byte = *reader.current_ptr();
+        (void)reader.advance(1);
+        dst[0] = kBase2bit[(byte >> 0) & 0x03];
+        dst[1] = kBase2bit[(byte >> 2) & 0x03];
+        dst[2] = kBase2bit[(byte >> 4) & 0x03];
+        dst[3] = kBase2bit[(byte >> 6) & 0x03];
+        dst += 4;
+    }
+    if (remaining > 0) {
+        auto byte = *reader.current_ptr();
+        (void)reader.advance(1);
+        for (std::size_t r = 0; r < remaining; ++r) {
+            dst[r] = kBase2bit[(byte >> (r * 2)) & 0x03];
+        }
+    }
+}
+
+std::expected<std::vector<std::string>, std::string>
+decode_seq_ref_delta_column(const unsigned char* data, std::size_t size,
+                            std::uint32_t record_count,
+                            const std::vector<std::int32_t>& positions,
+                            const std::vector<std::string>& cigars,
+                            const std::string& ref_seq) {
+    if (positions.size() != record_count || cigars.size() != record_count) {
+        return std::unexpected("ref-delta decode requires POS and CIGAR columns");
+    }
+    Reader reader(data, size);
+    std::vector<std::string> values;
+    values.reserve(record_count);
+
+    for (std::uint32_t idx = 0; idx < record_count; ++idx) {
+        auto seq_len = read_varint_u64(reader, "truncated ref-delta seq_length",
+                                       "ref-delta seq_length overflow");
+        if (!seq_len) return std::unexpected(seq_len.error());
+        auto mismatch_count = read_varint_u64(reader, "truncated ref-delta mismatch_count",
+                                               "ref-delta mismatch_count overflow");
+        if (!mismatch_count) return std::unexpected(mismatch_count.error());
+
+        std::vector<std::pair<std::size_t, char>> mismatches;
+        mismatches.reserve(static_cast<std::size_t>(*mismatch_count));
+        std::size_t prev_offset = 0;
+        for (std::uint64_t m = 0; m < *mismatch_count; ++m) {
+            auto delta = read_varint_u64(reader, "truncated ref-delta mismatch offset",
+                                         "ref-delta mismatch offset overflow");
+            if (!delta) return std::unexpected(delta.error());
+            auto base_r = reader.read_u8();
+            if (!base_r) return std::unexpected("truncated ref-delta mismatch base");
+            if (*base_r > 3) return std::unexpected("invalid ref-delta mismatch base");
+            std::size_t abs_offset = prev_offset + static_cast<std::size_t>(*delta);
+            mismatches.emplace_back(abs_offset, kBase2bit[*base_r]);
+            prev_offset = abs_offset;
+        }
+
+        auto clip_len = read_varint_u64(reader, "truncated ref-delta clip_length",
+                                         "ref-delta clip_length overflow");
+        if (!clip_len) return std::unexpected(clip_len.error());
+        std::string soft_clips;
+        if (*clip_len > 0) {
+            soft_clips.resize(static_cast<std::size_t>(*clip_len));
+            unpack_2bit_bases(reader, soft_clips.data(), soft_clips.size());
+        }
+
+        auto insert_count = read_varint_u64(reader, "truncated ref-delta insert_count",
+                                             "ref-delta insert_count overflow");
+        if (!insert_count) return std::unexpected(insert_count.error());
+        std::vector<std::string> insertions;
+        insertions.reserve(static_cast<std::size_t>(*insert_count));
+        for (std::uint64_t ins = 0; ins < *insert_count; ++ins) {
+            auto ins_len = read_varint_u64(reader, "truncated ref-delta insertion length",
+                                           "ref-delta insertion length overflow");
+            if (!ins_len) return std::unexpected(ins_len.error());
+            std::string ins_bases(static_cast<std::size_t>(*ins_len), '\0');
+            unpack_2bit_bases(reader, ins_bases.data(), ins_bases.size());
+            insertions.push_back(std::move(ins_bases));
+        }
+
+        auto tokens = parse_cigar_tokens(cigars[idx]);
+        if (!tokens) return std::unexpected("ref-delta CIGAR parse: " + tokens.error());
+
+        std::string sequence(static_cast<std::size_t>(*seq_len), '\0');
+        auto ref_pos = static_cast<std::size_t>(positions[idx] >= 0 ? positions[idx] : 0);
+        std::size_t query_pos = 0;
+        std::size_t clip_pos = 0;
+        std::size_t ins_idx = 0;
+
+        for (const auto& [op_len, op_code] : *tokens) {
+            const auto len = static_cast<std::size_t>(op_len);
+            switch (op_code) {
+            case 0: // M
+            case 7: // =
+            case 8: // X
+                for (std::size_t i = 0; i < len && query_pos < sequence.size(); ++i) {
+                    char ref_base = (ref_pos + i < ref_seq.size())
+                                        ? ref_seq[ref_pos + i] : 'N';
+                    sequence[query_pos] = ref_base;
+                    ++query_pos;
+                }
+                ref_pos += len;
+                break;
+            case 1: // I
+                if (ins_idx < insertions.size()) {
+                    for (std::size_t i = 0; i < len && query_pos < sequence.size(); ++i) {
+                        sequence[query_pos] = insertions[ins_idx][i];
+                        ++query_pos;
+                    }
+                    ++ins_idx;
+                }
+                break;
+            case 2: // D
+            case 3: // N
+                ref_pos += len;
+                break;
+            case 4: // S
+                for (std::size_t i = 0; i < len && query_pos < sequence.size(); ++i) {
+                    sequence[query_pos] = (clip_pos < soft_clips.size())
+                                              ? soft_clips[clip_pos] : 'N';
+                    ++clip_pos;
+                    ++query_pos;
+                }
+                break;
+            case 5: // H
+            case 6: // P
+                break;
+            default:
+                return std::unexpected("ref-delta unknown CIGAR op in decode");
+            }
+        }
+
+        for (const auto& [offset, base] : mismatches) {
+            if (offset < sequence.size()) {
+                sequence[offset] = base;
+            }
+        }
+
+        values.push_back(std::move(sequence));
+    }
+
+    if (reader.offset() != reader.size()) {
+        return std::unexpected("AXF1 ref-delta column has trailing bytes");
+    }
+    return values;
+}
+
 std::expected<std::vector<std::string>, std::string>
 decode_qual_rle_column(const unsigned char* data, std::size_t size, std::uint32_t record_count) {
     Reader reader(data, size);
@@ -2690,6 +3095,7 @@ bool is_supported_column_codec(Axf1ColumnId column_id, Axf1CodecId codec_id) {
            (column_id == Axf1ColumnId::cigar && codec_id == Axf1CodecId::cigar_token) ||
            (column_id == Axf1ColumnId::cigar && codec_id == Axf1CodecId::cigar_dict) ||
            (column_id == Axf1ColumnId::sequence && codec_id == Axf1CodecId::seq_2bit_literal) ||
+           (column_id == Axf1ColumnId::sequence && codec_id == Axf1CodecId::seq_ref_delta) ||
            (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_rle) ||
            (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_pack) ||
            (column_id == Axf1ColumnId::quality && codec_id == Axf1CodecId::qual_pack_compressed) ||
@@ -2776,7 +3182,8 @@ slice_column_payload(const unsigned char* chunk_payload_data, std::size_t chunk_
 std::expected<void, std::string>
 decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
                          const ColumnEntry& entry,
-                         const unsigned char* payload_data, std::size_t payload_size) {
+                         const unsigned char* payload_data, std::size_t payload_size,
+                         const std::string* ref_seq = nullptr) {
     if (entry.codec_id == Axf1CodecId::compressed) {
         auto envelope = decode_compressed_payload_envelope(payload_data, payload_size);
         if (!envelope) return std::unexpected(envelope.error());
@@ -2786,7 +3193,8 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
         ColumnEntry unwrapped = entry;
         unwrapped.codec_id = envelope->base_codec_id;
         return decode_column_into_chunk(chunk, record_count, unwrapped,
-                                        envelope->payload.data(), envelope->payload.size());
+                                        envelope->payload.data(), envelope->payload.size(),
+                                        ref_seq);
     }
     switch (entry.column_id) {
     case Axf1ColumnId::qname: {
@@ -2882,9 +3290,27 @@ decode_column_into_chunk(Axf1Chunk& chunk, std::uint32_t record_count,
         break;
     }
     case Axf1ColumnId::sequence: {
-        auto values = entry.codec_id == Axf1CodecId::seq_2bit_literal
-                          ? decode_seq_2bit_literal_column(payload_data, payload_size, record_count)
-                          : decode_string_column(payload_data, payload_size, record_count);
+        std::expected<std::vector<std::string>, std::string> values =
+            std::unexpected("unsupported AXF1 SEQ codec");
+        if (entry.codec_id == Axf1CodecId::seq_ref_delta) {
+            if (!ref_seq) {
+                return std::unexpected(
+                    "file uses ref-delta SEQ codec; "
+                    "use --reference <path> or set ALIGNX_REFERENCE");
+            }
+            std::vector<std::int32_t> positions(record_count);
+            std::vector<std::string> cigars(record_count);
+            for (std::uint32_t i = 0; i < record_count; ++i) {
+                positions[i] = chunk.records[i].pos;
+                cigars[i] = chunk.records[i].cigar;
+            }
+            values = decode_seq_ref_delta_column(payload_data, payload_size, record_count,
+                                                 positions, cigars, *ref_seq);
+        } else if (entry.codec_id == Axf1CodecId::seq_2bit_literal) {
+            values = decode_seq_2bit_literal_column(payload_data, payload_size, record_count);
+        } else {
+            values = decode_string_column(payload_data, payload_size, record_count);
+        }
         if (!values) {
             return std::unexpected(values.error());
         }
@@ -3025,6 +3451,53 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
 }
 
 } // namespace
+
+MetadataEntry make_ref_contig_sha256_entry(
+    const std::vector<std::pair<std::uint32_t, std::array<unsigned char, 32>>>& checksums,
+    std::uint8_t flags) {
+    std::vector<unsigned char> value;
+    append_u32(value, static_cast<std::uint32_t>(checksums.size()));
+    for (const auto& [contig_index, hash] : checksums) {
+        append_u32(value, contig_index);
+        value.insert(value.end(), hash.begin(), hash.end());
+    }
+    return {.key_id = extension_key::kRefContigSha256, .flags = flags, .value = std::move(value)};
+}
+
+MetadataEntry make_encode_reference_path_entry(std::string_view path) {
+    std::vector<unsigned char> value(path.begin(), path.end());
+    return {.key_id = extension_key::kEncodeReferencePath, .flags = 0, .value = std::move(value)};
+}
+
+std::vector<std::pair<std::uint32_t, std::array<unsigned char, 32>>>
+parse_ref_contig_sha256_entry(const MetadataEntry& entry) {
+    std::vector<std::pair<std::uint32_t, std::array<unsigned char, 32>>> result;
+    if (entry.value.size() < 4) {
+        return result;
+    }
+    Reader reader(entry.value.data(), entry.value.size());
+    auto count = reader.read_u32();
+    if (!count) {
+        return result;
+    }
+    result.reserve(*count);
+    for (std::uint32_t i = 0; i < *count; ++i) {
+        auto contig_index = reader.read_u32();
+        if (!contig_index) {
+            break;
+        }
+        std::array<unsigned char, 32> hash{};
+        for (auto& byte : hash) {
+            auto b = reader.read_u8();
+            if (!b) {
+                return result;
+            }
+            byte = *b;
+        }
+        result.emplace_back(*contig_index, hash);
+    }
+    return result;
+}
 
 bool Axf1ChunkIndexEntry::overlaps(std::int32_t query_start,
                                    std::int32_t query_end) const noexcept {
@@ -3461,6 +3934,7 @@ struct ColumnarDecode {
     FlatColumn qualities;
     FlatColumn tags;
     std::uint32_t record_count = 0;
+    const std::string* ref_seq = nullptr;
 };
 
 std::expected<ColumnarDecode, std::string>
@@ -3599,6 +4073,35 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
                 auto v = decode_seq_2bit_literal_flat(col_data, col_size, *record_count);
                 if (!v) return std::unexpected(v.error());
                 result.sequences = std::move(*v);
+            } else if (effective_codec == Axf1CodecId::seq_ref_delta) {
+                if (result.positions.size() != *record_count ||
+                    result.cigars.offsets.size() != *record_count + 1) {
+                    return std::unexpected("ref-delta SEQ requires POS+CIGAR decoded first");
+                }
+                std::vector<std::string> cigar_strs(*record_count);
+                const auto& cig = result.cigars;
+                for (std::uint32_t r = 0; r < *record_count; ++r) {
+                    auto start = cig.offsets[r];
+                    auto end = cig.offsets[r + 1];
+                    cigar_strs[r] = std::string(cig.data.data() + start, end - start);
+                }
+                if (!result.ref_seq) {
+                    return std::unexpected(
+                        "file uses ref-delta SEQ codec; "
+                        "use --reference <path> or set ALIGNX_REFERENCE");
+                }
+                auto v = decode_seq_ref_delta_column(col_data, col_size, *record_count,
+                                                     result.positions, cigar_strs,
+                                                     *result.ref_seq);
+                if (!v) return std::unexpected(v.error());
+                FlatColumn flat;
+                flat.offsets.reserve(v->size() + 1);
+                for (const auto& s : *v) {
+                    flat.offsets.push_back(static_cast<std::uint32_t>(flat.data.size()));
+                    flat.data.insert(flat.data.end(), s.begin(), s.end());
+                }
+                flat.offsets.push_back(static_cast<std::uint32_t>(flat.data.size()));
+                result.sequences = std::move(flat);
             } else {
                 auto v = decode_string_column(col_data, col_size, *record_count);
                 if (!v) return std::unexpected(v.error());
@@ -3906,19 +4409,44 @@ std::expected<void, std::string> write_axf1_file(const Axf1File& file,
         return std::unexpected(validation.error());
     }
 
+    const std::uint32_t file_version =
+        file.metadata.extensions.empty() ? kVersion : kVersionV3;
+
     std::vector<unsigned char> reference_bytes;
     for (const Axf1Reference& reference : file.references) {
         append_u16(reference_bytes, static_cast<std::uint16_t>(reference.name.size()));
         reference_bytes.insert(reference_bytes.end(), reference.name.begin(), reference.name.end());
         append_u32(reference_bytes, reference.length);
     }
-    const std::vector<unsigned char> metadata_bytes = encode_file_metadata(file.metadata);
+    const std::vector<unsigned char> metadata_bytes =
+        encode_file_metadata(file.metadata, file_version);
+
+    std::unordered_map<std::uint32_t, std::string> ref_sequences;
+    if (options.reference_fasta.has_value()) {
+        auto fasta = io::FastaReader::open(*options.reference_fasta);
+        if (fasta) {
+            for (std::uint32_t i = 0; i < file.references.size(); ++i) {
+                auto seq = fasta->fetch_contig(file.references[i].name);
+                if (seq) {
+                    for (char& c : *seq) {
+                        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 32);
+                    }
+                    ref_sequences[i] = std::move(*seq);
+                }
+            }
+        }
+    }
 
     std::vector<unsigned char> chunk_bytes;
     std::vector<Axf1ChunkIndexEntry> index_entries;
     std::uint64_t chunk_offset = kHeaderSize + reference_bytes.size() + metadata_bytes.size();
     for (const Axf1Chunk& chunk : file.chunks) {
-        auto bytes = write_chunk(chunk, options);
+        const std::string* ref_seq = nullptr;
+        auto ref_it = ref_sequences.find(chunk.ref_id);
+        if (ref_it != ref_sequences.end()) {
+            ref_seq = &ref_it->second;
+        }
+        auto bytes = write_chunk(chunk, options, ref_seq);
         if (!bytes) {
             return std::unexpected(bytes.error());
         }
@@ -3935,7 +4463,7 @@ std::expected<void, std::string> write_axf1_file(const Axf1File& file,
 
     std::vector<unsigned char> output;
     output.insert(output.end(), kMagic.begin(), kMagic.end());
-    append_u32(output, kVersion);
+    append_u32(output, file_version);
     append_u32(output, static_cast<std::uint32_t>(file.references.size()));
     append_u64(output, static_cast<std::uint64_t>(file.chunks.size()));
     append_u64(output, index_offset);
@@ -3971,7 +4499,7 @@ std::expected<Axf1File, std::string> read_axf1_file(const std::filesystem::path&
     if (!version || !ref_count || !chunk_count || !index_offset) {
         return std::unexpected("truncated AXF1 file");
     }
-    if (*version != kVersionV1 && *version != kVersion) {
+    if (*version != kVersionV1 && *version != kVersion && *version != kVersionV3) {
         return std::unexpected("unsupported AXF1 version");
     }
     if (*index_offset > reader.size()) {
@@ -3995,8 +4523,8 @@ std::expected<Axf1File, std::string> read_axf1_file(const std::filesystem::path&
     if (reader.offset() > *index_offset) {
         return std::unexpected("AXF1 references overlap index");
     }
-    if (*version == kVersion) {
-        auto metadata = read_file_metadata(reader);
+    if (*version >= kVersion) {
+        auto metadata = read_file_metadata(reader, *version);
         if (!metadata) {
             return std::unexpected(metadata.error());
         }
@@ -4086,7 +4614,7 @@ read_axf1_index_metadata(const std::filesystem::path& path) {
     if (!version || !ref_count || !chunk_count || !index_offset) {
         return std::unexpected("truncated AXF1 file");
     }
-    if (*version != kVersionV1 && *version != kVersion) {
+    if (*version != kVersionV1 && *version != kVersion && *version != kVersionV3) {
         return std::unexpected("unsupported AXF1 version");
     }
     if (*index_offset > reader.size()) {
@@ -4110,8 +4638,8 @@ read_axf1_index_metadata(const std::filesystem::path& path) {
     if (reader.offset() > *index_offset) {
         return std::unexpected("AXF1 references overlap index");
     }
-    if (*version == kVersion) {
-        auto metadata = read_file_index_metadata(reader);
+    if (*version >= kVersion) {
+        auto metadata = read_file_index_metadata(reader, *version);
         if (!metadata) {
             return std::unexpected(metadata.error());
         }
