@@ -5,6 +5,7 @@
 #include <expected>
 #include <filesystem>
 #include <iosfwd>
+#include <optional>
 #include <string>
 
 #include "query/record_filter.hpp"
@@ -35,11 +36,13 @@ struct Axf1ViewProfile {
 
 [[nodiscard]] std::expected<void, std::string>
 write_axf1_region_sam(const std::filesystem::path& input, const std::string& region,
-                      std::ostream& out, const RecordFilter& filter = {});
+                      std::ostream& out, const RecordFilter& filter = {},
+                      const std::optional<std::filesystem::path>& reference = std::nullopt);
 
 [[nodiscard]] std::expected<void, std::string>
 write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::string& region,
                                std::ostream& out, Axf1ViewProfile& profile,
-                               const RecordFilter& filter = {});
+                               const RecordFilter& filter = {},
+                               const std::optional<std::filesystem::path>& reference = std::nullopt);
 
 } // namespace alignx::query

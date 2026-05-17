@@ -184,7 +184,8 @@ public:
     [[nodiscard]] std::expected<Axf1Chunk, std::string>
     read_chunk_columns_selective(const Axf1ChunkIndexEntry& chunk,
                                 const std::vector<Axf1ColumnId>& columns,
-                                Axf1ChunkReadProfile& profile);
+                                Axf1ChunkReadProfile& profile,
+                                const std::string* ref_seq = nullptr);
 
     [[nodiscard]] std::expected<std::vector<unsigned char>, std::string>
     read_chunk_raw(const Axf1ChunkIndexEntry& chunk);
@@ -192,12 +193,14 @@ public:
     [[nodiscard]] static std::expected<Axf1Chunk, std::string>
     decode_chunk_raw(const std::vector<unsigned char>& chunk_bytes,
                      const Axf1ChunkIndexEntry& chunk,
-                     const std::vector<Axf1ColumnId>& columns);
+                     const std::vector<Axf1ColumnId>& columns,
+                     const std::string* ref_seq = nullptr);
 
     [[nodiscard]] static std::expected<Axf1Chunk, std::string>
     decode_chunk_mapped(const unsigned char* data, std::uint64_t length,
                         const Axf1ChunkIndexEntry& chunk,
-                        const std::vector<Axf1ColumnId>& columns);
+                        const std::vector<Axf1ColumnId>& columns,
+                        const std::string* ref_seq = nullptr);
 
     struct FusedDecodeResult {
         std::string sam_output;
@@ -209,7 +212,8 @@ public:
                               const Axf1ChunkIndexEntry& chunk,
                               const std::string& ref_name,
                               bool is_interior_chunk,
-                              std::int32_t region_start, std::int32_t region_end);
+                              std::int32_t region_start, std::int32_t region_end,
+                              const std::string* ref_seq = nullptr);
 
     [[nodiscard]] static std::expected<std::size_t, std::string>
     decode_chunk_to_sam_append(const unsigned char* data, std::uint64_t length,
@@ -217,7 +221,8 @@ public:
                               const std::string& ref_name,
                               bool is_interior_chunk,
                               std::int32_t region_start, std::int32_t region_end,
-                              std::string& output);
+                              std::string& output,
+                              const std::string* ref_seq = nullptr);
 
     struct FilteredAppendResult {
         std::size_t records_scanned = 0;
@@ -232,7 +237,8 @@ public:
                                        bool is_interior_chunk,
                                        std::int32_t region_start, std::int32_t region_end,
                                        std::uint16_t flag_exclude, std::uint8_t min_mapq,
-                                       std::string& output);
+                                       std::string& output,
+                                       const std::string* ref_seq = nullptr);
 
     [[nodiscard]] const unsigned char* mapped_data() const noexcept;
     [[nodiscard]] std::uint64_t file_size() const noexcept;

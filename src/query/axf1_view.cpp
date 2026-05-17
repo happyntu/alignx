@@ -10,9 +10,11 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "format/axf1_file.hpp"
+#include "io/fasta_reader.hpp"
 #include "query/region.hpp"
 #include "query/sam_utils.hpp"
 
@@ -65,15 +67,17 @@ void merge_output_columns(format::Axf1Chunk& target, format::Axf1Chunk&& source)
 std::expected<void, std::string> write_axf1_region_sam(const std::filesystem::path& input,
                                                        const std::string& region,
                                                        std::ostream& out,
-                                                       const RecordFilter& filter) {
+                                                       const RecordFilter& filter,
+                                                       const std::optional<std::filesystem::path>& reference) {
     Axf1ViewProfile unused_profile;
-    return write_axf1_region_sam_profiled(input, region, out, unused_profile, filter);
+    return write_axf1_region_sam_profiled(input, region, out, unused_profile, filter, reference);
 }
 
 std::expected<void, std::string>
 write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::string& region,
                                std::ostream& out, Axf1ViewProfile& profile,
-                               const RecordFilter& filter) {
+                               const RecordFilter& filter,
+                               const std::optional<std::filesystem::path>& reference) {
     auto parsed_region = parse_sam_region(region);
     if (!parsed_region) {
         return std::unexpected(parsed_region.error());
@@ -118,6 +122,19 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
     }
 
     const auto& ref_name = reader->index().references.at(*ref_id).name;
+
+    const std::string* ref_seq_ptr = nullptr;
+    std::string ref_seq_storage;
+    if (reference.has_value()) {
+        auto fasta = io::FastaReader::open(*reference);
+        if (fasta) {
+            auto seq = fasta->fetch_contig(ref_name);
+            if (seq) {
+                ref_seq_storage = std::move(*seq);
+                ref_seq_ptr = &ref_seq_storage;
+            }
+        }
+    }
 
     constexpr std::size_t kParallelThreshold = 16;
     const bool use_parallel = hits->size() >= kParallelThreshold;
@@ -183,7 +200,8 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
 
                     if (filter_active) {
                         auto chunk_dec = format::Axf1FileReader::decode_chunk_mapped(
-                            chunk_data, chunk_entry->chunk_length, *chunk_entry, columns_ref);
+                            chunk_data, chunk_entry->chunk_length, *chunk_entry, columns_ref,
+                            ref_seq_ptr);
                         if (!chunk_dec) {
                             results[idx] = std::unexpected(chunk_dec.error());
                             continue;
@@ -214,7 +232,8 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
                         cr.records_scanned = chunk_entry->record_count;
                         auto formatted = format::Axf1FileReader::decode_chunk_to_sam_append(
                             chunk_data, chunk_entry->chunk_length, *chunk_entry, ref_name,
-                            is_interior, parsed_region->start, parsed_region->end, buf);
+                            is_interior, parsed_region->start, parsed_region->end, buf,
+                            ref_seq_ptr);
                         if (!formatted) {
                             results[idx] = std::unexpected(formatted.error());
                             continue;
@@ -251,7 +270,7 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
                 }
 
                 auto chunk = format::Axf1FileReader::decode_chunk_raw(
-                    *chunk_bytes, *chunk_entry, columns_ref);
+                    *chunk_bytes, *chunk_entry, columns_ref, ref_seq_ptr);
                 if (!chunk) {
                     results[idx] = std::unexpected(chunk.error());
                     continue;
@@ -319,7 +338,8 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
             format::Axf1ChunkReadProfile chunk_profile;
             const auto decode_start = Clock::now();
             auto chunk =
-                reader->read_chunk_columns_selective(*chunk_entry, kAllViewColumns, chunk_profile);
+                reader->read_chunk_columns_selective(*chunk_entry, kAllViewColumns, chunk_profile,
+                                                     ref_seq_ptr);
             profile.output_decode_time += Clock::now() - decode_start;
             if (!chunk) {
                 return std::unexpected(chunk.error());
@@ -402,7 +422,7 @@ write_axf1_region_sam_profiled(const std::filesystem::path& input, const std::st
                  format::Axf1ColumnId::mate_pos, format::Axf1ColumnId::template_length,
                  format::Axf1ColumnId::sequence, format::Axf1ColumnId::quality,
                  format::Axf1ColumnId::tags},
-                output_profile);
+                output_profile, ref_seq_ptr);
             profile.output_decode_time += Clock::now() - output_decode_start;
             if (!output_chunk) {
                 return std::unexpected(output_chunk.error());

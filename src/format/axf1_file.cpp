@@ -3371,7 +3371,8 @@ std::expected<Axf1Chunk, std::string>
 decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
                    const Axf1ChunkIndexEntry& index_entry,
                    const std::vector<Axf1ColumnId>& requested_columns,
-                   Axf1ChunkReadProfile* profile = nullptr) {
+                   Axf1ChunkReadProfile* profile = nullptr,
+                   const std::string* ref_seq = nullptr) {
     Reader reader(chunk_bytes);
 
     auto ref_id = reader.read_u32();
@@ -3441,7 +3442,7 @@ decode_chunk_bytes(const std::vector<unsigned char>& chunk_bytes,
             return std::unexpected(payload.error());
         }
         auto decode = decode_column_into_chunk(chunk, *record_count, entry,
-                                               payload->data, payload->size);
+                                               payload->data, payload->size, ref_seq);
         if (!decode) {
             return std::unexpected(decode.error());
         }
@@ -3672,7 +3673,8 @@ Axf1FileReader::read_chunk_columns_profiled(const Axf1ChunkIndexEntry& chunk,
 std::expected<Axf1Chunk, std::string>
 Axf1FileReader::read_chunk_columns_selective(const Axf1ChunkIndexEntry& chunk,
                                              const std::vector<Axf1ColumnId>& columns,
-                                             Axf1ChunkReadProfile& profile) {
+                                             Axf1ChunkReadProfile& profile,
+                                             const std::string* ref_seq) {
     constexpr std::uint64_t kChunkFixedHeader = 4 + 4 + 4 + 4 + 2; // 18 bytes
 
     // Bulk read entire chunk when requesting many columns (>=5); per-column reads otherwise
@@ -3751,7 +3753,7 @@ Axf1FileReader::read_chunk_columns_selective(const Axf1ChunkIndexEntry& chunk,
             const std::size_t col_size = static_cast<std::size_t>(entry.length);
 
             auto decode = decode_column_into_chunk(result, *record_count, entry,
-                                                   col_data, col_size);
+                                                   col_data, col_size, ref_seq);
             if (!decode) {
                 return std::unexpected(decode.error());
             }
@@ -3837,7 +3839,7 @@ Axf1FileReader::read_chunk_columns_selective(const Axf1ChunkIndexEntry& chunk,
         bytes_actually_read += entry.length;
 
         auto decode = decode_column_into_chunk(result, *record_count, entry,
-                                               payload->data(), payload->size());
+                                               payload->data(), payload->size(), ref_seq);
         if (!decode) {
             return std::unexpected(decode.error());
         }
@@ -3855,14 +3857,16 @@ Axf1FileReader::read_chunk_raw(const Axf1ChunkIndexEntry& chunk) {
 std::expected<Axf1Chunk, std::string>
 Axf1FileReader::decode_chunk_raw(const std::vector<unsigned char>& chunk_bytes,
                                  const Axf1ChunkIndexEntry& chunk,
-                                 const std::vector<Axf1ColumnId>& columns) {
-    return decode_chunk_bytes(chunk_bytes, chunk, columns);
+                                 const std::vector<Axf1ColumnId>& columns,
+                                 const std::string* ref_seq) {
+    return decode_chunk_bytes(chunk_bytes, chunk, columns, nullptr, ref_seq);
 }
 
 std::expected<Axf1Chunk, std::string>
 Axf1FileReader::decode_chunk_mapped(const unsigned char* data, std::uint64_t length,
                                     const Axf1ChunkIndexEntry& chunk,
-                                    const std::vector<Axf1ColumnId>& columns) {
+                                    const std::vector<Axf1ColumnId>& columns,
+                                    const std::string* ref_seq) {
     const std::size_t size = static_cast<std::size_t>(length);
     Reader reader(data, size);
 
@@ -3911,7 +3915,7 @@ Axf1FileReader::decode_chunk_mapped(const unsigned char* data, std::uint64_t len
             return std::unexpected(slice.error());
         }
         auto decode = decode_column_into_chunk(result, *record_count, entry,
-                                               slice->data, slice->size);
+                                               slice->data, slice->size, ref_seq);
         if (!decode) {
             return std::unexpected(decode.error());
         }
@@ -3939,7 +3943,8 @@ struct ColumnarDecode {
 
 std::expected<ColumnarDecode, std::string>
 decode_all_columns_mapped(const unsigned char* data, std::size_t size,
-                          const Axf1ChunkIndexEntry& chunk) {
+                          const Axf1ChunkIndexEntry& chunk,
+                          const std::string* ref_seq = nullptr) {
     Reader reader(data, size);
 
     auto ref_id = reader.read_u32();
@@ -3977,6 +3982,7 @@ decode_all_columns_mapped(const unsigned char* data, std::size_t size,
 
     ColumnarDecode result;
     result.record_count = *record_count;
+    result.ref_seq = ref_seq;
 
     for (const ColumnEntry& entry : entries) {
         auto slice = slice_column_payload(payload_data, payload_size, entry);
@@ -4253,8 +4259,9 @@ Axf1FileReader::decode_chunk_to_sam_mapped(const unsigned char* data, std::uint6
                                            const Axf1ChunkIndexEntry& chunk,
                                            const std::string& ref_name,
                                            bool is_interior_chunk,
-                                           std::int32_t region_start, std::int32_t region_end) {
-    auto cols = decode_all_columns_mapped(data, static_cast<std::size_t>(length), chunk);
+                                           std::int32_t region_start, std::int32_t region_end,
+                                           const std::string* ref_seq) {
+    auto cols = decode_all_columns_mapped(data, static_cast<std::size_t>(length), chunk, ref_seq);
     if (!cols) {
         return std::unexpected(cols.error());
     }
@@ -4304,8 +4311,9 @@ Axf1FileReader::decode_chunk_to_sam_append(const unsigned char* data, std::uint6
                                            const std::string& ref_name,
                                            bool is_interior_chunk,
                                            std::int32_t region_start, std::int32_t region_end,
-                                           std::string& output) {
-    auto cols = decode_all_columns_mapped(data, static_cast<std::size_t>(length), chunk);
+                                           std::string& output,
+                                           const std::string* ref_seq) {
+    auto cols = decode_all_columns_mapped(data, static_cast<std::size_t>(length), chunk, ref_seq);
     if (!cols) {
         return std::unexpected(cols.error());
     }
@@ -4353,8 +4361,9 @@ Axf1FileReader::decode_chunk_to_sam_append_filtered(
     bool is_interior_chunk,
     std::int32_t region_start, std::int32_t region_end,
     std::uint16_t flag_exclude, std::uint8_t min_mapq,
-    std::string& output) {
-    auto cols = decode_all_columns_mapped(data, static_cast<std::size_t>(length), chunk);
+    std::string& output,
+    const std::string* ref_seq) {
+    auto cols = decode_all_columns_mapped(data, static_cast<std::size_t>(length), chunk, ref_seq);
     if (!cols) {
         return std::unexpected(cols.error());
     }

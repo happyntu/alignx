@@ -284,8 +284,8 @@ int run_axf1_view(const std::filesystem::path& input, const std::string& region,
     query::Axf1ViewProfile profile;
     auto result =
         profile_enabled
-            ? query::write_axf1_region_sam_profiled(input, region, out, profile, filter)
-            : query::write_axf1_region_sam(input, region, out, filter);
+            ? query::write_axf1_region_sam_profiled(input, region, out, profile, filter, reference)
+            : query::write_axf1_region_sam(input, region, out, filter, reference);
     if (!result) {
         err << "alignx view: " << result.error() << '\n';
         return 1;
