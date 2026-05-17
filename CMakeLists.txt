@@ -150,5 +150,11 @@ if(ALIGNX_BUILD_PYTHON AND TARGET alignx_lib)
   set_target_properties(_alignx PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python"
   )
+  add_custom_command(TARGET _alignx POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_SOURCE_DIR}/src/python/alignx"
+      "${CMAKE_BINARY_DIR}/python/alignx"
+    COMMENT "Copying alignx Python package to build directory"
+  )
   message(STATUS "Python bindings enabled (pybind11 ${pybind11_VERSION})")
 endif()

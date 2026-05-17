@@ -1,4 +1,5 @@
 #include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
 #include <optional>
@@ -118,6 +119,38 @@ PYBIND11_MODULE(_alignx, m) {
         .def_readonly("start_pos", &Axf1Chunk::start_pos)
         .def_readonly("end_pos", &Axf1Chunk::end_pos)
         .def_readonly("records", &Axf1Chunk::records)
+        .def("column_array", [](const Axf1Chunk& chunk, const std::string& col) -> py::object {
+            const auto& recs = chunk.records;
+            const auto n = static_cast<py::ssize_t>(recs.size());
+            if (col == "pos") {
+                auto arr = py::array_t<std::int32_t>(n);
+                auto ptr = arr.mutable_data();
+                for (py::ssize_t i = 0; i < n; ++i) ptr[i] = recs[static_cast<std::size_t>(i)].pos;
+                return std::move(arr);
+            } else if (col == "flag") {
+                auto arr = py::array_t<std::uint16_t>(n);
+                auto ptr = arr.mutable_data();
+                for (py::ssize_t i = 0; i < n; ++i) ptr[i] = recs[static_cast<std::size_t>(i)].flag;
+                return std::move(arr);
+            } else if (col == "mapq") {
+                auto arr = py::array_t<std::uint8_t>(n);
+                auto ptr = arr.mutable_data();
+                for (py::ssize_t i = 0; i < n; ++i) ptr[i] = recs[static_cast<std::size_t>(i)].mapq;
+                return std::move(arr);
+            } else if (col == "mate_pos") {
+                auto arr = py::array_t<std::int32_t>(n);
+                auto ptr = arr.mutable_data();
+                for (py::ssize_t i = 0; i < n; ++i) ptr[i] = recs[static_cast<std::size_t>(i)].mate_pos;
+                return std::move(arr);
+            } else if (col == "template_length") {
+                auto arr = py::array_t<std::int32_t>(n);
+                auto ptr = arr.mutable_data();
+                for (py::ssize_t i = 0; i < n; ++i) ptr[i] = recs[static_cast<std::size_t>(i)].template_length;
+                return std::move(arr);
+            }
+            throw std::invalid_argument(
+                "column_array supports: pos, flag, mapq, mate_pos, template_length");
+        }, py::arg("column"), "Extract a numeric column as a numpy array.")
         .def("__repr__", [](const Axf1Chunk& c) {
             return "<alignx.Chunk ref_id=" + std::to_string(c.ref_id) +
                    " range=[" + std::to_string(c.start_pos) + "," + std::to_string(c.end_pos) +
@@ -214,12 +247,25 @@ PYBIND11_MODULE(_alignx, m) {
         .def("is_active", &RecordFilter::is_active);
 
     using alignx::analysis::CoverageResult;
-    py::class_<CoverageResult>(m, "CoverageResult")
+    py::class_<CoverageResult>(m, "CoverageResult", py::buffer_protocol())
         .def_readonly("reference", &CoverageResult::reference)
         .def_readonly("start", &CoverageResult::start)
         .def_readonly("end", &CoverageResult::end)
-        .def_readonly("depth", &CoverageResult::depth)
+        .def_property_readonly("depth", [](CoverageResult& c) {
+            return py::array_t<std::uint32_t>(
+                {static_cast<py::ssize_t>(c.depth.size())},
+                {sizeof(std::uint32_t)},
+                c.depth.data(),
+                py::cast(c));
+        })
         .def_readonly("records_counted", &CoverageResult::records_counted)
+        .def_buffer([](CoverageResult& c) -> py::buffer_info {
+            return py::buffer_info(
+                c.depth.data(), sizeof(std::uint32_t),
+                py::format_descriptor<std::uint32_t>::format(),
+                1, {static_cast<py::ssize_t>(c.depth.size())},
+                {sizeof(std::uint32_t)});
+        })
         .def("__repr__", [](const CoverageResult& c) {
             return "<alignx.CoverageResult ref='" + c.reference +
                    "' range=[" + std::to_string(c.start) + "," + std::to_string(c.end) +
